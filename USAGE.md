@@ -43,6 +43,17 @@ flashpy ~/holy/scripts/inference/load_pi05_int8.py     # INT8 档加载验证
 # 期望末行: OK — 权重加载链路（safetensors + norm_stats + 前端）全部就绪
 ```
 
+**真机相机推理（带实时性打点，只读不执行）**——SDK 三路取图 → 推理 → 动作打印，
+耗时分三层（纯推理 / 取图解码 / 端到端节拍+动作步率），自动对照控制频率窗口
+（默认 50Hz）判定能否跟上，并与 echo 机基线比较：
+
+```bash
+LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
+flashpy ~/holy/scripts/inference/run_pi05_camera.py \
+    [--prompt "..."] [--rounds 10] [--hold 10] [--views 3] [--tier int8_full] [--ctrl-hz 50]
+# 前提: 机器人已上电、相机服务在跑；echo 机实测: 取图解码 ~20ms，3视角全INT8 端到端 ~248ms/轮
+```
+
 ### 3.2 延迟基准（换机/换驱动后必跑，`scripts/test/`）
 
 ```bash
