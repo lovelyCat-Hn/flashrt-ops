@@ -3,6 +3,14 @@
 目标：在另一台 Orin 上零编译、零联网复刻 echo 机的全部验证结论。
 本文件随包走，落在 `~/holy/DEPLOY.md`；一键验收脚本在 `~/holy/scripts/verify_deploy.sh`。
 
+## Agent 说明（给新机上的 Claude Code / 其他 agent）
+
+`agent_memory/` 是部署这套环境的 agent 记忆快照（echo 机 2026-09-21），含全部踩坑的
+根因与决策依据。有 agent 时：**先读 `agent_memory/galbot-flashrt-env-migration-pack.md`、
+`galbot-pi05-env-setup.md`、`galbot-pi05-sdk-integration.md` 三份再动手**；需要自动 Recall
+的，可整目录拷入 `~/.claude/projects/-home-galbot/memory/`。注意快照可能滞后，
+以本文件与 verify_deploy.sh 的实测为准。没有 agent 的人照本文件操作即可，无依赖。
+
 ---
 
 ## 0. 目标机前提（硬性）
