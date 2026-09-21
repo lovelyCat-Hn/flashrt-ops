@@ -60,7 +60,7 @@ EOF
 [ $? -eq 0 ] && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
 
 echo "=== ④ 加载+推理（2视角全INT8，期望 (10,7)、~0.2s 级） ==="
-PI05_NO_GRAPH=1 FVK_PI05_RTX_FORCE_INT8=1 "$PY" ~/holy/scripts/load_pi05.py 2>&1 | tail -3
+PI05_NO_GRAPH=1 FVK_PI05_RTX_FORCE_INT8=1 "$PY" ~/holy/scripts/inference/load_pi05.py 2>&1 | tail -3
 [ ${PIPESTATUS[0]} -eq 0 ] && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
 
 echo "=== ⑤ graph 抓图探测（信息项：r35.5 驱动预期崩，崩了不算失败） ==="

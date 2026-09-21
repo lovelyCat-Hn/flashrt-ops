@@ -13,7 +13,7 @@
 | `~/holy/FlashRT/` | FlashRT 源码树（editable 安装指向这里；含已编译 fa2/kernels .so） |
 | `~/holy/models/pi05_lerobot_base/` | pi0.5 权重 14.5G + `assets/.../norm_stats.json`（openpi 官方 q01/q99 统计，勿删） |
 | `~/.cache/flash_rt/paligemma_tokenizer.model` | PaliGemma 分词器（4.26MB，勿删） |
-| `~/holy/scripts/` | 全部验证/基准脚本 |
+| `~/holy/scripts/` | 脚本（`inference/` 推理冒烟、`test/` 性能与诊断、`eval/` 精度评估，根上 `verify_deploy.sh` 为装机验收入口） |
 | `~/holy/cuda_warmup.py` | cuBLAS 暖场兜底（生产启动入口必加） |
 | `~/holy/{DEPLOY,USAGE,BENCHMARKS}.md` | 三份文档 |
 
@@ -34,20 +34,20 @@ alias flashpy=/home/galbot/miniforge3/envs/flash_pyrt311/bin/python
 
 ## 3. 常用任务
 
-### 3.1 加载自检（~30s）
+### 3.1 推理冒烟（~30s，`scripts/inference/`）
 
 ```bash
 unset PYTHONPATH LD_LIBRARY_PATH LD_PRELOAD
-flashpy ~/holy/scripts/load_pi05.py          # BF16 加载验证
-flashpy ~/holy/scripts/load_pi05_int8.py     # INT8 档加载验证
+flashpy ~/holy/scripts/inference/load_pi05.py          # BF16 加载验证
+flashpy ~/holy/scripts/inference/load_pi05_int8.py     # INT8 档加载验证
 # 期望末行: OK — 权重加载链路（safetensors + norm_stats + 前端）全部就绪
 ```
 
-### 3.2 延迟基准（换机/换驱动后必跑）
+### 3.2 延迟基准（换机/换驱动后必跑，`scripts/test/`）
 
 ```bash
-flashpy ~/holy/scripts/bench_pi05.py int8_full 30     # 档位: bf16 | int8_enc | int8_full
-PI05_VIEWS=3 flashpy ~/holy/scripts/bench_pi05.py int8_full 30   # 三视角（真机配置）
+flashpy ~/holy/scripts/test/bench_pi05.py int8_full 30     # 档位: bf16 | int8_enc | int8_full
+PI05_VIEWS=3 flashpy ~/holy/scripts/test/bench_pi05.py int8_full 30   # 三视角（真机配置）
 ```
 
 INT8 档位语义（环境变量，脚本内已设）：
@@ -55,11 +55,11 @@ INT8 档位语义（环境变量，脚本内已设）：
 - `FVK_PI05_RTX_INT8_ENCODER_ONLY=1` 保守档（编码器 INT8 + 解码器 BF16）
 - `FVK_PI05_RTX_INT8_VISION=1` **禁用**（静态版把余弦打到 0.28，已永久关闭；动态版未验证）
 
-### 3.3 量化精度 A/B
+### 3.3 量化精度 A/B（`scripts/eval/`）
 
 ```bash
-flashpy ~/holy/scripts/ab_compare_pi05.py 12      # 合成噪声图，12 样本
-flashpy ~/holy/scripts/ab_real_camera.py 5        # 真机相机（只读抓图，不执行任何动作）
+flashpy ~/holy/scripts/eval/ab_compare_pi05.py 12      # 合成噪声图，12 样本
+flashpy ~/holy/scripts/eval/ab_real_camera.py 5        # 真机相机（只读抓图，不执行任何动作）
 # 前提: 相机服务在跑 + 机器人已上电（吃过"没上电"的亏）；拼图在 /tmp/cam_samples.png
 ```
 
@@ -68,7 +68,7 @@ flashpy ~/holy/scripts/ab_real_camera.py 5        # 真机相机（只读抓图�
 ### 3.4 graph 探测（换驱动后跑一次）
 
 ```bash
-bash ~/holy/scripts/verify_deploy.sh    # 第 ⑤ 项自动探；或 flashpy ~/holy/scripts/graph_repro.py
+bash ~/holy/scripts/verify_deploy.sh    # 第 ⑤ 项自动探；或 flashpy ~/holy/scripts/test/graph_repro.py
 # 崩(段错误) = 驱动缺陷仍在，保持 PI05_NO_GRAPH=1；通过 = 可开 graph 拿更快延迟
 ```
 

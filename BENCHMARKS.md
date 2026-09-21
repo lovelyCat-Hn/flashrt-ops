@@ -80,4 +80,4 @@
 - 延迟：首次调用（建 pipeline）不计入，稳态 30 次；合成输入为零图（视觉计算量与内容无关，耗时有代表性）
 - 精度 A/B 三要素：同图缓存、同初始噪声、`cache_frames=1`（排除时序 KV 复用）
 - 噪声对齐必须走 `model.infer(obs, noise=torch.randn(10,32))` 显式传（`torch.manual_seed` 控不住：首次调用走 calibrate 路径额外消耗 RNG）；`infer` 返回 dict，动作取 `["actions"]`
-- 复现脚本（`~/holy/scripts/`）：`bench_pi05.py`（延迟三档）、`ab_compare_pi05.py`（合成 A/B）、`ab_real_camera.py`（真机相机 A/B，只读不执行）、`graph_repro.py`（graph 最小复现）、`verify_deploy.sh`（部署验收）
+- 复现脚本（`~/holy/scripts/`，分 `inference/` 推理冒烟、`test/` 性能诊断、`eval/` 精度评估）：`test/bench_pi05.py`（延迟三档）、`eval/ab_compare_pi05.py`（合成 A/B）、`eval/ab_real_camera.py`（真机相机 A/B，只读不执行）、`test/graph_repro.py`（graph 最小复现）、`verify_deploy.sh`（部署验收，根目录）
