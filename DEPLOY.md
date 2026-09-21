@@ -18,18 +18,18 @@
 
 ## 1. 源机打包（v2 = v1 环境 + 新增资产）
 
-**实际采用（2026-09-21 定稿）：不压缩，直接传**——safetensors 压不动，gzip 单线程白耗 1 小时：
+**双轨管理（2026-09-21 定稿）**：环境轨走 tar（纯环境+资产，**不含 scripts**），代码轨（脚本+文档）走 git（`~/holy` 即仓库，remote 自建）。bundle 里的 scripts 视为冻结快照，上机先 `git pull` 覆盖。
 
 ```bash
 cd ~
 tar --exclude='miniforge3/pkgs' --exclude='holy/FlashRT/build*' \
     -cf ~/flashrt_bundle_v2.tar \
     miniforge3 holy/FlashRT holy/cuda_warmup.py holy/pytorch/dist \
-    holy/models holy/scripts .cache/flash_rt
-# 成品 21G（22022266880 字节），NVMe 打包 ~2 分钟
+    holy/models .cache/flash_rt
+# 成品 ~21G，NVMe 打包 ~2 分钟；不要加 -z（safetensors 压不动，gzip 单线程白耗 1 小时；要压用 -I pigz）
 ```
 
-（备选：`-I pigz -cf` 多线程压缩可省 ~3G 体积，吃 CPU；有 pigz 时几分钟也能打完）
+（首版 v2 曾含 scripts，无害——git 拉取覆盖即可）
 
 v2 相比 v1 多了三块（都是踩坑补出来的，缺一不可）：
 1. `holy/models/pi05_lerobot_base/` — 权重 14G + **`assets/physical-intelligence/libero/norm_stats.json`**（openpi 官方 q01/q99 统计，HF 仓不带！）
@@ -42,9 +42,20 @@ v2 相比 v1 多了三块（都是踩坑补出来的，缺一不可）：
 # ① 解压（必须在 ~ 下！解到别的目录 mv 也行，但最终位置必须是 /home/galbot/{miniforge3,holy,.cache}）
 cd ~ && tar -xf flashrt_bundle_v2.tar
 
-# ② 一键验收
+# ② 拉代码轨（脚本+文档以 git 为准，覆盖 bundle 里的冻结快照）
+#    新机首次连 GitHub 需先配认证（二选一）：
+#    a) SSH: ssh-keygen -t ed25519 -N "" → 把 ~/.ssh/id_ed25519.pub 加到 GitHub → Settings → SSH keys
+#    b) HTTPS: GitHub → Settings → Developer settings → Fine-grained token（Contents: RW）
+git clone git@github.com:lovelyCat-Hn/flashrt-ops.git /tmp/ops
+cp -r /tmp/ops/scripts/. ~/holy/scripts/
+cp /tmp/ops/*.md ~/holy/
+
+# ③ 一键验收
 bash ~/holy/scripts/verify_deploy.sh
 ```
+
+（tar 里解出的 scripts 是打包时的冻结快照，第②步用 git 版覆盖；今后改动只进 git，
+重打 bundle 时不要再把 scripts 打进去。echo 机已把 ~/holy 建成仓库，老机直接 `git pull` 即可。）
 
 不需要 conda init、不需要 pip、不需要联网——env 自包含（含 numpy 1.26.4 + opencv 4.10 钉版），所有编译产物随包。
 如果目标机已有 miniconda/anaconda：**不要跑 miniforge 的 conda init**（双 init 打架），用绝对路径即可。
