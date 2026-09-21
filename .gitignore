@@ -1,0 +1,13 @@
+# ── 环境轨：走 tar 打包，不进 git ──
+FlashRT/
+models/
+pytorch/
+__pycache__/
+*.pyc
+*.so
+*.tar
+*.tar.gz
+
+# ── 杂项 ──
+.vscode/
+*.swp
