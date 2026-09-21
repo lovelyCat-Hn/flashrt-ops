@@ -23,6 +23,7 @@ if mode == "int8_enc":
 elif mode == "int8_full":
     os.environ["FVK_PI05_RTX_FORCE_INT8"] = "1"
 
+import functools
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
 import flash_rt  # noqa: E402
@@ -34,7 +35,8 @@ if os.environ.get("PI05_NO_GRAPH", "1") == "1":
 
     _orig_init = _fe.Pi05TorchFrontendRtx.__init__
 
-    def _no_graph_init(self, *a, **kw):
+    @functools.wraps(_orig_init)
+def _no_graph_init(self, *a, **kw):
         kw["use_cuda_graph"] = False
         _orig_init(self, *a, **kw)
 

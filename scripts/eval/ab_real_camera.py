@@ -15,6 +15,7 @@
 import os
 import sys
 
+import functools
 import numpy as np
 import cv2
 import torch
@@ -29,6 +30,7 @@ import flash_rt.frontends.torch.pi05_rtx as _fe  # noqa: E402
 _orig_init = _fe.Pi05TorchFrontendRtx.__init__
 
 
+@functools.wraps(_orig_init)
 def _no_graph_init(self, *a, **kw):
     kw["use_cuda_graph"] = False
     _orig_init(self, *a, **kw)

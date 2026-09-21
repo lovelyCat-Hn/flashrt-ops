@@ -34,6 +34,7 @@ if args.tier == "int8_full":
 elif args.tier == "int8_enc":
     os.environ.setdefault("FVK_PI05_RTX_INT8_ENCODER_ONLY", "1")
 
+import functools
 import numpy as np  # noqa: E402
 import cv2  # noqa: E402
 import torch  # noqa: E402
@@ -45,6 +46,7 @@ import flash_rt.frontends.torch.pi05_rtx as _fe  # noqa: E402
 _orig_init = _fe.Pi05TorchFrontendRtx.__init__
 
 
+@functools.wraps(_orig_init)
 def _no_graph_init(self, *a, **kw):
     kw["use_cuda_graph"] = False
     _orig_init(self, *a, **kw)
