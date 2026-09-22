@@ -56,9 +56,13 @@ cd ~ && tar -xf flashrt_bundle_v2.tar
 #    b) HTTPS: GitHub → Settings → Developer settings → Fine-grained token（Contents: RW）
 git clone git@github.com:lovelyCat-Hn/flashrt-ops.git /tmp/ops
 cp -r /tmp/ops/scripts/. ~/holy/scripts/
+cp -r /tmp/ops/hotfix_flashrt ~/holy/
 cp /tmp/ops/*.md ~/holy/
 
-# ③ 一键验收
+# ③ 应用 FlashRT 热修（bundle 源码缺两个本地补丁，背景见 2.1；幂等）
+bash ~/holy/hotfix_flashrt/apply_hotfix.sh
+
+# ④ 一键验收
 bash ~/holy/scripts/verify_deploy.sh
 ```
 
@@ -67,6 +71,19 @@ bash ~/holy/scripts/verify_deploy.sh
 
 不需要 conda init、不需要 pip、不需要联网——env 自包含（含 numpy 1.26.4 + opencv 4.10 钉版），所有编译产物随包。
 如果目标机已有 miniconda/anaconda：**不要跑 miniforge 的 conda init**（双 init 打架），用绝对路径即可。
+
+### 2.1 FlashRT 本地补丁热修（解压后必做，10 秒）
+
+bundle 里的 FlashRT 源码停在 09-21 打包版（`6406a1c2`），**缺两个后续纯 Python 补丁**
+（`6425fe8d` 动作维可配置、`bff59419` 归一化语义 norm_mode/normalize_state）——G1 三件套
+依赖它们。环境本体不受影响，只换 3 个 py 文件：
+
+```bash
+bash ~/holy/hotfix_flashrt/apply_hotfix.sh    # 幂等；已应用则直接跳过
+```
+
+（echo 机之后如果 FlashRT 又有本地改动，记得刷新 `hotfix_flashrt/` 里的文件并推 git——
+热修包以 ops 仓库为准，不跟 bundle 走。）
 
 ## 3. 日常使用姿势
 

@@ -50,6 +50,16 @@ from flash_rt import flash_rt_kernels
 c("kernels 可导入", lambda: "ok")
 import cv2
 c("cv2", lambda: cv2.__version__)
+import inspect
+def _need_hotfix():
+    raise RuntimeError("缺本地补丁 → bash ~/holy/hotfix_flashrt/apply_hotfix.sh")
+c("本地补丁: action_dim", lambda: "ok"
+  if "action_dim" in inspect.signature(flash_rt.load_model).parameters else _need_hotfix())
+try:
+    from flash_rt.core.utils.actions import normalize_state  # noqa
+    c("本地补丁: norm_mode/normalize_state", lambda: "ok")
+except ImportError:
+    c("本地补丁: norm_mode/normalize_state", _need_hotfix)
 from flash_rt.core.utils.norm_stats import load_norm_stats, pi05_candidates
 import pathlib
 s = load_norm_stats(pi05_candidates(pathlib.Path("/home/galbot/holy/models/pi05_lerobot_base")),

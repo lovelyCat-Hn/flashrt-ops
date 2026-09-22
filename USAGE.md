@@ -87,6 +87,9 @@ bash ~/holy/scripts/verify_deploy.sh    # 第 ⑤ 项自动探；或 flashpy ~/h
 
 ### 3.5 G1 16 维微调权重接入（微调完成后三步，2026-09-22 全链路已验证）
 
+> 新机先用：`bash ~/holy/hotfix_flashrt/apply_hotfix.sh`（bundle 里的 FlashRT 源码
+> 缺两个本地补丁；verify_deploy.sh ③ 段会自动探测并提示）。
+
 ```bash
 # ① 装配 + 预检（微调输出目录 → FlashRT 部署目录，软链不复制 14G）
 flashpy ~/holy/scripts/inference/g1_ckpt_prep.py \
