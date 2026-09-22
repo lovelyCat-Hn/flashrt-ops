@@ -11,7 +11,9 @@
   5. 执行前回车确认
 
 每轮遥测：推理 ms / 取图 ms / 每步执行 ms / 回读跟踪误差 mrad /
-相邻步指令增量（抖动代理）/ 往返反转计数（振荡指标）/ 汇总分位数。
+相邻步指令增量（抖动代理）/ 汇总分位数。
+流水线：下一块推理在本轮第 1 步执行期间后台完成（predict-only 入后台，
+SDK 调用全留主线程），轮间零停顿；代价是消费时观测滞后 ≈ 剩余步执行时长。
 
 用法:
   LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
@@ -47,6 +49,15 @@ ap.add_argument("--delta-max", type=float, default=0.05, help="每步限幅 rad"
 ap.add_argument("--speed", type=float, default=0.15, help="关节速度上限 rad/s")
 ap.add_argument("--max-excursion", type=float, default=0.25,
                 help="偏离起始位护栏 rad（任一关节超限即停）")
+ap.add_argument("--settle", action="store_true",
+                help="步进-停走（阻塞等待到位，旧行为）；默认追踪式：误差收窄即发下一目标")
+ap.add_argument("--settle-frac", type=float, default=0.3,
+                help="追踪式换目标阈值：剩余误差 < frac×delta-max 即发下一步")
+ap.add_argument("--chunk-mode", choices=("track", "settle", "traj"), default="track",
+                help="步进引擎：track=追踪单步 / settle=停走 / traj=整块轨迹流"
+                     "（PVT 原生，最平滑；--steps-per-round 不适用，整 chunk 一次发）")
+ap.add_argument("--traj-dt", type=float, default=0.1,
+                help="traj 模式轨迹点周期 s（0.033=采集原速 30fps；默认 0.1=3 倍慢放）")
 args = ap.parse_args()
 
 
@@ -140,7 +151,8 @@ _fe.Pi05TorchFrontendRtx.__init__ = _no_graph_init
 
 import flash_rt  # noqa: E402
 from flash_rt.core.utils.actions import normalize_state  # noqa: E402
-from galbot_sdk.g1 import GalbotRobot, SensorType  # noqa: E402
+from galbot_sdk.g1 import (  # noqa: E402
+    GalbotRobot, SensorType, Trajectory, TrajectoryPoint, JointCommand)
 
 # ── 关节表（数据集维序：右臂在前）──
 LEFT = [f"left_arm_joint{i}" for i in range(1, 8)]
@@ -221,6 +233,33 @@ def plan_step(k, cur):
     return cur + np.clip(arm_tgt - cur, -args.delta_max, args.delta_max)
 
 
+def build_traj(chunk, cur0):
+    """chunk → 整块 PVT 轨迹。逐点追踪式钳位推进；任一点越护栏即截断。
+
+    返回 (traj, n_pts, final_p)；n_pts=0 表示首点就越护栏（勿下发）。
+    """
+    traj = Trajectory()
+    traj.joint_names = ARM_NAMES
+    pts, p = [], cur0.copy()
+    for k in range(len(chunk)):
+        arm_tgt = np.concatenate([chunk[k][:7], chunk[k][8:15]])
+        new_p = p + np.clip(arm_tgt - p, -args.delta_max, args.delta_max)
+        if float(np.max(np.abs(new_p - HOME))) > args.max_excursion:
+            return traj, k, (p if k else None)   # p = 最后一个合法点
+        p = new_p
+        tp = TrajectoryPoint()
+        tp.time_from_start_second = round((k + 1) * args.traj_dt, 4)
+        vec = []
+        for v in p:
+            c = JointCommand()
+            c.position = float(v)
+            vec.append(c)
+        tp.joint_command_vec = vec
+        pts.append(tp)
+    traj.points = pts
+    return traj, len(chunk), p
+
+
 # ── ② 干跑：只打印首轮计划，绝不下发 ──
 if not args.do_exec:
     print(f"\n== [干跑] 首轮 {n_steps} 步计划（未下发任何命令）==")
@@ -236,7 +275,7 @@ if not args.do_exec:
     robot.request_shutdown(); robot.wait_for_shutdown(); robot.destroy()
     os._exit(0)
 
-# ── ③ 连续循环 ──
+# ── ③ 连续循环（流水线：推理与执行重叠，消除轮间停顿）──
 WATCH.pause()
 input(f"\n⚠ 将连续 {args.rounds} 轮 × 每轮 {n_steps} 步真实驱动双臂"
       f"（限幅 ±{args.delta_max} rad，漂移护栏 ±{args.max_excursion} rad）。\n"
@@ -247,22 +286,103 @@ infer_ms, grab_ms, round_ms, step_ms, track_err = [], [], [], [], []
 cmd_hist = None
 aborted = False
 
+
+class _PredictJob:
+    """后台推理作业：GPU 推理与 SDK 阻塞执行重叠。
+
+    只有 predict 放后台；SDK 取图/读关节/下发全部留在主线程，不碰 SDK
+    线程安全。同一时刻只有一个 predict 在飞（消费完才启动下一个）。
+    """
+
+    def __init__(self, model, prompt):
+        self._model, self._prompt = model, prompt
+        self._done = threading.Event()
+        self._res = None
+        self._err = None
+        self.dur_ms = 0.0
+
+    def start(self, obs, state_n):
+        self._done.clear()
+        self._err = None
+
+        def _run():
+            t = time.perf_counter()
+            try:
+                self._res = np.asarray(self._model.predict(
+                    obs, prompt=self._prompt, state=state_n))
+            except Exception as e:      # 主线程 result() 时再抛
+                self._err = e
+            self.dur_ms = (time.perf_counter() - t) * 1000
+            self._done.set()
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def result(self):
+        self._done.wait()
+        if self._err is not None:
+            raise self._err
+        return self._res
+
+
+def fresh_obs():
+    """取图+读关节+归一化（主线程，~22ms），耗时计入 grab_ms。"""
+    t_g = time.perf_counter()
+    obs = grab_views(robot)
+    st_n = normalize_state(read_joints(robot, STATE_NAMES), ns)
+    grab_ms.append((time.perf_counter() - t_g) * 1000)
+    return obs, st_n
+
+
+job = _PredictJob(model, args.prompt)
+job.start(*fresh_obs())              # 轮 0 的 chunk
+
 for r in range(args.rounds):
     if aborted:
         break
     t_r = time.perf_counter()
-    t_g = time.perf_counter()
-    obs = grab_views(robot)
-    state_i = read_joints(robot, STATE_NAMES)
-    state_n = normalize_state(state_i, ns)
-    grab_ms.append((time.perf_counter() - t_g) * 1000)
-
-    t_i = time.perf_counter()
-    chunk = np.asarray(model.predict(obs, prompt=args.prompt, state=state_n))
-    infer_ms.append((time.perf_counter() - t_i) * 1000)
-
-    print(f"\n── 轮 {r} | 取图 {grab_ms[-1]:.0f} | 推理 {infer_ms[-1]:.0f} ms ──")
+    chunk = job.result()             # 上轮执行期间启动的推理——此刻早已就绪
+    infer_ms.append(job.dur_ms)
+    print(f"\n── 轮 {r} | 推理 {job.dur_ms:.0f} ms（与上轮执行重叠，零等待）──")
+    if args.chunk_mode == "traj":
+        cur0 = read_joints(robot, ARM_NAMES)
+        traj, n_pts, final_p = build_traj(chunk, cur0)
+        if n_pts == 0:
+            print("⛔ 轨迹首点越护栏，停止循环")
+            aborted = True
+        else:
+            print(f"  轨迹 {n_pts} 点 × {args.traj_dt * 1000:.0f} ms 下发...")
+            t_s = time.perf_counter()
+            st = robot.execute_joint_trajectory(traj, is_blocking=False)
+            if r < args.rounds - 1:
+                job.start(*fresh_obs())   # 推理藏进轨迹执行期（sleep 放 GIL）
+            t_end = t_s + n_pts * args.traj_dt
+            while time.perf_counter() < t_end:
+                time.sleep(0.05)          # 主线程小睡，GIL 让给推理线程
+            tss = robot.check_trajectory_execution_status([])
+            step_ms.append((time.perf_counter() - t_s) * 1000)
+            ach = read_joints(robot, ARM_NAMES)
+            if final_p is not None:
+                track_err.append(float(np.max(np.abs(ach - final_p))) * 1000)
+            d_cmd = (float(np.max(np.abs(final_p - cmd_hist))) * 1000
+                     if cmd_hist is not None and final_p is not None else 0.0)
+            if final_p is not None:
+                cmd_hist = final_p.copy()
+            print(f"  轨迹完成: {st} | 执行 {step_ms[-1]:.0f} ms | "
+                  f"末端偏差 {track_err[-1] if track_err else float('nan'):.1f} mrad | "
+                  f"|Δcmd| {d_cmd:.1f} mrad | PVT 状态 "
+                  f"{[s.name for s in tss] or '未上报'}")
+            if any(s.value != 2 for s in tss):   # ≠ COMPLETED
+                print("⛔ PVT 状态非 COMPLETED，停止循环")
+                aborted = True
+        round_ms.append((time.perf_counter() - t_r) * 1000)
+        if round_ms[-1] > 1:
+            print(f"  轮耗时 {round_ms[-1]:.0f} ms（重规划频率 {1000 / round_ms[-1]:.1f} Hz）")
+        continue
     for k in range(n_steps):
+        # 第 1 步开始前启动下一块推理（n_steps=1 则在本步前启动）：
+        # 237ms 推理被剩余步的执行时间完全覆盖，观测滞后 = 剩余步执行时长
+        if k == (1 if n_steps > 1 else 0) and r < args.rounds - 1:
+            job.start(*fresh_obs())
         cur = read_joints(robot, ARM_NAMES)
         tgt = plan_step(k, cur)
         drift = float(np.max(np.abs(tgt - HOME)))
@@ -274,9 +394,25 @@ for r in range(args.rounds):
         cmd_delta = (tgt - cmd_hist) if cmd_hist is not None else np.zeros_like(tgt)
         cmd_hist = tgt.copy()
         t_s = time.perf_counter()
-        st = robot.set_joint_positions(tgt.tolist(), joint_names=ARM_NAMES,
-                                       is_blocking=True, speed_rad_s=args.speed,
-                                       timeout_s=10.0)
+        if args.settle:
+            # 旧步进-停走：阻塞到位再发下一条 → 速度曲线锯齿（"卡卡的"根因）
+            st = robot.set_joint_positions(tgt.tolist(), joint_names=ARM_NAMES,
+                                           is_blocking=True, speed_rad_s=args.speed,
+                                           timeout_s=10.0)
+        else:
+            # 追踪式：非阻塞下发，误差收窄到阈值（未停透）即换下一目标，
+            # 机械臂连续运动；轮询 sleep 放 GIL，后台推理不再被饿
+            robot.set_joint_positions(tgt.tolist(), joint_names=ARM_NAMES,
+                                      is_blocking=False, speed_rad_s=args.speed)
+            gate = args.settle_frac * args.delta_max
+            while True:
+                ach = read_joints(robot, ARM_NAMES)
+                if float(np.max(np.abs(ach - tgt))) <= gate:
+                    break
+                if time.perf_counter() - t_s > 2.0:   # 单步兜底
+                    break
+                time.sleep(0.02)
+            st = "ControlStatus.SUCCESS(tracked)"
         step_ms.append((time.perf_counter() - t_s) * 1000)
         ach = read_joints(robot, ARM_NAMES)
         err = float(np.max(np.abs(ach - tgt))) * 1000
@@ -288,7 +424,8 @@ for r in range(args.rounds):
             aborted = True
             break
     round_ms.append((time.perf_counter() - t_r) * 1000)
-    print(f"  轮耗时 {round_ms[-1]:.0f} ms（重规划频率 {1000 / round_ms[-1]:.1f} Hz）")
+    if round_ms[-1] > 1:
+        print(f"  轮耗时 {round_ms[-1]:.0f} ms（重规划频率 {1000 / round_ms[-1]:.1f} Hz）")
 
 # ── ④ 汇总 ──
 fin = read_joints(robot, ARM_NAMES)
