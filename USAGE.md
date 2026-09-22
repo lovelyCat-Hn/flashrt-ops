@@ -85,6 +85,34 @@ bash ~/holy/scripts/verify_deploy.sh    # 第 ⑤ 项自动探；或 flashpy ~/h
 
 所有脚本默认 `PI05_NO_GRAPH=1`（绕过 r35.5 驱动 `cudaGraphInstantiate` 段错误，详见 BENCHMARKS.md 第四节）。
 
+### 3.5 G1 16 维微调权重接入（微调完成后三步，2026-09-22 全链路已验证）
+
+```bash
+# ① 装配 + 预检（微调输出目录 → FlashRT 部署目录，软链不复制 14G）
+flashpy ~/holy/scripts/inference/g1_ckpt_prep.py \
+    --src <微调输出目录> --out ~/holy/models/pi05_g1_ft \
+    --stats <训练用的 stats.json> --mode mean_std   # 语义务必与训练配置一致！
+# ② 对齐校验（数学往返 + 引擎语义分发实证 + 落域）
+flashpy ~/holy/scripts/eval/norm_align_check.py --ckpt ~/holy/models/pi05_g1_ft
+# ③ 真机推理（只读不执行；manifest 自动配置，零参数）
+LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
+flashpy ~/holy/scripts/inference/run_g1_inference.py --ckpt ~/holy/models/pi05_g1_ft
+```
+
+要点（详见 BENCHMARKS.md G1 节与记忆）：
+- **pi0.5 原生动作隐空间就是 32 维**，16/7 维只是消费侧切片——权重不用改，
+  `load_model(action_dim=16)` + config 声明即可（FlashRT 本地补丁 6425fe8d+）
+- **归一化语义**：norm_stats.json 顶层 `"norm_mode"` 标记分发——`q01_q99`（openpi
+  分位，默认/兼容旧行为）或 `mean_std`（lerobot MEAN_STD）。**选错 = 动作系统性
+  畸变**，lerobot 管线微调默认 MEAN_STD，openpi 默认分位
+- **state 归一化是调用方责任**：FlashRT 不归一化 state，直接把原始关节值喂进去
+  会被 256-bin 离散化打满。必须 `normalize_state(raw, norm_stats)` 后再传 `state=`
+  （`run_g1_inference.py` 已内置）
+- **state 23 维布局**（与 pick_place_balence 逐维对齐，2026-09-22 真机逐维核验）：
+  `[l_arm×7, l_grip, r_arm×7, r_grip, leg_joint1-5, head_joint1-2]`；
+  夹爪数据集是 0~100%，SDK 读数是开口宽度（米），标定后经 manifest 换算
+- 夹爪标定：`--grip-wmin/--grip-wmax`（满/零开度 SDK 宽度），写入 manifest
+
 ## 4. 与 GalbotSDK 联用（同进程，已验证）
 
 ```python
@@ -99,7 +127,11 @@ robot.init({SensorType.HEAD_LEFT_CAMERA, SensorType.LEFT_ARM_CAMERA,
 robot.request_shutdown(); robot.wait_for_shutdown(); robot.destroy()   # 收尾三件套
 ```
 
-- 相机映射建议：HEAD_LEFT→`image`，LEFT_ARM→`wrist_image`，RIGHT_ARM→`wrist_image_right`
+- 相机映射建议：HEAD_LEFT→`image`，LEFT_ARM→`wrist_image`，RIGHT_ARM→`wrist_image_right`；
+  **G1 数据集（pick_place_balence）主相机是 head_right**，微调部署用
+  `run_g1_inference.py` 的 manifest 映射（HEAD_RIGHT→`image`）
+- 读关节**一律显式名字模式** `get_joint_positions([], names)`（group 模式返回顺序实测乱序）；
+  `get_joint_names()` 全量 23 个 = leg5 + head2 + 双臂14 + 双夹爪2
 - 参考 `~/workspace/GalbotSDK-1.7.1/examples/g1/python/`（注意运行时是 1.8.1）；`tutorials/example6_execute_vla.py` 是 VLA 集成骨架
 - ⚠️ pi0.5 输出 (10,7) 是 LIBERO 臂动作空间，与 G1 臂**不是恒等映射**——先开环观察，勿直接闭环执行
 
@@ -112,7 +144,10 @@ robot.request_shutdown(); robot.wait_for_shutdown(); robot.destroy()   # 收尾�
 | 动作块长度 | 固定 10（训练配置），不可改；要覆盖 50 步 = 跑 5 次（真机流水执行） |
 | 跨调用状态 | 每次从全新噪声采样；连续性靠新观测（`state=` 每帧喂）+ prompt/KV 缓存 |
 | 固定噪声复现 | `model.infer(obs, noise=torch.randn(10,32))`，返回 dict 取 `["actions"]` |
-| 上游更新 | 纯 Python 改动 `git -C ~/holy/FlashRT pull` 即生效；碰 CUDA 源码要重编（11.8 工具链） |
+| 动作输出维 | `load_model(action_dim=N)`（默认 7；G1 微调 16 维走 manifest 自动传） |
+| 归一化语义 | norm_stats.json 顶层 `norm_mode`：`q01_q99`（默认）/`mean_std`；`normalize_state`/`unnormalize_actions` 按此分发 |
+| state 输入 | **必须调用方归一化**（`normalize_state`），FlashRT 只做 256-bin 离散化进 prompt |
+| 上游更新 | 纯 Python 改动 `git -C ~/holy/FlashRT pull` 即生效；碰 CUDA 源码要重编（11.8 工具链）。本地有未推上游补丁（action_dim/norm_mode，见 git log） |
 
 ## 6. 红线与禁忌
 
@@ -122,3 +157,5 @@ robot.request_shutdown(); robot.wait_for_shutdown(); robot.destroy()   # 收尾�
 4. 不开 `FVK_PI05_RTX_INT8_VISION=1`
 5. 生产启动入口加 `cuda_warmup()`（cuBLAS 阵发坏窗口兜底，见 `~/holy/cuda_warmup.py` 头注释）
 6. norm_stats.json 和 tokenizer.model 是踩坑补出来的，**删了模型就加载不了**
+7. **state 必须归一化后再喂**（`normalize_state`）——原始关节值直接喂会被离散化打满 bin，静默劣化
+8. **norm_mode 语义必须与训练配置一致**——lerobot 默认 MEAN_STD、openpi 默认分位，接权重前先跑 `norm_align_check.py`

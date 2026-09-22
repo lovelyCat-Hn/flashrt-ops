@@ -96,6 +96,8 @@ LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
 | 7 | numpy 被升级 | 装任何带 numpy 依赖的包后 torch/flash_rt 报 ABI 错 | **红线：钉 `numpy==1.26.4`**；opencv 用 `==4.10.0.84`（5.x 要 numpy≥2） |
 | 8 | cuBLAS 阵发坏窗口 | 首调用 ALLOC_FAILED / 偶发失败 | `~/holy/cuda_warmup.py` 暖场兜底，启动入口必加 |
 | 9 | INT8 无需校准 | — | 权重 scale 加载时按行静态算，激活 scale 运行时动态；FP8 那套校准不适用于 Orin |
+| 10 | G1 微调权重接入 | state/action 维数、归一化语义与 base 不同 | 走 `g1_ckpt_prep.py` 装配 + `norm_align_check.py` 校验 + `run_g1_inference.py` 推理（USAGE.md §3.5）。**state 必须调用方归一化**；norm_mode 选错=动作系统性畸变 |
+| 11 | SDK 读关节乱序 | group 模式返回值与名字对不上 | **一律显式名字模式** `get_joint_positions([], names)`（数字孪生排障已实证 21/21 全错位） |
 
 ## 5. echo 机基准（对照新机复测）
 
