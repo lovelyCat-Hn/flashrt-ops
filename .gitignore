@@ -11,3 +11,8 @@ __pycache__/
 # ── 杂项 ──
 .vscode/
 *.swp
+
+# ── 数据/教学材料不进仓 ──
+datasets/
+g1_joint_test_src/lesson_*
+g1_joint_test_src/__pycache__/

@@ -78,12 +78,21 @@ with open(w, "rb") as f:
 tensors = {k: v["shape"] for k, v in hdr.items() if k != "__metadata__"}
 n_tensors = len(tensors)
 check(n_tensors > 700, f"张量数 {n_tensors}（预期 ~812）")
-ao = tensors.get("action_out_proj.weight")
-ai = tensors.get("action_in_proj.weight")
+
+
+def tget(k):
+    """键查找，兼容 lerobot 微调仓的 model. 前缀 wrap（FlashRT loader 同规则）。"""
+    return tensors[k] if k in tensors else tensors.get("model." + k)
+
+
+ao = tget("action_out_proj.weight")
+ai = tget("action_in_proj.weight")
 check(ao == [32, 1024],
       f"action_out_proj.weight {ao}（原生 32 维隐空间，应为 [32,1024]）")
 check(ai == [1024, 32], f"action_in_proj.weight {ai}")
-palig = sum(1 for k in tensors if k.startswith("paligemma_with_expert."))
+palig = sum(1 for k in tensors
+            if k.startswith("paligemma_with_expert.")
+            or ".paligemma_with_expert." in k)
 check(palig > 500, f"paligemma 骨干张量 {palig} 个")
 
 # ── ② config 特征维数 ──
@@ -191,10 +200,10 @@ manifest = {
                    "wrist_image": "LEFT_ARM_CAMERA",
                    "wrist_image_right": "RIGHT_ARM_CAMERA"},
     "state_layout": {
-        "0-6": "left_arm_joint1-7 (rad)",
-        "7": "left_gripper_joint1 (0~100 %，SDK 宽度米需标定换算)",
-        "8-14": "right_arm_joint1-7 (rad)",
-        "15": "right_gripper_joint1 同上",
+        "0-6": "right_arm_joint1-7 (rad)【右臂在前，meta/info.json 权威】",
+        "7": "right_arm_gripper (0~100 %，SDK 宽度米需标定换算)",
+        "8-14": "left_arm_joint1-7 (rad)",
+        "15": "left_arm_gripper 同上",
         "16-20": "leg_joint1-5（2026-09-22 实测与数据集逐维吻合）",
         "21-22": "head_joint1-2"},
     "gripper": {"sdk_unit": "width_m",

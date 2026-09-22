@@ -8,14 +8,16 @@ norm_stats 的语义）→ pi0.5 推理 → (10, 16) 动作打印 + 三层实时
   action_dim / state_dim / views / camera_map / gripper 标定 / norm_mode
 没有 manifest 时用内置 G1 缺省。换微调权重 = 换 --ckpt 目录，零代码改动。
 
-state 23 维装配（与 pick_place_balence 数据集逐维对齐，显式名字读取——
-group 模式返回顺序不可信）:
-  [0:7]   left_arm_joint1..7 (rad)
-  [7]     left_gripper_joint1  SDK 开口宽度(米) → 百分比(需标定)
-  [8:15]  right_arm_joint1..7 (rad)
-  [15]    right_gripper_joint1 同上
+state 23 维装配（与 pick_place_balence 数据集逐维对齐——⚠【右臂在前】，
+meta/info.json 权威定义；显式名字读取，group 模式返回顺序不可信）:
+  [0:7]   right_arm_joint1..7 (rad)
+  [7]     right_gripper_joint1  SDK 开口宽度(米) → 百分比(需标定)
+  [8:15]  left_arm_joint1..7 (rad)
+  [15]    left_gripper_joint1 同上
   [16:21] leg_joint1..5
   [21:23] head_joint1..2
+曾按"左臂在前"装配，把右臂统计喂给左臂读数（首跑 [-1,1] 外 15 维的主因
+之一，预热也把右臂目标下给左臂、机械臂甩到背后）——2026-09-22 修正。
 
 用法（需要 SDK 环境）:
   LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
@@ -39,7 +41,8 @@ ap.add_argument("--prompt", default="Left arm pick up the block. Right arm pick 
 ap.add_argument("--rounds", type=int, default=10, help="连续取图+推理轮数")
 ap.add_argument("--hold", type=int, default=10, help="冻结帧纯推理次数")
 ap.add_argument("--tier", default="int8_full", choices=("bf16", "int8_enc", "int8_full"))
-ap.add_argument("--ctrl-hz", type=float, default=50.0)
+ap.add_argument("--ctrl-hz", type=float, default=30.0,
+                help="控制频率（数据集 fps=30，10 步 chunk 窗口=333ms）")
 ap.add_argument("--grip-wmin", type=float, help="夹爪零开度 SDK 宽度(米)，覆盖 manifest")
 ap.add_argument("--grip-wmax", type=float, help="夹爪满开度 SDK 宽度(米)，覆盖 manifest")
 ap.add_argument("--force-state-dim", action="store_true",
@@ -88,17 +91,18 @@ import flash_rt  # noqa: E402
 from flash_rt.core.utils.actions import normalize_state  # noqa: E402
 from galbot_sdk.g1 import GalbotRobot, SensorType  # noqa: E402
 
-# echo 机基线（BENCHMARKS.md）：(tier, views) → (空载 ms, 真机负载 ms)
-BASELINE = {("int8_full", 3): (189.5, 234.0), ("bf16", 3): (None, 304.0)}
+# echo 机基线（BENCHMARKS.md）：(tier, views) → (空载纯推理, 负载纯推理, 负载端到端) ms
+# 注意分层：234/304 是负载纯推理；端到端另列，勿跨层对照（2026-09-22 修正）
+BASELINE = {("int8_full", 3): (189.5, 235.0, 257.5), ("bf16", 3): (None, 304.0, None)}
 
-# ── state 装配表（显式名，顺序即数据集维序）──
-STATE_NAMES = ([f"left_arm_joint{i}" for i in range(1, 8)]
-               + ["left_gripper_joint1"]
-               + [f"right_arm_joint{i}" for i in range(1, 8)]
+# ── state 装配表（显式名，顺序即数据集维序：右臂在前！）──
+STATE_NAMES = ([f"right_arm_joint{i}" for i in range(1, 8)]
                + ["right_gripper_joint1"]
+               + [f"left_arm_joint{i}" for i in range(1, 8)]
+               + ["left_gripper_joint1"]
                + [f"leg_joint{i}" for i in range(1, 6)]
                + ["head_joint1", "head_joint2"])
-GRIP_IDX = (7, 15)
+GRIP_IDX = (7, 15)   # dim7=右夹爪, dim15=左夹爪（数据集 0~100% 语义）
 
 
 def read_state(robot) -> tuple[np.ndarray, list[str]]:
@@ -231,10 +235,14 @@ try:
              else f"❌ 推理落后 {(p50 - window):.0f} ms（降控制频率/减视角/修 graph）"))
     base = BASELINE.get((args.tier, VIEWS))
     if base and n:
-        ref = base[1] if base[1] else base[0]
-        delta = float(np.percentile(round_ms, 50)) - ref
-        print(f"[基线对照] echo 机 {args.tier}/{VIEWS}视角 真机负载: {ref:.1f} ms → "
-              f"本次 {'快' if delta < 0 else '慢'} {abs(delta):.1f} ms")
+        i_p50 = float(np.percentile(infer_ms, 50))
+        r_p50 = float(np.percentile(round_ms, 50))
+        if base[1]:
+            print(f"[基线对照] echo 机 {args.tier}/{VIEWS}视角 负载纯推理 {base[1]:.1f} ms → "
+                  f"本次 {'快' if i_p50 < base[1] else '慢'} {abs(i_p50 - base[1]):.1f} ms")
+        if base[2]:
+            print(f"[基线对照] echo 机 负载端到端 {base[2]:.1f} ms → "
+                  f"本次 {'快' if r_p50 < base[2] else '慢'} {abs(r_p50 - base[2]):.1f} ms")
     if acts is not None:
         a = np.asarray(acts)
         print(f"[动作示例] 首步({a.shape[1]} 维): {np.round(a[0], 3).tolist()}")
