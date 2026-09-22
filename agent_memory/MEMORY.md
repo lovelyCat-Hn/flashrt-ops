@@ -10,6 +10,6 @@
 - [pi0.5 环境准备](galbot-pi05-env-setup.md) — Orin sm_87;torch2.4.1 已编译安装验证过(~32TF bf16);wheel 可移植 JP5.1+py311;cuBLAS 首调用怪癖;onnx tarball 可用;下一步 FlashRT -e 安装
 - [FlashRT 环境打包迁移](galbot-flashrt-env-migration-pack.md) — 同路径 tar 解压即用零编译；软链/editable 随包走；换用户名走干净配方；JP6 不可用；v2 包含权重/norm_stats/tokenizer/scripts，部署指南 ~/holy/DEPLOY.md + verify_deploy.sh 一键验收
 - [pi0.5↔GalbotSDK 集成](galbot-pi05-sdk-integration.md) — 3.11 同进程已验证；相机压缩图 CPU 软解；arm 7-DoF 与 libero 动作空间需映射；运行时 1.8.1
-- [G1 微调数据集判读](galbot-pi05-g1-finetune-data.md) — pick_place_balence 是 lerobot v3.0 双臂 16 维（臂7+夹爪0-100 ×2），与 libero 7 维不对应；路线=微调 16 维 G1 版 pi05 再部署
+- [G1 微调数据集判读](galbot-pi05-g1-finetune-data.md) — pick_place_balence 16/23 维【右臂在前】(info.json 权威，记反会把臂甩背后)；与 libero 7 维不对应；路线=微调 16 维 G1 版 pi05 再部署
 - 基准报告在 `~/holy/BENCHMARKS.md`（对外汇报用，echo 机 2026-09-21 全部实测数据）；操作手册在 `~/holy/USAGE.md`（装机+日常使用，随 DEPLOY.md 构成三件套文档）
 - [安装类命令用户亲自执行](galbot-user-runs-install-commands.md) — conda/pip/apt 安装发命令清单给用户跑;我只做只读检查和判读
