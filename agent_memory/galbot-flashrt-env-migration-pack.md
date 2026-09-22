@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 688dacf4-1a8a-4f2b-b926-938022b6de08
-  modified: 2026-09-22T01:46:04.904Z
+  modified: 2026-09-22T06:38:59.143Z
 ---
 
 pi0.5 推理环境（FlashRT 0.2.0 + torch 2.4.0a0 自编 wheel + py3.11 conda env）打包迁移到另一台 Orin 的标准配方（2026-09-21 定稿）。核心思路：**所有编译产物已就绪，目标机零编译**；用"相同绝对路径解压"让 conda、editable 安装、cuBLAS 软链全部免修。
@@ -51,5 +51,7 @@ print('kernels  : ok')"
 **bundle v2 + 双轨管理（2026-09-21 定稿）**：**bundle 只装环境+资产**（miniforge3/FlashRT/cuda_warmup.py/pytorch/dist/models/.cache/flash_rt，**不含 scripts**，不压缩——safetensors 压不动）；**代码轨走 git**：`~/holy` 本身即仓库（.gitignore 圈住 FlashRT/models/pytorch，只跟踪 scripts+三份 MD+cuda_warmup.py），remote = `git@github.com:lovelyCat-Hn/flashrt-ops.git`（SSH 已通，2026-09-21 首推 master 完成）。仓库内 `agent_memory/` 是本记忆目录的 git 快照（2026-09-21 建，供新机 agent 读取获得上下文；记忆有重大更新时记得重新拷贝并 commit 刷新快照）。换机 SOP：scp bundle → tar -xf → `git clone <remote> /tmp/ops && cp -r /tmp/ops/{scripts,hotfix_flashrt}/. ~/holy/ && cp /tmp/ops/*.md ~/holy/`（fresh 机 ~/holy 无 .git，不能直接 pull）→ `bash ~/holy/hotfix_flashrt/apply_hotfix.sh` → verify_deploy.sh。首版 v2 带过 scripts，无害，git 覆盖。新增 `holy/models/pi05_lerobot_base`（权重+openpi norm_stats）、`.cache/flash_rt/paligemma_tokenizer.model`。一键验收 `bash ~/holy/scripts/verify_deploy.sh`（⑤ graph 探测必须真 predict——graph 崩在首推理不在 load；③ 段含本地补丁探针）。env 自包含含钉版 numpy==1.26.4+opencv-python-headless==4.10.0.84，目标机零 pip 零联网。踩坑处置表在 `~/holy/DEPLOY.md`（11 条）。
 
 **⚠️ bundle 与 FlashRT 本地补丁失配（2026-09-22 发现并解决）**：v2 bundle 打包于 09-21 白天，FlashRT 源码停在 `6406a1c2`；之后两个本地纯 Python 提交不在包里——`6425fe8d`（action_dim 可配置，改 api.py+pi05_rtx.py）+ `bff59419`（norm_mode 语义+normalize_state，改 actions.py）。**环境本体（torch wheel/.so/tokenizer/权重）完全不受影响**，editable 安装只指路径不拷文件 → 新机补 3 个 py 文件即齐。机制：ops 仓库 `hotfix_flashrt/`（3 个验证过的文件 + `apply_hotfix.sh`）——**不用 git am**（bundle 内 FlashRT git 状态不完全可控），文件覆盖+grep 特征探针幂等，应用后顺手本地 git 快照。echo 机已验证：假 bundle 状态→热修→逐字节一致；verify ③ 段新探针"本地补丁: action_dim / norm_mode"自动发现缺失。**维护规矩：echo 机上 FlashRT 以后每次本地改动，必须同步刷新 `~/holy/hotfix_flashrt/` 里对应文件并 commit 推 git**（热修包以 ops 仓库为准，不跟 bundle 走；新机不重打 bundle 就永远拿得到最新补丁）。
+
+**2026-09-22 本机（源机）状态**：已生成 SSH key 并 clone ops 仓库到 `~/flashrt-ops`；仓库记忆快照已回灌本机 memory 目录（仓库版是本机版的超集，取仓库为基准）。本机 ~/holy 已**改为仓库本体**（旧 holy 挪到 ~/holy_srcbak 后 clone，FlashRT/pytorch 源树搬回，apply_hotfix.sh 已打补丁）——与部署机同构，后续可 git pull。资产到位：权重 14,467,165,872 字节精确一致 + openpi norm_stats（GCS 直补到 ckpt 内 assets/，state 8/actions 7 q01_q99）+ tokenizer 4,264,023 字节 + cv2 4.10.0/numpy 1.26.4。**verify_deploy.sh PASS=9 FAIL=0，源机部署齐平（2026-09-22）**；⑤ graph 探测本机同样 exit 139——同驱动第二台复现，驱动 bug 结论二次坐实。**两台物理机 hostname 同为 galbot-echo**，记忆与沟通中一律以"源机（本机）/部署机（另一台）"区分，勿用 hostname。
 
 相关：[[galbot-pi05-env-setup]]（环境本体与 cuBLAS 三层现象）、[[galbot-pi05-g1-finetune-data]]（补丁内容与 G1 三件套）、[[galbot-user-runs-install-commands]]（安装类命令由用户执行）
