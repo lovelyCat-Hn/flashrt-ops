@@ -8,8 +8,12 @@
 两段式（安全优先）：
   ① move_whole_body_joint_zero —— SDK 预定义零位，带碰撞检查（reset_pos.py
      已验证用法），先脱离收拢/折叠等大偏移姿态。--skip-zero 可跳过
-  ② 双臂 7×2 + 头 2 关节 set_joint_positions → 数据集 state.mean（采集平均
-     工作姿态，与零位接近，小步幅）。限速默认 0.15 rad/s
+  ② 双臂 7×2 + 头 2 + 腿 5（躯干站高/前倾）set_joint_positions → 数据集
+     state.mean（采集平均工作姿态，与零位接近，小步幅）。臂/头限速默认
+     0.15 rad/s，腿 0.2 rad/s。--skip-leg 可跳过腿部（会改变站高/前倾，
+     确认底盘平衡在位；SDK 若拒收腿关节会打印非 SUCCESS）
+腿部默认随段② 对齐 state.mean（数据集各轨迹同一起点，躯干姿态也是分布
+一部分）；--skip-leg 显式退出。
 夹爪：读数按 manifest 标定换算 0~100% 展示；--grip 显式开启时闭合到数据集
 起点 0%（width_min；199 轨全部从 0% 起步——2026-09-23 实证）。闭合命令在
 段① 前一次性发出（非阻塞，与整身/臂动作并行——夹爪与臂位无物理耦合，
@@ -47,6 +51,8 @@ ap.add_argument("--skip-zero", action="store_true", help="跳过零位段（已�
 ap.add_argument("--speed", type=float, default=0.15, help="关节速度上限 rad/s")
 ap.add_argument("--grip", action="store_true",
                 help="闭合夹爪到数据集起点 0%%（width_min；需 manifest 标定）")
+ap.add_argument("--skip-leg", action="store_true",
+                help="跳过躯干/腿对齐（腿部动作改变站高/前倾，默认对齐）")
 args = ap.parse_args()
 
 
@@ -218,7 +224,9 @@ if not args.skip_zero:
     cur = read23(robot)
 
 WATCH.pause()
-input(f"\n⚠ 段②：双臂+头 → 数据集均值位（限速 {args.speed} rad/s）。急停就绪回车...")
+input(f"\n⚠ 段②：双臂+头" + ("+躯干腿" if not args.skip_leg else "")
+      + f" → 数据集均值位（臂/头 {args.speed} rad/s，腿 0.2 rad/s）。"
+      "腿动会改变站高/前倾，确认底盘平衡在位。急停就绪回车...")
 WATCH.resume()
 if args.grip and args.skip_zero:
     fire_grip_close()   # 跳过段① 时在段② 前发，闭合仍与臂动作并行
@@ -229,6 +237,15 @@ st = robot.set_joint_positions(arm_tgt, joint_names=arm_names,
                                timeout_s=45.0)
 print(f"set_joint_positions(臂+头) → {st}")
 time.sleep(1.0)
+
+# ── 段②b：躯干/腿 → state.mean（站高/前倾对齐采集起点）──
+if not args.skip_leg:
+    leg_tgt = [TARGET[i] for i in IDX["leg"]]
+    st_l = robot.set_joint_positions(leg_tgt, joint_names=LEG,
+                                     is_blocking=True, speed_rad_s=0.2,
+                                     timeout_s=45.0)
+    print(f"set_joint_positions(躯干/腿) → {st_l}")
+    time.sleep(1.0)
 
 # ── 达标判定：归一化 [-1,1] 外维数 ──
 cur = read23(robot)
@@ -242,7 +259,9 @@ print(f"双臂维(0-7,8-15) 外 {len(arms_out)} 维 → "
       + ("✅ 达标，可跑推理" if not arms_out else "⚠ 仍偏，检查臂段是否到位"))
 print("（leg/head 窄维亮灯属传感器噪声量级， Part B 已知）")
 leg_dev = max(abs(cur[IDX['leg'][k]] - TARGET[IDX['leg'][k]]) for k in range(5))
-print(f"腿部最大偏差 {leg_dev:.3f} rad（未下发，仅对照；偏大请考虑手动/底盘调整）")
+print(f"躯干/腿最大偏差 {leg_dev:.3f} rad"
+      + ("（已下发对齐；偏大=未到位，查上方状态）" if not args.skip_leg
+         else "（--skip-leg 未下发，仅对照）"))
 if args.grip:
     ok_g = cur[7] <= 10 and cur[15] <= 10
     print(f"夹爪闭合核对: 右 {cur[7]:.1f}% / 左 {cur[15]:.1f}%（目标 0%）→ "
