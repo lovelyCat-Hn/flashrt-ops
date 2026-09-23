@@ -77,6 +77,27 @@ execute/loop 脚本已自动加回预测时刻臂位再执行，无需手工换�
 **看什么**：每轮遥测分位数；回读跟踪误差 mrad；相邻步指令增量（抖动代理）。
 已知残留：指令切换瞬间一次抖动（待调项，见 agent_memory）。
 
+### ⑤ 数据集影子回放（观测吃数据集，动作出真机）
+
+```bash
+# 前置：预热到 task0 起始位（脚本启动会打印与 ep0 帧起始的偏差，>300 mrad 必须先预热）
+~/holy/run.sh ~/holy/scripts/inference/g1_pose_warmup.py
+
+# 干跑（只读关节 + GPU 推理，打印前 2 控制步计划，不动机器人）
+~/holy/run.sh ~/holy/scripts/inference/run_g1_replay.py
+
+# 真实回放
+~/holy/run.sh ~/holy/scripts/inference/run_g1_replay.py --exec
+```
+
+- 2026-09-23 干跑验证：ep0 598 帧 / 198 控制步 / 任务句自动从 npz 解析；
+  bf16 稳态 372 ms；计划每子步 50 mrad 限幅平滑爬坡、夹爪 0.2~0.4%（pick 起始正确）
+- **观测全部来自数据集**（3 路相机按时间戳取帧 + 23 维 state 归一化喂模型），
+  所以**现场摆什么都行、桌面可以不清**；只有机器人自身起始臂位要对齐数据集
+- 逐子步：模型 delta + 数据集 state 臂位 → 绝对目标，±0.05 rad 限幅、
+  0.25 rad/s、离起始位 >3.0 rad 自动停；夹爪按 chunk 维 7/15 下发（config [gripper]）
+- `--ep N` 换 episode；`--no-grip` 关夹爪；参数在 config `[loop]/[gripper]/[run]`
+
 ---
 
 ## 2. 夹爪标定（换机械爪/漂移才需要）
