@@ -34,6 +34,21 @@ def read_arm(robot):
     return [float(x) for x in v]
 
 
+def _kb(t, v, tb):
+    if t is KeyboardInterrupt:
+        print("\n⛔ Ctrl-C 退出", flush=True)
+        r = globals().get("robot")
+        if r is not None:
+            try:
+                r.request_shutdown(); r.wait_for_shutdown(); r.destroy()
+            except Exception:
+                pass
+        sys.stdout.flush(); os._exit(130)
+    sys.__excepthook__(t, v, tb)
+
+
+sys.excepthook = _kb
+
 print("== 右臂恢复（急停就绪！）==", flush=True)
 robot = GalbotRobot()
 if not robot.init():
@@ -44,8 +59,9 @@ print(f"右臂当前: {[round(v, 3) for v in cur]}", flush=True)
 print(f"目标(工作位): {[round(v, 3) for v in TARGET]}", flush=True)
 print(f"active: {robot.get_active_controller('right_arm')}", flush=True)
 
-input("\n⚠ ① 即将 stop_controller('right_arm')——臂会【失力变软】，"
+print("\n⚠ ① 即将 stop_controller('right_arm')——臂会【失力变软】，"
       "先伸手扶住右臂！就绪回车，Ctrl-C 退出...", flush=True)
+input()
 st = robot.stop_controller("right_arm")
 print(f"stop_controller → {st}", flush=True)
 time.sleep(2)
@@ -56,8 +72,9 @@ print(f"active: {robot.get_active_controller('right_arm')}", flush=True)
 
 cur = read_arm(robot)
 test_t = [c + max(-0.1, min(0.1, t - c)) for c, t in zip(cur, TARGET)]
-input(f"\n⚠ ② 小步试动到 {[round(v, 3) for v in test_t]}（±0.1 rad，0.1 rad/s）。"
+print(f"\n⚠ ② 小步试动到 {[round(v, 3) for v in test_t]}（±0.1 rad，0.1 rad/s）。"
       "臂前空间清空，就绪回车...", flush=True)
+input()
 st = robot.set_joint_positions(test_t, joint_names=RIGHT, is_blocking=True,
                                speed_rad_s=0.1, timeout_s=15.0)
 print(f"试动 → {st}", flush=True)
@@ -71,7 +88,8 @@ if moved <= 0.01:
     robot.request_shutdown(); robot.wait_for_shutdown(); robot.destroy()
     sys.stdout.flush(); os._exit(1)
 
-input("\n⚠ ③ 回工作位（0.15 rad/s）。就绪回车...", flush=True)
+print("\n⚠ ③ 回工作位（0.15 rad/s）。就绪回车...", flush=True)
+input()
 st = robot.set_joint_positions(TARGET, joint_names=RIGHT, is_blocking=True,
                                speed_rad_s=0.15, timeout_s=45.0)
 print(f"回位 → {st}", flush=True)
