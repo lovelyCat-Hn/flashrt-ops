@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 24ded4cc-d86c-4589-8234-2f1634018dc7
-  modified: 2026-09-22T08:54:20.297Z
+  modified: 2026-09-23T01:34:56.495Z
 ---
 
 **G1 真机数据集判读（2026-09-21，echo 机 `~/datasets/pick_place_balence/`，zip 857M 解压 870M）**
@@ -17,7 +17,7 @@ metadata:
 **16 维部署全链路已搭好并真机验证（2026-09-22）**——pi0.5 原生动作隐空间 32 维（action_out_proj [32,1024]），16/7 维只是消费侧切片，权重零改动。三件套（`~/holy/scripts/`）：
 1. `inference/g1_ckpt_prep.py`：微调输出 → 部署目录（软链 14G + config + norm_stats.json 带 `norm_mode` 标记 + flashrt_deploy.json 部署清单）。预检：safetensors header 张量校验（键名带 `.weight` 后缀！）、config/stats 维数三方一致、tokenizer 在位。
 2. `eval/norm_align_check.py`：Part A 双语义数学往返（1e-5）→ Part B state 落域+常量窄维预警 → Part C **单实例 stats 翻转法**实证引擎分发（反解 raw 一致 6e-08、mean_std 仿射符合 8e-09）→ Part D 落域。
-3. `inference/run_g1_inference.py`：真机只读推理。manifest 自动配置零参数；显式名字读 23 维关节 → `normalize_state` → predict → (10,16) + 三层打点（ctrl-hz 默认 30=数据集 fps）。实测（源机，服务常驻负载）：①纯推理 232ms（≈基线）、②取图 22ms、③端到端 mean 450/p50 400/min 257/max 803ms——**min=基线但方差大，autotune 块中途重现 ×2 指向显存分配翻转引发引擎重规划**，未解（下一步 tegrastats 定位）。**推理→SDK→关节闭环已打通（2026-09-22）**：`g1_pose_warmup.py` 预热到工作位（臂 16 维归一化全部入域，余 3 维 leg 窄维噪声）→ `run_g1_execute.py --exec` 3 步全 SUCCESS、回读最大偏差 2.3 mrad。工具已入库（483de44）。
+3. `inference/run_g1_inference.py`：真机只读推理。manifest 自动配置零参数；显式名字读 23 维关节 → `normalize_state` → predict → (10,16) + 三层打点（ctrl-hz 默认 30=数据集 fps）。实测（源机，服务常驻负载）：①纯推理 232ms（≈基线）、②取图 22ms、③端到端 min 259/p50 560/max 853ms。**③层大方差已破案（2026-09-23）**：state 以十进制文本拼进 prompt（`format_pi05_prompt`），关节值漂→bin 数位变→token 数变；`state_prompt_mode` 默认 **exact**=每种长度一条 pipeline，换长即整条重建+重 autotune（~800ms；合成实验实锤 A→B 793ms、切回 A 511ms）。修复=`FLASHRT_PI05_STATE_PROMPT_MODE=fixed`（定长 200 一条 pipeline 只换 embeds），实测含 state 来回切全部 240-253ms 恒定；run 两脚本已内置。state 静止时 exact 也稳定——此前"偶发慢"都发生在关节运动之后。**坑：`os._exit` 不刷新 stdout 缓冲**——重定向到文件时打印全丢（终端行缓冲不受影响），重定向跑批关键 print 要 `flush=True`。**推理→SDK→关节闭环已打通（2026-09-22）**：`g1_pose_warmup.py` 预热到工作位（臂 16 维归一化全部入域，余 3 维 leg 窄维噪声）→ `run_g1_execute.py --exec` 3 步全 SUCCESS、回读最大偏差 2.3 mrad。工具已入库（483de44）。
 
 **FlashRT 本地补丁（未推上游）**：`6425fe8d` action_dim 参数+三处切片可配置；`bff59419` `unnormalize_actions` 按 norm_stats 顶层 `"norm_mode"` 分发（`q01_q99` 默认旧行为逐位不变 / `mean_std` = x*std+mean）+ 新增 `normalize_state`（flash_rt/core/utils/actions.py）。**关键事实：FlashRT 不归一化 state**——`discretize_pi05_state` 直接把输入按 [-1,1] 分 256 bin 进 prompt，喂原始关节值=静默打满 bin，必须调用方先 `normalize_state`。**教训：monkeypatch 前端 `__init__` 必须 `functools.wraps`，否则 api.py 按签名转发静默丢参**。**坑：跨两次模型实例同噪声 raw 不逐位一致**（14G 常驻改变显存布局/cuBLAS 路径），对齐实验须同实例内做（stats 翻转法）。
 

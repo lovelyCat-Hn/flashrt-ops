@@ -13,8 +13,10 @@
 
 每轮遥测：推理 ms / 取图 ms / 每步执行 ms / 回读跟踪误差 mrad /
 相邻步指令增量（抖动代理）/ 汇总分位数。
-流水线：下一块推理在本轮第 1 步执行期间后台完成（predict-only 入后台，
-SDK 调用全留主线程），轮间零停顿；代价是消费时观测滞后 ≈ 剩余步执行时长。
+流水线：下一块推理在本轮首条指令执行期间后台完成（predict-only 入后台，
+SDK 调用全留主线程）；配额步消费完而推理未就绪时，用旧 chunk 剩余步
+"续航"追踪（限幅/护栏不变，观测滞后相应加长），推理再慢也不站桩，
+chunk 耗尽才需等待。
 
 用法:
   LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
@@ -58,6 +60,9 @@ ap.add_argument("--settle", action="store_true",
                 help="步进-停走（阻塞等待到位，旧行为）；默认追踪式：误差收窄即发下一目标")
 ap.add_argument("--settle-frac", type=float, default=0.3,
                 help="追踪式换目标阈值：剩余误差 < frac×delta-max 即发下一步")
+ap.add_argument("--switch-dist", type=float, default=0.0,
+                help="提前换目标阈值 rad：剩余误差收到该值即重定向，滑行中转向、"
+                     "速度不过零，消指令边界停顿；0=旧语义（近乎到位才换）")
 ap.add_argument("--chunk-mode", choices=("track", "settle", "traj"), default="track",
                 help="步进引擎：track=追踪单步 / settle=停走 / traj=整块轨迹流"
                      "（PVT 原生，最平滑；--steps-per-round 不适用，整 chunk 一次发）")
@@ -138,6 +143,11 @@ CAM_MAP = mf.get("camera_map", {"image": "HEAD_RIGHT_CAMERA",
 
 os.environ.setdefault("FVK_PI05_RTX_FORCE_INT8", "1")
 os.environ.setdefault("PI05_NO_GRAPH", "1")   # r35.5 graph 段错误绕法
+# state 以十进制文本拼进 prompt（format_pi05_prompt）：关节值一漂、bin 数位
+# 变化 → token 数变；默认 exact 模式每种长度一条 pipeline，换长=整条重建+
+# 重 autotune（~800ms，2026-09-23 合成实验实锤）。fixed=定长 200 一条
+# pipeline 只换 embeds，实测含 state 切换恒定 240-253ms
+os.environ.setdefault("FLASHRT_PI05_STATE_PROMPT_MODE", "fixed")
 
 import numpy as np  # noqa: E402
 import cv2  # noqa: E402
@@ -296,6 +306,7 @@ WATCH.resume()
 infer_ms, grab_ms, round_ms, step_ms, track_err = [], [], [], [], []
 cmd_hist = None
 aborted = False
+sustain_cmds = 0                     # 配额外"续航"指令条数（掩盖慢推理）
 
 
 class _PredictJob:
@@ -327,6 +338,9 @@ class _PredictJob:
             self._done.set()
 
         threading.Thread(target=_run, daemon=True).start()
+
+    def done(self):
+        return self._done.is_set()
 
     def result(self):
         self._done.wait()
@@ -390,9 +404,12 @@ for r in range(args.rounds):
             print(f"  轮耗时 {round_ms[-1]:.0f} ms（重规划频率 {1000 / round_ms[-1]:.1f} Hz）")
         continue
     gate = args.settle_frac * args.delta_max   # 换目标阈值按单步尺度（到位未停透）
+    # 消费配额 n_steps 步后若新块未就绪 → 用旧 chunk 剩余步"续航"追踪，
+    # 轮间零站桩（推理 825ms 实测 > 滑行 539ms 的对策）；chunk 耗尽才需等待。
+    # 每条指令仍受 ±BUDGET 限幅 + 漂移护栏，续航不放大行程风险
     k = 0
-    while k < n_steps:
-        k_end = min(k + spc, n_steps)   # 本条指令消费 chunk 步 [k, k_end)
+    while k < len(chunk):
+        k_end = min(k + spc, len(chunk))   # 本条指令消费 chunk 步 [k, k_end)
         cur = read_joints(robot, ARM_NAMES)
         tgt = plan_step(k_end - 1, cur, BUDGET)
         drift = float(np.max(np.abs(tgt - HOME)))
@@ -418,10 +435,16 @@ for r in range(args.rounds):
             if k == 0 and r < args.rounds - 1:
                 # 下一块推理藏进本指令执行期（观测取自滑行中途，即真实当前态）
                 job.start(*fresh_obs())
+            # 提前换目标：剩余误差收到 switch-dist（>0）即重定向——机械臂
+            # 滑行中转向、速度不过零，消指令边界的停-走；0 = 旧近停透语义。
+            # 最短驻留 0.15s 防止目标太近时连环刷指令
+            sw_gate = args.switch_dist if args.switch_dist > 0 else gate
+            min_dwell = 0.15 if args.switch_dist > 0 else 0.0
             deadline = t_s + max(2.0, 1.5 * BUDGET / max(args.speed, 0.01))
             while True:
                 ach = read_joints(robot, ARM_NAMES)
-                if float(np.max(np.abs(ach - tgt))) <= gate:
+                if (time.perf_counter() - t_s >= min_dwell
+                        and float(np.max(np.abs(ach - tgt))) <= sw_gate):
                     break
                 if time.perf_counter() > deadline:   # 兜底（慢速时按预算放宽）
                     break
@@ -431,7 +454,10 @@ for r in range(args.rounds):
         ach = read_joints(robot, ARM_NAMES)
         err = float(np.max(np.abs(ach - tgt))) * 1000
         track_err.append(err)
-        print(f"  指令[步{k}-{k_end - 1}]: |Δcmd| "
+        tag = f"指令[步{k}-{k_end - 1}]" + ("·续航" if k >= n_steps else "")
+        if k >= n_steps:
+            sustain_cmds += 1
+        print(f"  {tag}: |Δcmd| "
               f"{float(np.max(np.abs(cmd_delta))) * 1000:5.1f} mrad | "
               f"执行 {step_ms[-1]:5.0f} ms | 回读偏差 {err:4.1f} mrad | {st}")
         if not str(st).startswith("ControlStatus.SUCCESS"):
@@ -439,6 +465,9 @@ for r in range(args.rounds):
             aborted = True
             break
         k = k_end
+        # 配额消费完：新块就绪（或已是最后一轮）→ 立即换块零等待；否则续航
+        if k >= n_steps and (r == args.rounds - 1 or job.done()):
+            break
     round_ms.append((time.perf_counter() - t_r) * 1000)
     if round_ms[-1] > 1:
         print(f"  轮耗时 {round_ms[-1]:.0f} ms（重规划频率 {1000 / round_ms[-1]:.1f} Hz）")
@@ -458,6 +487,8 @@ if round_ms:
 if track_err:
     print(f"跟踪误差: mean {np.mean(track_err):.1f} | max {max(track_err):.1f} mrad")
     print("抖动判读：|Δcmd| 快速变号=抖动；持续同号=漂移（由护栏兜底）")
+if sustain_cmds:
+    print(f"续航指令: {sustain_cmds} 条（配额外消费旧 chunk 步，掩盖慢推理轮间站桩）")
 print(f"最终偏离起始位: {exc:.0f} mrad（护栏 {args.max_excursion * 1000:.0f} mrad）"
       + (" ⛔ 护栏触发过" if aborted else ""))
 
