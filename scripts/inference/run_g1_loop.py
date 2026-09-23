@@ -3,7 +3,8 @@
 
 目的：实测执行链路的实时延迟与抖动（2026-09-22 闭环打通后的量化步骤）。
 ⚠ 加 --exec 会连续真实驱动双臂！安全设计：
-  1. 只动双臂 14 关节；夹爪/腿/头维度永不下发
+  1. 只动双臂 14 关节；腿/头维度永不下发；夹爪仅 --grip 显式开启时下发
+     （0~100% → manifest 标定宽度，变化超 --grip-chg 才发，非阻塞不等反馈）
   2. 每条指令目标 = 当前读数 ± steps-per-cmd×--delta-max 限幅（默认
      1×0.05 rad；合步 3 → 0.15 rad，与逐 3 步一轮的行程上限相同），限速 --speed
   3. 漂移护栏：任一关节偏离起始位超 --max-excursion（默认 0.25 rad）→ 立即
@@ -68,6 +69,12 @@ ap.add_argument("--chunk-mode", choices=("track", "settle", "traj"), default="tr
                      "（PVT 原生，最平滑；--steps-per-round 不适用，整 chunk 一次发）")
 ap.add_argument("--traj-dt", type=float, default=0.1,
                 help="traj 模式轨迹点周期 s（0.033=采集原速 30fps；默认 0.1=3 倍慢放）")
+ap.add_argument("--grip", action="store_true",
+                help="启用夹爪下发（dim7/dim15 0~100%% → manifest 标定宽度）")
+ap.add_argument("--grip-speed", type=float, default=0.05, help="夹爪速度 m/s")
+ap.add_argument("--grip-effort", type=float, default=30, help="夹爪力矩 N")
+ap.add_argument("--grip-chg", type=float, default=2.0,
+                help="夹爪下发变化阈值 %%（小于它不重发）")
 args = ap.parse_args()
 
 
@@ -141,6 +148,22 @@ CAM_MAP = mf.get("camera_map", {"image": "HEAD_RIGHT_CAMERA",
                                 "wrist_image": "LEFT_ARM_CAMERA",
                                 "wrist_image_right": "RIGHT_ARM_CAMERA"})
 
+# ── 夹爪下发配置（--grip；宽度来自 manifest 标定，无标定拒绝开启）──
+GRIP = None
+if args.grip:
+    g = mf.get("gripper", {})
+    wmin, wmax = g.get("width_min"), g.get("width_max")
+    if wmin is None or wmax is None:
+        raise SystemExit("--grip 需要 manifest 夹爪标定；先重跑 "
+                         "g1_ckpt_prep.py --grip-wmin/--grip-wmax（2026-09-23 实测 "
+                         "0.0005/0.1200 m）")
+    GRIP = {"names": (("right_gripper", 7), ("left_gripper", 15)),
+            "wmin": float(wmin), "wmax": float(wmax),
+            "speed": args.grip_speed, "effort": args.grip_effort,
+            "chg": args.grip_chg, "sent": {}}
+    print(f"夹爪下发开启: 0%→{wmin} m | 100%→{wmax} m | 速度 {args.grip_speed} m/s | "
+          f"力矩 {args.grip_effort} N | 变化阈值 {args.grip_chg}%")
+
 os.environ.setdefault("FVK_PI05_RTX_FORCE_INT8", "1")
 os.environ.setdefault("PI05_NO_GRAPH", "1")   # r35.5 graph 段错误绕法
 # state 以十进制文本拼进 prompt（format_pi05_prompt）：关节值一漂、bin 数位
@@ -167,7 +190,8 @@ _fe.Pi05TorchFrontendRtx.__init__ = _no_graph_init
 import flash_rt  # noqa: E402
 from flash_rt.core.utils.actions import normalize_state  # noqa: E402
 from galbot_sdk.g1 import (  # noqa: E402
-    GalbotRobot, SensorType, Trajectory, TrajectoryPoint, JointCommand)
+    GalbotRobot, SensorType, Trajectory, TrajectoryPoint, JointCommand,
+    G1JointGroup)
 
 # ── 关节表（数据集维序：右臂在前）──
 LEFT = [f"left_arm_joint{i}" for i in range(1, 8)]
@@ -204,6 +228,30 @@ def pstats(ms):
     a = np.array(ms)
     return (f"p50 {np.percentile(a, 50):.1f} | p95 {np.percentile(a, 95):.1f} | "
             f"max {a.max():.1f} ms")
+
+
+def send_grip(robot, chunk_row):
+    """chunk 行 dim7/dim15（0~100%）→ 标定宽度下发（超阈值才发，非阻塞）。
+
+    ⚠ SDK 夹爪反馈滞后 ~6.3s 且期间 is_moving 恒 False——本函数只发不查
+    不等待（否则拖死控制环）；终态核对放循环结束后。
+    """
+    if GRIP is None:
+        return None
+    parts = []
+    for name, dim in GRIP["names"]:
+        p = float(np.clip(chunk_row[dim], 0.0, 100.0))
+        last = GRIP["sent"].get(name)
+        if last is not None and abs(p - last) < GRIP["chg"]:
+            parts.append(f"{name[0].upper()} {p:.1f}%·hold")
+            continue
+        w = GRIP["wmin"] + p / 100.0 * (GRIP["wmax"] - GRIP["wmin"])
+        st = robot.set_gripper_command(getattr(G1JointGroup, name),
+                                       w, GRIP["speed"], GRIP["effort"], False)
+        GRIP["sent"][name] = p
+        parts.append(f"{name[0].upper()} {p:.1f}%→{w * 1000:.0f}mm "
+                     f"{str(st).replace('ControlStatus.', '')}")
+    return "  ".join(parts)
 
 
 # ── ① SDK 初始化 + 模型 ──
@@ -291,6 +339,13 @@ if not args.do_exec:
         print(f"  指令[步{k}-{k_end - 1}]: 限幅后 {np.round(tgt, 3).tolist()}"
               f"\n        离起始位峰值 {drift * 1000:.0f} mrad"
               f"（护栏 {args.max_excursion * 1000:.0f}）")
+        if GRIP:
+            desc = []
+            for name, dim in GRIP["names"]:
+                p = float(np.clip(chunk[k_end - 1][dim], 0.0, 100.0))
+                w = GRIP["wmin"] + p / 100.0 * (GRIP["wmax"] - GRIP["wmin"])
+                desc.append(f"{name[0].upper()} {p:.1f}%→{w * 1000:.0f}mm")
+            print(f"        夹爪目标: {'  '.join(desc)}")
     print("\n[干跑] 未下发任何命令。加 --exec 真实执行。")
     WATCH.restore()
     robot.request_shutdown(); robot.wait_for_shutdown(); robot.destroy()
@@ -299,8 +354,9 @@ if not args.do_exec:
 # ── ③ 连续循环（流水线：推理与执行重叠，消除轮间停顿）──
 WATCH.pause()
 input(f"\n⚠ 将连续 {args.rounds} 轮 × 每轮 {n_steps} 步真实驱动双臂"
-      f"（合步 {spc} 步/指令，每条限幅 ±{BUDGET} rad，漂移护栏 ±{args.max_excursion} rad）。\n"
-      "急停就绪后回车开始，循环期间随时按 q 退出...")
+      f"（合步 {spc} 步/指令，每条限幅 ±{BUDGET} rad，漂移护栏 ±{args.max_excursion} rad"
+      + ("，夹爪下发开启）。\n" if GRIP else ")。\n")
+      + "急停就绪后回车开始，循环期间随时按 q 退出...")
 WATCH.resume()
 
 infer_ms, grab_ms, round_ms, step_ms, track_err = [], [], [], [], []
@@ -376,6 +432,9 @@ for r in range(args.rounds):
             aborted = True
         else:
             print(f"  轨迹 {n_pts} 点 × {args.traj_dt * 1000:.0f} ms 下发...")
+            gp = send_grip(robot, chunk[-1])
+            if gp:
+                print(f"  夹爪: {gp}")
             t_s = time.perf_counter()
             st = robot.execute_joint_trajectory(traj, is_blocking=False)
             if r < args.rounds - 1:
@@ -420,6 +479,9 @@ for r in range(args.rounds):
             break
         cmd_delta = (tgt - cmd_hist) if cmd_hist is not None else np.zeros_like(tgt)
         cmd_hist = tgt.copy()
+        gp = send_grip(robot, chunk[k_end - 1])   # 夹爪伴随后臂目标，发在计时区外
+        if gp:
+            print(f"  夹爪: {gp}")
         t_s = time.perf_counter()
         if args.settle:
             # 旧步进-停走：阻塞到位再发下一条 → 速度曲线锯齿（"卡卡的"根因）
@@ -473,6 +535,12 @@ for r in range(args.rounds):
         print(f"  轮耗时 {round_ms[-1]:.0f} ms（重规划频率 {1000 / round_ms[-1]:.1f} Hz）")
 
 # ── ④ 汇总 ──
+if GRIP:
+    time.sleep(8.0)   # 夹爪反馈滞后 ~6.3s（2026-09-23 实测），留足再读终态
+    for name, _ in GRIP["names"]:
+        gs = robot.get_gripper_state(getattr(G1JointGroup, name))
+        if gs is not None:
+            print(f"夹爪终态 {name}: {gs.width * 1000:.1f} mm (moving={gs.is_moving})")
 fin = read_joints(robot, ARM_NAMES)
 exc = float(np.max(np.abs(fin - HOME))) * 1000
 print(f"\n== 汇总（{len(round_ms)} 轮 / {len(step_ms)} 步）==")
