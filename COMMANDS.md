@@ -60,7 +60,9 @@ $RUN_PY ~/holy/scripts/inference/run_g1_loop.py --exec
 
 - config 内置 2026-09-23 真机 5/5 全绿组合：
   `--speed 0.25 --settle-frac 0.5 --steps-per-cmd 3 --switch-dist 0.06 --chunk-mode track`
-- 漂移护栏：任一关节偏离起始位 >0.25 rad 自动停（`--max-excursion` 调）
+- 漂移护栏：任一关节偏离起始位 >3.0 rad 自动停（`--max-excursion` 调；
+  按数据集 199 轨合法抓取包络 max 2.785 重标，旧 0.25 真任务 100% 误触）
+- rounds 默认 60（单次抓取全程预算，一轮≈0.4s / 0.15 rad 行程）
 - 推理在执行期间后台完成，p50 ~255 ms、重规划 2.5 Hz 为正常水位
 
 **看什么**：每轮遥测分位数；回读跟踪误差 mrad；相邻步指令增量（抖动代理）。

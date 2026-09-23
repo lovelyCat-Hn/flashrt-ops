@@ -29,12 +29,13 @@ BUILTIN = {
         "speed": 0.15,
     },
     "loop": {
-        "rounds": 10,
+        "rounds": 60,             # 单次抓取全程预算（10 轮会中途断）
         "steps_per_round": 3,
         "steps_per_cmd": 3,       # 合步：一条 SDK 指令跨 K 个 chunk 步
         "delta_max": 0.05,
         "speed": 0.25,            # 闭环实测最优（2026-09-23 5/5 全绿组合）
-        "max_excursion": 0.25,
+        "max_excursion": 3.0,     # 按数据集包络重标（合法抓取 max 2.785；
+                                  # 旧 0.25 真任务 100% 误触）
         "settle": False,
         "settle_frac": 0.5,
         "switch_dist": 0.06,

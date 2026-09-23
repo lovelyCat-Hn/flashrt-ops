@@ -23,12 +23,15 @@ delta_max = 0.05    # 每步相对当前读数限幅 rad
 speed = 0.15        # 关节速度上限 rad/s
 
 [loop]              # run_g1_loop（闭环；= 2026-09-23 真机 5/5 全绿组合）
-rounds = 10
+rounds = 60         # 单次抓取全程预算：一轮≈0.4s/0.15 rad 行程，10 轮会中途断
 steps_per_round = 3
 steps_per_cmd = 3   # 合步：一条 SDK 指令跨 K 个 chunk 步（3=整轮一条平滑轮廓）
 delta_max = 0.05
 speed = 0.25        # 0.15 偏慢，0.25 实测最优
-max_excursion = 0.25    # 偏离起始位护栏 rad，任一关节超限即停
+max_excursion = 3.0    # 偏离起始位护栏 rad，任一关节超限即停。
+                       # 2026-09-23 按数据集重标：199 轨合法抓取全程包络
+                       # max 2.785（中位 1.17），旧值 0.25 是语义测试期防漂移
+                       # 值，真任务 100% 误触；3.0 仍兜住失控漂移
 settle = false      # true=停走（旧行为）；false=追踪式
 settle_frac = 0.5   # 追踪换目标阈值：剩余误差 < frac×delta_max 即发下一步
 switch_dist = 0.06  # 提前重定向阈值 rad（滑行中转向，消指令边界停顿）
