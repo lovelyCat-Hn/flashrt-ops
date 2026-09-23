@@ -75,11 +75,11 @@ import g1_config  # noqa: E402
 
 g1_config.apply(args, {
     "ckpt": ("run", "ckpt"),
-    "speed": ("loop", "speed"),
+    "speed": ("replay", "speed"),
     "delta_max": ("loop", "delta_max"),
     "max_excursion": ("loop", "max_excursion"),
     "switch_dist": ("loop", "switch_dist"),
-    "catch_timeout": ("loop", "catch_timeout"),
+    "catch_timeout": ("replay", "catch_timeout"),
     "grip": ("gripper", "enabled"),
     "grip_speed": ("gripper", "speed"),
     "grip_effort": ("gripper", "effort"),

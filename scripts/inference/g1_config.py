@@ -41,6 +41,13 @@ BUILTIN = {
         "settle_frac": 0.5,       # 比例（无量纲 0~1）
         "switch_dist": 0.06,      # rad
         "catch_timeout": 8.0,     # s；回放步末追平门超时（run_g1_replay 用）
+    },
+    "replay": {
+        # run_g1_replay 专用（与 loop 解耦）：速度按 ep0 增量分布定标——
+        # 每控制步最忙关节位移 p95 0.147 rad ÷ 0.75s 自然窗口 ≈ 0.2，
+        # 取 0.15：90% 步在窗口内自然完成，全程无满速冲刺（冲击∝速度）
+        "speed": 0.15,
+        "catch_timeout": 8.0,     # 步末追平门超时
         "chunk_mode": "track",
         "traj_dt": 0.1,           # s/点
     },

@@ -40,8 +40,13 @@ settle = false      # true=停走（旧行为）；false=追踪式
 settle_frac = 0.5   # 追踪换目标阈值，比例（无量纲 0~1）：
                     # 剩余误差 < frac×delta_max 即发下一步
 switch_dist = 0.06  # 提前重定向阈值，rad（滑行中转向，消指令边界停顿）
-catch_timeout = 8.0 # 步末追平门超时，s（run_g1_replay：等臂到数据集参考位再
-                    # 喂下一帧；超时警告推进。轨迹锁定，数据集自动慢放）
+
+[replay]            # run_g1_replay（数据集影子回放）专用，与 loop 解耦
+speed = 0.15        # 关节速度上限，rad/s。按 ep0 增量分布定标（2026-09-24）：
+                    # 每控制步最忙关节位移 p95=0.147，÷0.75s 自然窗口≈0.2，
+                    # 取 0.15 → 90% 步窗口内自然完成，全程无满速冲刺
+catch_timeout = 8.0 # 步末追平门超时，s（等臂到数据集参考位再喂下一帧；
+                    # 超时警告推进。轨迹锁定，数据集自动慢放）
 chunk_mode = "track"    # track / settle / traj（traj 走 PVT，已封存慎用）
 traj_dt = 0.1       # traj 模式轨迹点周期，s/点（0.033=采集原速 30fps）
 
