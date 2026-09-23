@@ -4,11 +4,8 @@
 > 参数已集中到 **`config/g1.toml`**，日常命令都很短；临时调整用 CLI 覆盖
 > （优先级：**CLI 显式 > config 文件 > 内置默认**，脚本启动会打印 config 覆盖了哪些项）。
 
-新开 shell 先执行（或写进 ~/.bashrc）：
-
-```bash
-RUN_PY="env LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib ~/miniforge3/envs/flash_pyrt311/bin/python"
-```
+所有命令统一用启动器 `~/holy/run.sh`（自带 SDK 库路径 + flash_pyrt311 环境，
+新开 shell 直接用，无需定义变量；参数原样透传）。
 
 **安全**：所有会动的脚本执行前有回车确认；运动等待中随时按 `q` 退出
 （SDK 阻塞中 Ctrl-C 无效，q 走独立线程）；紧急停止拍物理急停。
@@ -20,7 +17,7 @@ RUN_PY="env LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib ~/minif
 ### ① 预热 → 数据集工作姿态（零位 → 臂+头 → 躯干/腿 → 夹爪闭合并行）
 
 ```bash
-$RUN_PY ~/holy/scripts/inference/g1_pose_warmup.py
+~/holy/run.sh ~/holy/scripts/inference/g1_pose_warmup.py
 ```
 
 - 2026-09-23 真机全绿：腿 5 关节 set_joint_positions 直接收（SUCCESS 逐关节到位）；
@@ -34,7 +31,7 @@ $RUN_PY ~/holy/scripts/inference/g1_pose_warmup.py
 ### ② 只读推理（不动机器人，验语义/延迟）
 
 ```bash
-$RUN_PY ~/holy/scripts/inference/run_g1_inference.py
+~/holy/run.sh ~/holy/scripts/inference/run_g1_inference.py
 ```
 
 **看什么**：chunk (10,16) 打印；推理 p50 应 ~240-260 ms（fixed 模式恒定）；
@@ -43,7 +40,7 @@ $RUN_PY ~/holy/scripts/inference/run_g1_inference.py
 ### ③ 3 步 smoke（真实驱动，含夹爪）
 
 ```bash
-$RUN_PY ~/holy/scripts/inference/run_g1_execute.py --exec
+~/holy/run.sh ~/holy/scripts/inference/run_g1_execute.py --exec
 ```
 
 - 每步限幅 ±0.05 rad + 0.15 rad/s 限速，说破天也只挪这些
@@ -55,7 +52,7 @@ $RUN_PY ~/holy/scripts/inference/run_g1_execute.py --exec
 ### ④ 闭环 receding-horizon（连续任务）
 
 ```bash
-$RUN_PY ~/holy/scripts/inference/run_g1_loop.py --exec
+~/holy/run.sh ~/holy/scripts/inference/run_g1_loop.py --exec
 ```
 
 - config 内置 2026-09-23 真机 5/5 全绿组合：
@@ -74,10 +71,10 @@ $RUN_PY ~/holy/scripts/inference/run_g1_loop.py --exec
 
 ```bash
 # 只读探针（判断反馈活着没：width/velocity/effort/is_moving）
-$RUN_PY ~/holy/scripts/inference/gripper_calib.py --read-only
+~/holy/run.sh ~/holy/scripts/inference/gripper_calib.py --read-only
 
 # 全行程标定（先左后右，结束停在张开位）→ 抄下打印的 --grip-wmin/--grip-wmax
-$RUN_PY ~/holy/scripts/inference/gripper_calib.py
+~/holy/run.sh ~/holy/scripts/inference/gripper_calib.py
 ```
 
 拿到新标定后重跑 §3 的 prep 步带上 `--grip-wmin <值> --grip-wmax <值>`，
@@ -91,15 +88,15 @@ $RUN_PY ~/holy/scripts/inference/gripper_calib.py
 
 ```bash
 # ① stats 提取（微调输出目录 → norm_stats.json）
-$RUN_PY ~/holy/scripts/inference/lerobot_stats_extract.py --ckpt <微调输出>/pretrained_model
+~/holy/run.sh ~/holy/scripts/inference/lerobot_stats_extract.py --ckpt <微调输出>/pretrained_model
 
 # ② 组装部署目录（软链 14G 权重 + config + manifest；norm_mode 必须显式）
-$RUN_PY ~/holy/scripts/inference/g1_ckpt_prep.py \
+~/holy/run.sh ~/holy/scripts/inference/g1_ckpt_prep.py \
     --src <微调输出>/pretrained_model --out ~/holy/models/<新目录> \
     --mode q01_q99 --grip-wmin 0.0005 --grip-wmax 0.1200
 
 # ③ 归一化对齐检查（全绿才用）
-$RUN_PY ~/holy/scripts/eval/norm_align_check.py \
+~/holy/run.sh ~/holy/scripts/eval/norm_align_check.py \
     --dataset ~/holy/datasets/pick_place_balence --ckpt ~/holy/models/<新目录>
 ```
 
@@ -128,10 +125,10 @@ Left arm places A in the top-left corner. Right arm places A in the top-left cor
 bash ~/holy/scripts/verify_deploy.sh            # 一键验收（只读+GPU 推理，9 项）
 
 # state prompt 模式 A/B（exact vs fixed 的 800ms 差距复现实验）
-$RUN_PY ~/holy/scripts/inference/g1_state_prompt_mode_test.py
+~/holy/run.sh ~/holy/scripts/inference/g1_state_prompt_mode_test.py
 
 # 显存/分配探针
-$RUN_PY ~/holy/scripts/inference/g1_alloc_probe.py
+~/holy/run.sh ~/holy/scripts/inference/g1_alloc_probe.py
 ```
 
 ---
