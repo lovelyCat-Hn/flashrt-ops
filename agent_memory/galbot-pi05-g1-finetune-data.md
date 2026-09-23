@@ -47,3 +47,14 @@ metadata:
 **配置文件化 + 命令速查（2026-09-23）**：参数从 CLI 沉淀到 `config/g1.toml`（TOML 带注释，py311 标准库 tomllib 零依赖），四脚本（execute/loop/inference/warmup）经 `scripts/inference/g1_config.py` 统一三态解析：**CLI 显式 > config > 内置默认（BUILTIN 同源兜底）**——config 支持的 add_argument 一律 default=None，apply() 回填。安全红线：`--exec`（真实运动）不进配置仅 CLI；布尔显式关用 `--no-grip` 旗标。`COMMANDS.md`（仓根）=日常命令速查（预热/推理/smoke/闭环/标定/权重接入三步/场景要求/合格信号）。单测覆盖：BUILTIN 覆盖全部 mapping 键、三态各路径、真实 toml 解析。
 
 **部署机 G1 权重接入完成（2026-09-23）**：`pi05_g1_040000`（lerobot 布局 `pretrained_model/`，model.safetensors 9,354,050,752 字节 bf16，train_config `normalization_mapping=QUANTILES` → `--mode q01_q99` 显式指定）三步走完：lerobot_stats_extract（夹爪维 q01=-0.00 ⚠ 为分位端毛刺非异常，q99≈100 正常）→ `g1_ckpt_prep --out ~/holy/models/pi05_g1_ft`（813 张量、32 维隐空间未动、16/23 维三方一致）→ `norm_align_check` 全绿（语义分发/同噪声确定性/落域 0% 越界；窄维 7 个=leg/head 属预期）。数据集同日到位 `~/holy/datasets/pick_place_balence`（199 轨/97,149 帧，meta names 右臂在前已核）。SDK 运行库 `/data/galbot/lib` 在位。**剩余**：真机 `run_g1_inference --ckpt pi05_g1_ft`（manifest 零参数）+ 夹爪标定（manifest width_min/max 仍 null，运行时透传并警告，拿到 SDK 满/零开度宽度后 prep 重跑带上 `--grip-wmin/--grip-wmax`）。
+
+**【2026-09-23 晚最终定案】根因=INT8 量化，前两条结论翻案**：用户与同事核对确认模型输出=delta 语义；且"直接喂训练集数据推理、输出仍偏 0"。离线 teacher-forced 三档复测（新工具 `scripts/eval/tf_matrix.py`：训练集 ep0 五帧、干净 prompt、模型 delta vs 数据集 delta、单步+块均两口径+消融矩阵，纯离线不碰机器人）：
+- 全 INT8：块均 cos **0.15**、夹爪 8~21% 垃圾值（数据集 0%）❌
+- 仅编码器 INT8：块均 cos **0.27**、夹爪 5~19% ❌——**编码器 INT8 同样有毒**（FlashRT 注释只验过 encoder cosine，从没验动作端到端）
+- 全 bf16：**块均 cos 0.98**（单步 0.90）、夹爪 0.2~0.4% ✅——**微调权重几乎完美复现训练行为：训练无问题、FlashRT 转换无问题**
+- **翻案 1**："bf16≈INT8 行为相同、量化排除"——那次 A/B 在 OOD 真机场景比的，两档都输出均值动作、看不出差别。作废。
+- **翻案 2**："teacher-forced cos=-0.104、模型不复现训练行为"——旧探针带括号 prompt（消融实测带括号显著扰动输出，cos 到基线仅 0.26~0.51）+ INT8 档，双重污染。干净 prompt+bf16 后判决反转。训练机 native 栈判别不再必需。
+- 部署定档改 **bf16**：config/g1.toml `[inference].tier=bf16`，execute/loop 显式 `FVK_PI05_RTX_FORCE_BF16=1`（Orin 无 FP8 本就默认 bf16，显式防变）；延迟 ~255→~350 ms（闭环流水线可吸收）；BENCHMARKS.md 附录记录教训：**量化定档必须带动作质量验收（teacher-forced），不能只看延迟**。
+- 连带修正：此前"场景摆位苛刻/腕部构图决定性/贴零=场景不对"等归因都是在 INT8 噪声输出上做的，判据作废；上真机用 bf16 重新校准（摆位对齐训练本身仍要做）。
+- 同日落地的执行侧修正：warmup 目标切 task0 起始中位（`episode_start_task0.json`，state.mean=双 task 平均不可用）；execute/loop 补 delta→绝对换算（基准=预测时刻 state 臂位、随块走、续航路径沿用本块基准）；warmup q 键监听死代码修复（continue 后不可达，q 退出此前实际失效）。
+- 环境：系统 python3.8 有 pandas+pyarrow（读 parquet 用它），flash_pyrt311 无；tf_matrix 用子进程自举把 episode 抽成 npz 缓存，flash 环境零新依赖。数据集视频=每相机 2 个共享 mp4，episode 按时间戳分段（帧 t → from_timestamp + t/30）。
