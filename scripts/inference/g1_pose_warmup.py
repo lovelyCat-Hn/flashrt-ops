@@ -219,8 +219,15 @@ print(f"start_controller('all') → {st}")
 cur = read23(robot)
 report(cur)
 
+_grip_sent = False
+
+
 def fire_grip_close():
     """夹爪闭合命令一次性发出（非阻塞），与臂动作并行；末端统一核对。"""
+    global _grip_sent
+    if _grip_sent:          # 零位重试路径不再重复发（已闭合状态下重发无害，省之）
+        return
+    _grip_sent = True
     s1 = robot.set_gripper_command(G1JointGroup.right_gripper,
                                    GRIP_WMIN, 0.05, 30, False)
     s2 = robot.set_gripper_command(G1JointGroup.left_gripper,
@@ -240,7 +247,25 @@ if not args.skip_zero:
                                            leg_head_speed_rad_s=0.2,
                                            leg_head_timeout_s=30.0)
     print(f"move_whole_body_joint_zero → {st}")
-    cur = read23(robot)
+    # 臂走规划器+碰撞检查（leg/head 才是直控），伸直/大偏移姿态下规划
+    # 可能内部超时（TIMEOUT，臂停中途）——重试常能过，或跳零位走段②直控
+    if not str(st).startswith("MotionStatus.SUCCESS"):
+        WATCH.pause()
+        ans = input("⚠ 零位未完全到位。回车=重试零位 / 输入 s=跳过零位"
+                    "（段② 关节直控到工作位，不经规划器、无碰撞检查，"
+                    "先清空臂前空间）/ Ctrl-C=退出：").strip().lower()
+        WATCH.resume()
+        if ans == "s":
+            args.skip_zero = True
+        else:
+            if args.grip:
+                fire_grip_close()
+            st = motion.move_whole_body_joint_zero(is_blocking=True,
+                                                   leg_head_speed_rad_s=0.2,
+                                                   leg_head_timeout_s=30.0)
+            print(f"move_whole_body_joint_zero(重试) → {st}")
+    if not args.skip_zero:
+        cur = read23(robot)
 
 WATCH.pause()
 input(f"\n⚠ 段②：双臂+头" + ("+躯干腿" if not args.skip_leg else "")
