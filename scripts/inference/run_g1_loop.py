@@ -190,7 +190,9 @@ if args.grip:
     print(f"夹爪下发开启: 0%→{wmin} m | 100%→{wmax} m | 速度 {args.grip_speed} m/s | "
           f"力矩 {args.grip_effort} N | 变化阈值 {args.grip_chg}%")
 
-os.environ.setdefault("FVK_PI05_RTX_FORCE_INT8", "1")
+# 2026-09-23 tf_matrix 实证：INT8 两档（全 INT8 / 仅编码器）均毁动作质量
+# （块均 cos 0.15/0.27 vs bf16 0.98）——定档 bf16，显式锁定（详见 BENCHMARKS 附录）
+os.environ.setdefault("FVK_PI05_RTX_FORCE_BF16", "1")
 os.environ.setdefault("PI05_NO_GRAPH", "1")   # r35.5 graph 段错误绕法
 # state 以十进制文本拼进 prompt（format_pi05_prompt）：关节值一漂、bin 数位
 # 变化 → token 数变；默认 exact 模式每种长度一条 pipeline，换长=整条重建+

@@ -52,5 +52,8 @@ chg = 2.0           # 重发变化阈值，%（0~100% 语义；变化小于它�
 [inference]         # run_g1_inference（只读推理）
 rounds = 10         # 连续取图+推理轮数，轮
 hold = 10           # 冻结帧纯推理次数，次
-tier = "int8_full"  # 量化档：bf16 / int8_enc / int8_full
+tier = "bf16"       # 量化档：bf16 / int8_enc / int8_full
+                    # 2026-09-23 实证（tf_matrix 三档 teacher-forced）：INT8 两档
+                    # 均毁动作质量（块均 cos 0.15/0.27 vs bf16 0.98，夹爪输出
+                    # 8~21% 垃圾值），动作质量必须 bf16，延迟代价 ~+90ms
 ctrl_hz = 30.0      # 控制频率，Hz（=数据集 fps；10 步 chunk 窗口=333 ms）

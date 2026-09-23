@@ -41,7 +41,9 @@
 ~/holy/run.sh ~/holy/scripts/inference/run_g1_inference.py
 ```
 
-**看什么**：chunk (10,16) 打印；推理 p50 应 ~240-260 ms（fixed 模式恒定）。
+**看什么**：chunk (10,16) 打印；推理 p50 应 ~340-360 ms（**bf16 档**，2026-09-23
+定档：INT8 两档均毁动作质量——teacher-forced 实测块均 cos 0.15/0.27 vs bf16
+0.98，夹爪输出 8~21% 垃圾值，详见 BENCHMARKS 附录；fixed 模式恒定）。
 ⚠ chunk 臂维是 **delta**（相对预测时刻 state，2026-09-23 语义修正；夹爪两维
 仍是绝对 %）：正常训练行为 = 每步 ±0.05 rad 量级平滑增量；单步 >0.3 rad
 或大幅乱变 = 模型没锚定场景；全员贴 0 = 输出零动作（OOD，见 §4）。
@@ -70,7 +72,7 @@ execute/loop 脚本已自动加回预测时刻臂位再执行，无需手工换�
 - 漂移护栏：任一关节偏离起始位 >3.0 rad 自动停（`--max-excursion` 调；
   按数据集 199 轨合法抓取包络 max 2.785 重标，旧 0.25 真任务 100% 误触）
 - rounds 默认 60（单次抓取全程预算，一轮≈0.4s / 0.15 rad 行程）
-- 推理在执行期间后台完成，p50 ~255 ms、重规划 2.5 Hz 为正常水位
+- 推理在执行期间后台完成，p50 ~350 ms（bf16 档）、重规划 ~2 Hz 为正常水位
 
 **看什么**：每轮遥测分位数；回读跟踪误差 mrad；相邻步指令增量（抖动代理）。
 已知残留：指令切换瞬间一次抖动（待调项，见 agent_memory）。
@@ -166,7 +168,7 @@ bash ~/holy/scripts/verify_deploy.sh            # 一键验收（只读+GPU 推�
 | `[execute]` | smoke 步数/限幅/速度 | 3 步 / 0.05 rad / 0.15 rad/s |
 | `[loop]` | 闭环全部参数 | speed 0.25、合步 3、switch 0.06、track |
 | `[gripper]` | 开关+速度/力矩/阈值 | 开 / 0.05 m/s / 30 N / 2% |
-| `[inference]` | 只读推理 | 10 轮 / hold 10 / int8_full / 30 Hz |
+| `[inference]` | 只读推理 | 10 轮 / hold 10 / **bf16** / 30 Hz |
 
 `--exec`（真实运动）**不进配置**，每次命令行显式给——防误触。
 改 ckpt/prompt/参数：直接编辑 toml；临时换：CLI 传一次即可。

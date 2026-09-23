@@ -95,7 +95,10 @@ GRIP_WMIN = _gcal.get("width_min")
 GRIP_WMAX = _gcal.get("width_max")
 
 # ── 开关必须在 load_model 之前设 ──
-os.environ.setdefault("FVK_PI05_RTX_FORCE_INT8", "1")   # 全 INT8（echo 定档）
+# 2026-09-23 tf_matrix 三档 teacher-forced 实证：全 INT8 / 编码器 INT8 都毁
+# 动作质量（块均 cos 0.15/0.27 vs bf16 0.98，夹爪输出 8~21% 垃圾值 vs 正确
+# 0.2~0.4%）——定档 bf16（Orin 无 FP8，本变量显式锁定，防引擎默认变化）
+os.environ.setdefault("FVK_PI05_RTX_FORCE_BF16", "1")
 os.environ.setdefault("PI05_NO_GRAPH", "1")             # r35.5 驱动 graph 段错误绕法
 
 import numpy as np  # noqa: E402

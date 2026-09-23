@@ -81,3 +81,25 @@
 - 精度 A/B 三要素：同图缓存、同初始噪声、`cache_frames=1`（排除时序 KV 复用）
 - 噪声对齐必须走 `model.infer(obs, noise=torch.randn(10,32))` 显式传（`torch.manual_seed` 控不住：首次调用走 calibrate 路径额外消耗 RNG）；`infer` 返回 dict，动作取 `["actions"]`
 - 复现脚本（`~/holy/scripts/`，分 `inference/` 推理冒烟、`test/` 性能诊断、`eval/` 精度评估）：`test/bench_pi05.py`（延迟三档）、`eval/ab_compare_pi05.py`（合成 A/B）、`eval/ab_real_camera.py`（真机相机 A/B，只读不执行）、`test/graph_repro.py`（graph 最小复现）、`verify_deploy.sh`（部署验收，根目录）
+
+---
+
+## 附录：量化档位动作质量定档（2026-09-23，微调模型 teacher-forced）
+
+> 上文档位对比**只测了延迟、未测动作质量**——真机排障（G1 微调权重
+> pi05_g1_040000）出"伸臂不抓"，离线 teacher-forced 复测定案：
+> `scripts/eval/tf_matrix.py`，训练集 ep0 五帧、干净 prompt、对比数据集 delta。
+
+| 档位 | cos 单步 | cos 块均 | 夹爪输出（数据集 0%） | 延迟/次 |
+|---|---:|---:|---|---:|
+| 全 INT8 | 0.07 | 0.15 | 8~21% ❌ | ~270 ms |
+| 编码器 INT8 + 解码器 BF16 | 0.28 | 0.27 | 5~19% ❌ | ~300 ms |
+| **全 BF16** | **0.90** | **0.98** | **0.2~0.4% ✅** | ~350 ms |
+
+- bf16 块均 cos 0.98 = **微调权重几乎完美复现训练行为，训练本身无问题**
+- INT8 对本模型动作质量是毁灭性的，且**仅编码器 INT8 也一样有毒**
+  （此前"编码器 INT8 安全"的判断只来自 encoder cosine，未验动作端到端）
+- 部署定档改 **bf16**（config/g1.toml `[inference].tier`；execute/loop 脚本
+  显式 `FVK_PI05_RTX_FORCE_BF16=1`），代价 ~+90 ms/次，闭环流水线可吸收
+- **教训：量化定档必须带动作质量验收（teacher-forced 对训练集），
+  不能只看延迟和 encoder cosine**
