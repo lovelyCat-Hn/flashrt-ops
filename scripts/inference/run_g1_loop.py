@@ -30,6 +30,7 @@ chunk 耗尽才需等待。
 import argparse
 import atexit
 import functools
+import g1_config  # noqa: E402  同目录共享配置（CLI > config/g1.toml > 内置默认）
 import json
 import os
 import pathlib
@@ -42,40 +43,65 @@ import tty
 
 ap = argparse.ArgumentParser(description=__doc__,
                              formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument("--ckpt", default="/home/galbot/holy/models/pi05_g1_deploy")
-ap.add_argument("--prompt", default="Left arm pick up the block. Right arm pick up the block.")
+ap.add_argument("--ckpt", default=None, help="部署目录（默认 config [run].ckpt）")
+ap.add_argument("--prompt", default=None, help="任务指令（默认 config [run].prompt，须用训练原句）")
 ap.add_argument("--exec", dest="do_exec", action="store_true",
-                help="真实连续驱动双臂（默认干跑只打印首轮计划）")
-ap.add_argument("--rounds", type=int, default=10, help="推理→执行循环轮数")
-ap.add_argument("--steps-per-round", type=int, default=3,
-                help="每轮执行 chunk 前 K 步（模型 10 步/次）")
-ap.add_argument("--steps-per-cmd", type=int, default=1,
-                help="合步：一条 SDK 指令跨 K 个 chunk 步（默认 1=逐步；"
+                help="真实连续驱动双臂（默认干跑只打印首轮计划；不进配置，仅 CLI）")
+ap.add_argument("--rounds", type=int, default=None, help="推理→执行循环轮数（config [loop].rounds）")
+ap.add_argument("--steps-per-round", type=int, default=None,
+                help="每轮执行 chunk 前 K 步（模型 10 步/次；config [loop].steps_per_round）")
+ap.add_argument("--steps-per-cmd", type=int, default=None,
+                help="合步：一条 SDK 指令跨 K 个 chunk 步（1=逐步；"
                      "3=整轮一条平滑轮廓，起停次数 1/3，实测提速只会加剧"
-                     "每点全停的冲击，减停顿才是平滑正解）")
-ap.add_argument("--delta-max", type=float, default=0.05, help="每步限幅 rad")
-ap.add_argument("--speed", type=float, default=0.15, help="关节速度上限 rad/s")
-ap.add_argument("--max-excursion", type=float, default=0.25,
-                help="偏离起始位护栏 rad（任一关节超限即停）")
-ap.add_argument("--settle", action="store_true",
-                help="步进-停走（阻塞等待到位，旧行为）；默认追踪式：误差收窄即发下一目标")
-ap.add_argument("--settle-frac", type=float, default=0.3,
-                help="追踪式换目标阈值：剩余误差 < frac×delta-max 即发下一步")
-ap.add_argument("--switch-dist", type=float, default=0.0,
+                     "每点全停的冲击，减停顿才是平滑正解；config [loop].steps_per_cmd）")
+ap.add_argument("--delta-max", type=float, default=None, help="每步限幅 rad（config [loop].delta_max）")
+ap.add_argument("--speed", type=float, default=None, help="关节速度上限 rad/s（config [loop].speed）")
+ap.add_argument("--max-excursion", type=float, default=None,
+                help="偏离起始位护栏 rad（任一关节超限即停；config [loop].max_excursion）")
+ap.add_argument("--settle", action="store_true", default=None,
+                help="步进-停走（阻塞等待到位，旧行为）；默认追踪式：误差收窄即发下一目标（config [loop].settle）")
+ap.add_argument("--settle-frac", type=float, default=None,
+                help="追踪式换目标阈值：剩余误差 < frac×delta-max 即发下一步（config [loop].settle_frac）")
+ap.add_argument("--switch-dist", type=float, default=None,
                 help="提前换目标阈值 rad：剩余误差收到该值即重定向，滑行中转向、"
-                     "速度不过零，消指令边界停顿；0=旧语义（近乎到位才换）")
-ap.add_argument("--chunk-mode", choices=("track", "settle", "traj"), default="track",
+                     "速度不过零，消指令边界停顿；0=旧语义（config [loop].switch_dist）")
+ap.add_argument("--chunk-mode", choices=("track", "settle", "traj"), default=None,
                 help="步进引擎：track=追踪单步 / settle=停走 / traj=整块轨迹流"
-                     "（PVT 原生，最平滑；--steps-per-round 不适用，整 chunk 一次发）")
-ap.add_argument("--traj-dt", type=float, default=0.1,
-                help="traj 模式轨迹点周期 s（0.033=采集原速 30fps；默认 0.1=3 倍慢放）")
-ap.add_argument("--grip", action="store_true",
-                help="启用夹爪下发（dim7/dim15 0~100%% → manifest 标定宽度）")
-ap.add_argument("--grip-speed", type=float, default=0.05, help="夹爪速度 m/s")
-ap.add_argument("--grip-effort", type=float, default=30, help="夹爪力矩 N")
-ap.add_argument("--grip-chg", type=float, default=2.0,
-                help="夹爪下发变化阈值 %%（小于它不重发）")
+                     "（PVT 原生，最平滑；--steps-per-round 不适用，整 chunk 一次发；config [loop].chunk_mode）")
+ap.add_argument("--traj-dt", type=float, default=None,
+                help="traj 模式轨迹点周期 s（0.033=采集原速 30fps；默认 0.1=3 倍慢放；config [loop].traj_dt）")
+ap.add_argument("--grip", action="store_true", default=None,
+                help="启用夹爪下发（dim7/dim15 0~100%% → manifest 标定宽度；config [gripper].enabled）")
+ap.add_argument("--no-grip", action="store_true",
+                help="显式关闭夹爪下发（覆盖 config 的 gripper.enabled=true）")
+ap.add_argument("--grip-speed", type=float, default=None, help="夹爪速度 m/s（config [gripper].speed）")
+ap.add_argument("--grip-effort", type=float, default=None, help="夹爪力矩 N（config [gripper].effort）")
+ap.add_argument("--grip-chg", type=float, default=None,
+                help="夹爪下发变化阈值 %%（config [gripper].chg）")
+ap.add_argument("--config", default=g1_config.DEFAULT_PATH,
+                help="配置文件路径（优先级 CLI > config > 内置默认）")
 args = ap.parse_args()
+g1_config.apply(args, {
+    "ckpt": ("run", "ckpt"),
+    "prompt": ("run", "prompt"),
+    "rounds": ("loop", "rounds"),
+    "steps_per_round": ("loop", "steps_per_round"),
+    "steps_per_cmd": ("loop", "steps_per_cmd"),
+    "delta_max": ("loop", "delta_max"),
+    "speed": ("loop", "speed"),
+    "max_excursion": ("loop", "max_excursion"),
+    "settle": ("loop", "settle"),
+    "settle_frac": ("loop", "settle_frac"),
+    "switch_dist": ("loop", "switch_dist"),
+    "chunk_mode": ("loop", "chunk_mode"),
+    "traj_dt": ("loop", "traj_dt"),
+    "grip": ("gripper", "enabled"),
+    "grip_speed": ("gripper", "speed"),
+    "grip_effort": ("gripper", "effort"),
+    "grip_chg": ("gripper", "chg"),
+})
+if args.no_grip:
+    args.grip = False
 
 
 class QuitWatcher:

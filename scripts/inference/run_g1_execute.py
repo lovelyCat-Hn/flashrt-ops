@@ -22,6 +22,7 @@
 """
 import argparse
 import functools
+import g1_config  # noqa: E402  同目录共享配置（CLI > config/g1.toml > 内置默认）
 import json
 import os
 import pathlib
@@ -29,23 +30,40 @@ import time
 
 ap = argparse.ArgumentParser(description=__doc__,
                              formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument("--ckpt", default="/home/galbot/holy/models/pi05_lerobot_base")
-ap.add_argument("--prompt", default="Left arm pick up the block. Right arm pick up the block.")
+ap.add_argument("--ckpt", default=None, help="部署目录（默认 config [run].ckpt）")
+ap.add_argument("--prompt", default=None, help="任务指令（默认 config [run].prompt，须用训练原句）")
 ap.add_argument("--exec", dest="do_exec", action="store_true",
-                help="真实下发关节命令（默认干跑只打印）")
-ap.add_argument("--steps", type=int, default=3, help="执行 chunk 前 K 步（≤10）")
-ap.add_argument("--delta-max", type=float, default=0.05,
-                help="每步相对当前读数的限幅（rad）")
-ap.add_argument("--speed", type=float, default=0.15, help="关节速度上限 rad/s")
+                help="真实下发关节命令（默认干跑只打印；不进配置，仅 CLI）")
+ap.add_argument("--steps", type=int, default=None, help="执行 chunk 前 K 步，≤10（config [execute].steps）")
+ap.add_argument("--delta-max", type=float, default=None,
+                help="每步相对当前读数的限幅 rad（config [execute].delta_max）")
+ap.add_argument("--speed", type=float, default=None, help="关节速度上限 rad/s（config [execute].speed）")
 ap.add_argument("--force-state-dim", action="store_true",
-                help="state/stats 维数不符时截断/零补适配（仅 smoke）")
-ap.add_argument("--grip", action="store_true",
-                help="启用夹爪下发（dim7/dim15 0~100%% → manifest 标定宽度）")
-ap.add_argument("--grip-speed", type=float, default=0.05, help="夹爪速度 m/s")
-ap.add_argument("--grip-effort", type=float, default=30, help="夹爪力矩 N")
-ap.add_argument("--grip-chg", type=float, default=2.0,
-                help="夹爪下发变化阈值 %%（小于它不重发）")
+                help="state/stats 维数不符时截断/零补适配（仅 smoke，不进配置）")
+ap.add_argument("--grip", action="store_true", default=None,
+                help="启用夹爪下发（dim7/dim15 0~100%% → manifest 标定宽度；config [gripper].enabled）")
+ap.add_argument("--no-grip", action="store_true",
+                help="显式关闭夹爪下发（覆盖 config 的 gripper.enabled=true）")
+ap.add_argument("--grip-speed", type=float, default=None, help="夹爪速度 m/s（config [gripper].speed）")
+ap.add_argument("--grip-effort", type=float, default=None, help="夹爪力矩 N（config [gripper].effort）")
+ap.add_argument("--grip-chg", type=float, default=None,
+                help="夹爪下发变化阈值 %%（config [gripper].chg）")
+ap.add_argument("--config", default=g1_config.DEFAULT_PATH,
+                help="配置文件路径（优先级 CLI > config > 内置默认）")
 args = ap.parse_args()
+g1_config.apply(args, {
+    "ckpt": ("run", "ckpt"),
+    "prompt": ("run", "prompt"),
+    "steps": ("execute", "steps"),
+    "delta_max": ("execute", "delta_max"),
+    "speed": ("execute", "speed"),
+    "grip": ("gripper", "enabled"),
+    "grip_speed": ("gripper", "speed"),
+    "grip_effort": ("gripper", "effort"),
+    "grip_chg": ("gripper", "chg"),
+})
+if args.no_grip:
+    args.grip = False
 
 # ── 部署清单（与 run_g1_inference.py 同规则）──
 CKPT = pathlib.Path(args.ckpt)

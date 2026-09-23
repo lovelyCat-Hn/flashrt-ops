@@ -1,0 +1,48 @@
+# G1 部署运行配置（echo 机）—— run_g1_execute / run_g1_loop / run_g1_inference /
+# g1_pose_warmup 四脚本共享。优先级：命令行显式传参 > 本文件 > 脚本内置默认。
+# 改完保存即生效（下次运行读取）；脚本启动会打印本文件实际覆盖了哪些项。
+# 注意：--exec（真实运动）不在本文件里，每次命令行显式给。
+# 与 scripts/inference/g1_config.py 的 BUILTIN 保持同源，两边一起改。
+
+[run]
+# 部署目录（g1_ckpt_prep 产物；norm_stats/manifest 从这里读）
+ckpt = "/home/galbot/holy/models/pi05_g1_ft"
+# 任务指令——必须是训练 tasks.parquet 里的原句（就这两条）：
+#   "Left arm pick up A. Right arm pick up A."
+#   "Left arm places A in the top-left corner. Right arm places A in the top-left corner."
+prompt = "Left arm pick up A. Right arm pick up A."
+
+[warmup]
+speed = 0.15        # 臂/头关节速度 rad/s（腿固定 0.2）
+skip_zero = false   # true=跳过段①零位（已在工作位附近时）
+skip_leg  = false   # true=跳过段②b 躯干/腿对齐
+
+[execute]           # run_g1_execute（3 步 smoke）
+steps = 3           # 执行 chunk 前 K 步（≤10）
+delta_max = 0.05    # 每步相对当前读数限幅 rad
+speed = 0.15        # 关节速度上限 rad/s
+
+[loop]              # run_g1_loop（闭环；= 2026-09-23 真机 5/5 全绿组合）
+rounds = 10
+steps_per_round = 3
+steps_per_cmd = 3   # 合步：一条 SDK 指令跨 K 个 chunk 步（3=整轮一条平滑轮廓）
+delta_max = 0.05
+speed = 0.25        # 0.15 偏慢，0.25 实测最优
+max_excursion = 0.25    # 偏离起始位护栏 rad，任一关节超限即停
+settle = false      # true=停走（旧行为）；false=追踪式
+settle_frac = 0.5   # 追踪换目标阈值：剩余误差 < frac×delta_max 即发下一步
+switch_dist = 0.06  # 提前重定向阈值 rad（滑行中转向，消指令边界停顿）
+chunk_mode = "track"    # track / settle / traj（traj 走 PVT，已封存慎用）
+traj_dt = 0.1
+
+[gripper]           # execute/loop 的 --grip、warmup 的 --grip 共用
+enabled = true      # 日常默认开；显式关：命令行 --no-grip 或改 false
+speed = 0.05        # m/s
+effort = 30         # N
+chg = 2.0           # 变化小于该阈值(%)不重发（0~100% 语义）
+
+[inference]         # run_g1_inference（只读推理）
+rounds = 10
+hold = 10
+tier = "int8_full"
+ctrl_hz = 30.0      # =数据集 fps

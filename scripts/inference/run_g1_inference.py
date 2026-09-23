@@ -29,6 +29,7 @@ meta/info.json 权威定义；显式名字读取，group 模式返回顺序不�
 """
 import argparse
 import functools
+import g1_config  # noqa: E402  同目录共享配置（CLI > config/g1.toml > 内置默认）
 import json
 import os
 import pathlib
@@ -36,18 +37,29 @@ import time
 
 ap = argparse.ArgumentParser(description=__doc__,
                              formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument("--ckpt", default="/home/galbot/holy/models/pi05_g1_smoke")
-ap.add_argument("--prompt", default="Left arm pick up the block. Right arm pick up the block.")
-ap.add_argument("--rounds", type=int, default=10, help="连续取图+推理轮数")
-ap.add_argument("--hold", type=int, default=10, help="冻结帧纯推理次数")
-ap.add_argument("--tier", default="int8_full", choices=("bf16", "int8_enc", "int8_full"))
-ap.add_argument("--ctrl-hz", type=float, default=30.0,
-                help="控制频率（数据集 fps=30，10 步 chunk 窗口=333ms）")
-ap.add_argument("--grip-wmin", type=float, help="夹爪零开度 SDK 宽度(米)，覆盖 manifest")
-ap.add_argument("--grip-wmax", type=float, help="夹爪满开度 SDK 宽度(米)，覆盖 manifest")
+ap.add_argument("--ckpt", default=None, help="部署目录（默认 config [run].ckpt）")
+ap.add_argument("--prompt", default=None, help="任务指令（默认 config [run].prompt，须用训练原句）")
+ap.add_argument("--rounds", type=int, default=None, help="连续取图+推理轮数（config [inference].rounds）")
+ap.add_argument("--hold", type=int, default=None, help="冻结帧纯推理次数（config [inference].hold）")
+ap.add_argument("--tier", default=None, choices=("bf16", "int8_enc", "int8_full"),
+                help="量化档（config [inference].tier）")
+ap.add_argument("--ctrl-hz", type=float, default=None,
+                help="控制频率（数据集 fps=30，10 步 chunk 窗口=333ms；config [inference].ctrl_hz）")
+ap.add_argument("--grip-wmin", type=float, help="夹爪零开度 SDK 宽度(米)，覆盖 manifest（不进配置）")
+ap.add_argument("--grip-wmax", type=float, help="夹爪满开度 SDK 宽度(米)，覆盖 manifest（不进配置）")
 ap.add_argument("--force-state-dim", action="store_true",
                 help="state/stats 维数不符时截断/零补适配（仅 smoke 用；真微调 ckpt 勿开）")
+ap.add_argument("--config", default=g1_config.DEFAULT_PATH,
+                help="配置文件路径（优先级 CLI > config > 内置默认）")
 args = ap.parse_args()
+g1_config.apply(args, {
+    "ckpt": ("run", "ckpt"),
+    "prompt": ("run", "prompt"),
+    "rounds": ("inference", "rounds"),
+    "hold": ("inference", "hold"),
+    "tier": ("inference", "tier"),
+    "ctrl_hz": ("inference", "ctrl_hz"),
+})
 
 # ── 部署清单 ──
 CKPT = pathlib.Path(args.ckpt)

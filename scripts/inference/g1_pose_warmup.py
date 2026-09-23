@@ -45,17 +45,34 @@ import threading
 import time
 import tty
 
+import g1_config   # noqa: E402  同目录共享配置（CLI > config/g1.toml > 内置默认）
+
 ap = argparse.ArgumentParser(description=__doc__,
                              formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument("--ckpt", default="/home/galbot/holy/models/pi05_g1_deploy",
-                help="部署目录（读 norm_stats.json 的 state.mean 作目标）")
-ap.add_argument("--skip-zero", action="store_true", help="跳过零位段（已在工作位附近时）")
-ap.add_argument("--speed", type=float, default=0.15, help="关节速度上限 rad/s")
-ap.add_argument("--grip", action="store_true",
-                help="闭合夹爪到数据集起点 0%%（width_min；需 manifest 标定）")
-ap.add_argument("--skip-leg", action="store_true",
-                help="跳过躯干/腿对齐（腿部动作改变站高/前倾，默认对齐）")
+ap.add_argument("--ckpt", default=None,
+                help="部署目录（默认 config [run].ckpt；读 norm_stats.json 的 state.mean 作目标）")
+ap.add_argument("--skip-zero", action="store_true", default=None,
+                help="跳过零位段（已在工作位附近时；config [warmup].skip_zero）")
+ap.add_argument("--speed", type=float, default=None,
+                help="臂/头关节速度上限 rad/s（默认 0.15；config [warmup].speed）")
+ap.add_argument("--grip", action="store_true", default=None,
+                help="闭合夹爪到数据集起点 0%%（width_min；需 manifest 标定；config [gripper].enabled）")
+ap.add_argument("--no-grip", action="store_true",
+                help="显式不闭合夹爪（覆盖 config 的 gripper.enabled=true）")
+ap.add_argument("--skip-leg", action="store_true", default=None,
+                help="跳过躯干/腿对齐（腿部动作改变站高/前倾，默认对齐；config [warmup].skip_leg）")
+ap.add_argument("--config", default=g1_config.DEFAULT_PATH,
+                help="配置文件路径（优先级 CLI > config > 内置默认）")
 args = ap.parse_args()
+g1_config.apply(args, {
+    "ckpt": ("run", "ckpt"),
+    "speed": ("warmup", "speed"),
+    "skip_zero": ("warmup", "skip_zero"),
+    "skip_leg": ("warmup", "skip_leg"),
+    "grip": ("gripper", "enabled"),
+})
+if args.no_grip:
+    args.grip = False
 
 
 class QuitWatcher:
