@@ -54,4 +54,6 @@ print('kernels  : ok')"
 
 **2026-09-22 本机（源机）状态**：已生成 SSH key 并 clone ops 仓库到 `~/flashrt-ops`；仓库记忆快照已回灌本机 memory 目录（仓库版是本机版的超集，取仓库为基准）。本机 ~/holy 已**改为仓库本体**（旧 holy 挪到 ~/holy_srcbak 后 clone，FlashRT/pytorch 源树搬回，apply_hotfix.sh 已打补丁）——与部署机同构，后续可 git pull。资产到位：权重 14,467,165,872 字节精确一致 + openpi norm_stats（GCS 直补到 ckpt 内 assets/，state 8/actions 7 q01_q99）+ tokenizer 4,264,023 字节 + cv2 4.10.0/numpy 1.26.4。**verify_deploy.sh PASS=9 FAIL=0，源机部署齐平（2026-09-22）**；⑤ graph 探测本机同样 exit 139——同驱动第二台复现，驱动 bug 结论二次坐实。**两台物理机 hostname 同为 galbot-echo**，记忆与沟通中一律以"源机（本机）/部署机（另一台）"区分，勿用 hostname。
 
+**2026-09-23 部署机验收通过（hostname 同为 galbot-echo，R35.6.0）**：~/holy 即仓库本体，`git pull` 一步到位拿到全部代码轨；本机 FlashRT 树自带 6425fe8d+bff59419 补丁提交（热修探针全过，apply_hotfix.sh 幂等跳过）；资产四件（miniforge3 env / 14G 权重精确一致 / tokenizer 4,264,023 字节 / openpi norm_stats）在位。**verify_deploy.sh PASS=9 FAIL=0**；⑤ graph 探测同 exit 139——r35.x 驱动 bug 第三台复现，定案：所有 R35.x 机器一律 `PI05_NO_GRAPH=1`。新机待办只剩 DEPLOY.md §6 后三项（相机视角映射 / 动作空间开环观察 / SDK 运行时版本核对）。
+
 相关：[[galbot-pi05-env-setup]]（环境本体与 cuBLAS 三层现象）、[[galbot-pi05-g1-finetune-data]]（补丁内容与 G1 三件套）、[[galbot-user-runs-install-commands]]（安装类命令由用户执行）
