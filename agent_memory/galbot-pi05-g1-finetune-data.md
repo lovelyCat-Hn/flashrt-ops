@@ -58,3 +58,9 @@ metadata:
 - 连带修正：此前"场景摆位苛刻/腕部构图决定性/贴零=场景不对"等归因都是在 INT8 噪声输出上做的，判据作废；上真机用 bf16 重新校准（摆位对齐训练本身仍要做）。
 - 同日落地的执行侧修正：warmup 目标切 task0 起始中位（`episode_start_task0.json`，state.mean=双 task 平均不可用）；execute/loop 补 delta→绝对换算（基准=预测时刻 state 臂位、随块走、续航路径沿用本块基准）；warmup q 键监听死代码修复（continue 后不可达，q 退出此前实际失效）。
 - 环境：系统 python3.8 有 pandas+pyarrow（读 parquet 用它），flash_pyrt311 无；tf_matrix 用子进程自举把 episode 抽成 npz 缓存，flash 环境零新依赖。数据集视频=每相机 2 个共享 mp4，episode 按时间戳分段（帧 t → from_timestamp + t/30）。
+
+**【2026-09-23 晚·数据集回放定级】task0 全绿可上真机，task1 夹爪未学会（训练侧）**：回放工具 `scripts/eval/tf_rollout.py`（bf16，整条 episode 逐控制步吃数据集真实观测，模型动作 vs 数据集动作逐帧对比+出图 /tmp/tf_rollout_ep{N}.png，系统 python3 matplotlib 画图）。**任务语义（用户纠正后钉死）**：task0=pick up（起始双爪空 0% → 预抓取张开 L@0.11·n / R@0.56·n → 抓住后指令 0%=收紧、state 被物体撑在 ~33.5%）；task1=places（起始双爪持物 state 33%=被撑、指令 0%=持续收紧 → L@0.27·n 释放 / R@0.66·n 张开 100% → 末态空爪 0%）。**夹爪语义：action=指令宽度%，state=物理宽度%（持物时被物体撑开，≠指令）**——两条 stream 对不上是物理不是 bug。
+- **ep0（task0）回放全绿**：臂 mean err 0.014 rad（p95 0.063）、delta cos p50 0.92、**开爪时机同帧（339 vs 339）**、持物保持 0% ✓、推理 p50 345ms（bf16 稳态）。
+- **task1（ep120/ep150）臂好爪坏**：臂全程跟踪（abs err ~0.019 rad）但夹爪通道错——持物段乱张 40-80%（两次开爪相位一致 0.128·n，非随机）、释放段该 100% 只输出 ~0。
+- **指令交换探针（同观测换 places/pick up 指令）**：夹爪输出几乎不变（帧96 两条指令都张 66-69%，帧380 该 100% 都输出 ~0）→ **语言接地对夹爪无效**，task0 的预抓取本能泄漏进 task1（疑似视觉相似段触发 task0 时刻表）。**结论：task1 夹爪时序未学会=训练侧缺陷**（部署无解），方向：加长训练/检查 task1 夹爪标签/强化语言条件。
+- **部署建议**：真机先跑 task0（pick up 原句 + episode_start_task0.json 预热 + bf16 + delta 执行链）；task1 待训练修复后 tf_matrix/tf_rollout 复验再上。
