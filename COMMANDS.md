@@ -112,10 +112,24 @@ Left arm places A in the top-left corner. Right arm places A in the top-left cor
 
 ## 4. 场景要求（语义验证前置，2026-09-23 实证）
 
-训练场景 = **桌面 + 蓝色料盒 + 盒内小玩偶（"A"），双臂从桌沿伸入**。
+训练场景 = **桌面 + 蓝色料盒（放在带脚轮小推车上）+ 盒内白色空气开关
+（红色扳把，"A"），双臂从桌沿伸入、起点爪几乎压在盒沿正上方**。
 场景不复现时模型输出"无条件均值"（臂 14 维 ≈0 rad、夹爪 ≈10-13%）——
 这是 OOD 标准行为，不是 bug；warmup 臂位即采集起始位，摆好场景后从 §① 重跑。
-对照素材：`datasets/pick_place_balence/videos/observation.images.*/` 抽帧。
+
+**摆位对位工具**（十几秒/轮，不加载模型）：
+
+```bash
+~/holy/run.sh ~/holy/scripts/inference/g1_scene_check.py
+# 输出 /tmp/scene_check/compare_*.png（左=当前 / 右=训练并排）
+```
+
+判据（**腕部两张是决定性的**，头部构图像不够——2026-09-23 教训：
+头部看似接近、模型仍输出均值，腕部一看盒子缩在视野边缘）：
+- ✅ 蓝盒占腕部视野下半较大比例、空气开关清晰可见、盒沿在爪正前下方
+- ❌ 盒子缩在视野边缘/很远、看到的多是空桌板 → 机器人向前挪或盒子往桌沿挪
+
+参考帧入库在 `docs/scene_reference/`（训练 episode0 起点 + 当前反例各一套）。
 
 ---
 
