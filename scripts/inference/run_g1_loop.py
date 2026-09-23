@@ -228,6 +228,9 @@ STATE_NAMES = (RIGHT + ["right_gripper_joint1"]
                + [f"leg_joint{i}" for i in range(1, 6)]
                + ["head_joint1", "head_joint2"])
 GRIP_IDX = (7, 15)                  # state 里的夹爪维：SDK 米 → 数据集 0~100%
+ARM_SLICE = list(range(0, 7)) + list(range(8, 15))   # state 里的臂维（0-6 右 / 8-14 左）
+# 当前 chunk 的预测时刻臂位——chunk 臂维是 delta（见 plan_step），换块时更新
+BASE_ARM = None
 _gcal = mf.get("gripper", {})
 GRIP_WMIN, GRIP_WMAX = _gcal.get("width_min"), _gcal.get("width_max")
 
@@ -325,6 +328,7 @@ print(f"tier=int8_full views={VIEWS} | load {time.time() - t0:.1f}s")
 obs = grab_views(robot)
 state0 = state_from_joints(read_joints(robot, STATE_NAMES))
 state_n0 = normalize_state(state0, ns)
+BASE_ARM = state0[ARM_SLICE]   # 首块 delta 基准 = 预测时刻臂位
 chunk = np.asarray(model.predict(obs, prompt=args.prompt, state=state_n0))  # 建管线
 # 首用引擎构建吸收：真实控制轮 0 曾撞 ~800ms 惰性构建（autotune 中途重现，
 # 2026-09-22 tegrastats 已排除热/内存）。连做 3 次新鲜取图推理，把构建成本
@@ -339,8 +343,13 @@ BUDGET = spc * args.delta_max                    # 每条指令位移限幅
 
 
 def plan_step(k, cur, budget=None):
-    """chunk 第 k 步 → 限幅后目标（14 维，右臂在前）；budget=位移限幅。"""
-    arm_tgt = np.concatenate([chunk[k][:7], chunk[k][8:15]])
+    """chunk 第 k 步 → 限幅后目标（14 维，右臂在前）；budget=位移限幅。
+
+    ⚠ 2026-09-23 语义修正：训练管线 relative_actions_processor 把臂维动作
+    转成 delta（相对预测时刻 state，夹爪维除外）——chunk 臂维不是绝对目标，
+    须加回本块预测时刻臂位 BASE_ARM（换块时随 job 更新）。
+    """
+    arm_tgt = BASE_ARM + np.concatenate([chunk[k][:7], chunk[k][8:15]])
     b = args.delta_max if budget is None else budget
     return cur + np.clip(arm_tgt - cur, -b, b)
 
@@ -354,7 +363,7 @@ def build_traj(chunk, cur0):
     traj.joint_names = ARM_NAMES
     pts, p = [], cur0.copy()
     for k in range(len(chunk)):
-        arm_tgt = np.concatenate([chunk[k][:7], chunk[k][8:15]])
+        arm_tgt = BASE_ARM + np.concatenate([chunk[k][:7], chunk[k][8:15]])
         new_p = p + np.clip(arm_tgt - p, -args.delta_max, args.delta_max)
         if float(np.max(np.abs(new_p - HOME))) > args.max_excursion:
             return traj, k, (p if k else None)   # p = 最后一个合法点
@@ -425,9 +434,10 @@ class _PredictJob:
         self._err = None
         self.dur_ms = 0.0
 
-    def start(self, obs, state_n):
+    def start(self, obs, state_n, state_arm):
         self._done.clear()
         self._err = None
+        self.state_arm = state_arm   # 本块 delta 基准（预测时刻臂位）
 
         def _run():
             t = time.perf_counter()
@@ -452,12 +462,16 @@ class _PredictJob:
 
 
 def fresh_obs():
-    """取图+读关节+夹爪换算+归一化（主线程，~22ms），耗时计入 grab_ms。"""
+    """取图+读关节+夹爪换算+归一化（主线程，~22ms），耗时计入 grab_ms。
+
+    返回 (obs, 归一化 state, 臂位原始值)——臂位原始值作该块 delta 基准随块走。
+    """
     t_g = time.perf_counter()
     obs = grab_views(robot)
-    st_n = normalize_state(state_from_joints(read_joints(robot, STATE_NAMES)), ns)
+    st_raw = state_from_joints(read_joints(robot, STATE_NAMES))
+    st_n = normalize_state(st_raw, ns)
     grab_ms.append((time.perf_counter() - t_g) * 1000)
-    return obs, st_n
+    return obs, st_n, st_raw[ARM_SLICE]
 
 
 job = _PredictJob(model, args.prompt)
@@ -468,6 +482,7 @@ for r in range(args.rounds):
         break
     t_r = time.perf_counter()
     chunk = job.result()             # 上轮执行期间启动的推理——此刻早已就绪
+    BASE_ARM = job.state_arm         # 新块 delta 基准 = 该块预测时刻臂位
     infer_ms.append(job.dur_ms)
     print(f"\n── 轮 {r} | 推理 {job.dur_ms:.0f} ms（与上轮执行重叠，零等待）──")
     if args.chunk_mode == "traj":

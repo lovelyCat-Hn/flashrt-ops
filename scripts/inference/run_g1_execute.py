@@ -243,12 +243,19 @@ n_steps = max(1, min(args.steps, len(chunk)))
 cur = read_joints(robot, ARM_NAMES)
 print(f"\n== ③ 双臂执行计划（共 {n_steps} 步，每步限幅 ±{args.delta_max} rad）==")
 print(f"当前读数: {np.round(cur, 3).tolist()}")
+# ⚠ 2026-09-23 语义修正：训练管线 relative_actions_processor 把臂维动作转成
+# delta（相对预测时刻 state；夹爪维除外保持绝对 %）——chunk 臂维不是绝对目标，
+# 须加回预测时刻臂位。基准取本块预测所用的 state_raw 臂维（0-6 右 / 8-14 左）。
+ARM_SLICE = list(range(0, 7)) + list(range(8, 15))
+state_arm0 = state_raw[ARM_SLICE].astype(np.float32)
 plan = []
 for k in range(n_steps):
-    tgt_raw = np.concatenate([chunk[k][:7], chunk[k][8:15]]).astype(np.float32)
+    arm_delta = np.concatenate([chunk[k][:7], chunk[k][8:15]]).astype(np.float32)
+    tgt_raw = state_arm0 + arm_delta          # delta → 绝对目标
     delta = np.clip(tgt_raw - cur, -args.delta_max, args.delta_max)
     plan.append(cur + delta)
-    print(f"  步{k}: 模型目标 {np.round(tgt_raw, 3).tolist()}"
+    print(f"  步{k}: 模型delta {np.round(arm_delta, 3).tolist()}"
+          f"\n      绝对目标 {np.round(tgt_raw, 3).tolist()}"
           f"\n      限幅后 {np.round(plan[-1], 3).tolist()}")
     if GRIP:
         for name, dim in GRIP["names"]:
