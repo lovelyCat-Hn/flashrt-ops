@@ -4,7 +4,8 @@
 目的：实测执行链路的实时延迟与抖动（2026-09-22 闭环打通后的量化步骤）。
 ⚠ 加 --exec 会连续真实驱动双臂！安全设计：
   1. 只动双臂 14 关节；夹爪/腿/头维度永不下发
-  2. 每步目标 = 当前读数 ± --delta-max 限幅（默认 0.05 rad），限速 0.15 rad/s
+  2. 每条指令目标 = 当前读数 ± steps-per-cmd×--delta-max 限幅（默认
+     1×0.05 rad；合步 3 → 0.15 rad，与逐 3 步一轮的行程上限相同），限速 --speed
   3. 漂移护栏：任一关节偏离起始位超 --max-excursion（默认 0.25 rad）→ 立即
      停止循环（语义测试期防模型单向漂移拖走机械臂）
   4. q 键即时退出（后台监听线程，SDK 阻塞中也可退）；物理急停第一优先级
@@ -45,6 +46,10 @@ ap.add_argument("--exec", dest="do_exec", action="store_true",
 ap.add_argument("--rounds", type=int, default=10, help="推理→执行循环轮数")
 ap.add_argument("--steps-per-round", type=int, default=3,
                 help="每轮执行 chunk 前 K 步（模型 10 步/次）")
+ap.add_argument("--steps-per-cmd", type=int, default=1,
+                help="合步：一条 SDK 指令跨 K 个 chunk 步（默认 1=逐步；"
+                     "3=整轮一条平滑轮廓，起停次数 1/3，实测提速只会加剧"
+                     "每点全停的冲击，减停顿才是平滑正解）")
 ap.add_argument("--delta-max", type=float, default=0.05, help="每步限幅 rad")
 ap.add_argument("--speed", type=float, default=0.15, help="关节速度上限 rad/s")
 ap.add_argument("--max-excursion", type=float, default=0.25,
@@ -225,12 +230,15 @@ for _ in range(3):
                   state=normalize_state(read_joints(robot, STATE_NAMES), ns))
 print("预热推理 ×3 完成（吸收惰性引擎构建）")
 n_steps = max(1, min(args.steps_per_round, 10))
+spc = max(1, min(args.steps_per_cmd, n_steps))   # 合步宽度（≤ 每轮步数）
+BUDGET = spc * args.delta_max                    # 每条指令位移限幅
 
 
-def plan_step(k, cur):
-    """chunk 第 k 步 → 限幅后目标（14 维，右臂在前）。"""
+def plan_step(k, cur, budget=None):
+    """chunk 第 k 步 → 限幅后目标（14 维，右臂在前）；budget=位移限幅。"""
     arm_tgt = np.concatenate([chunk[k][:7], chunk[k][8:15]])
-    return cur + np.clip(arm_tgt - cur, -args.delta_max, args.delta_max)
+    b = args.delta_max if budget is None else budget
+    return cur + np.clip(arm_tgt - cur, -b, b)
 
 
 def build_traj(chunk, cur0):
@@ -262,12 +270,15 @@ def build_traj(chunk, cur0):
 
 # ── ② 干跑：只打印首轮计划，绝不下发 ──
 if not args.do_exec:
-    print(f"\n== [干跑] 首轮 {n_steps} 步计划（未下发任何命令）==")
-    for k in range(n_steps):
+    n_cmd = (n_steps + spc - 1) // spc
+    print(f"\n== [干跑] 首轮 {n_steps} 步（合步 {spc} 步/指令 → {n_cmd} 条指令，"
+          f"每条位移限幅 ±{BUDGET} rad）未下发任何命令 ==")
+    for k in range(0, n_steps, spc):
+        k_end = min(k + spc, n_steps)
         cur = read_joints(robot, ARM_NAMES)
-        tgt = plan_step(k, cur)
+        tgt = plan_step(k_end - 1, cur, BUDGET)
         drift = float(np.max(np.abs(tgt - HOME)))
-        print(f"  步{k}: 限幅后 {np.round(tgt, 3).tolist()}"
+        print(f"  指令[步{k}-{k_end - 1}]: 限幅后 {np.round(tgt, 3).tolist()}"
               f"\n        离起始位峰值 {drift * 1000:.0f} mrad"
               f"（护栏 {args.max_excursion * 1000:.0f}）")
     print("\n[干跑] 未下发任何命令。加 --exec 真实执行。")
@@ -278,7 +289,7 @@ if not args.do_exec:
 # ── ③ 连续循环（流水线：推理与执行重叠，消除轮间停顿）──
 WATCH.pause()
 input(f"\n⚠ 将连续 {args.rounds} 轮 × 每轮 {n_steps} 步真实驱动双臂"
-      f"（限幅 ±{args.delta_max} rad，漂移护栏 ±{args.max_excursion} rad）。\n"
+      f"（合步 {spc} 步/指令，每条限幅 ±{BUDGET} rad，漂移护栏 ±{args.max_excursion} rad）。\n"
       "急停就绪后回车开始，循环期间随时按 q 退出...")
 WATCH.resume()
 
@@ -378,13 +389,12 @@ for r in range(args.rounds):
         if round_ms[-1] > 1:
             print(f"  轮耗时 {round_ms[-1]:.0f} ms（重规划频率 {1000 / round_ms[-1]:.1f} Hz）")
         continue
-    for k in range(n_steps):
-        # 第 1 步开始前启动下一块推理（n_steps=1 则在本步前启动）：
-        # 237ms 推理被剩余步的执行时间完全覆盖，观测滞后 = 剩余步执行时长
-        if k == (1 if n_steps > 1 else 0) and r < args.rounds - 1:
-            job.start(*fresh_obs())
+    gate = args.settle_frac * args.delta_max   # 换目标阈值按单步尺度（到位未停透）
+    k = 0
+    while k < n_steps:
+        k_end = min(k + spc, n_steps)   # 本条指令消费 chunk 步 [k, k_end)
         cur = read_joints(robot, ARM_NAMES)
-        tgt = plan_step(k, cur)
+        tgt = plan_step(k_end - 1, cur, BUDGET)
         drift = float(np.max(np.abs(tgt - HOME)))
         if drift > args.max_excursion:
             print(f"⛔ 漂移护栏：关节最大偏离 {drift * 1000:.0f} mrad > "
@@ -400,16 +410,20 @@ for r in range(args.rounds):
                                            is_blocking=True, speed_rad_s=args.speed,
                                            timeout_s=10.0)
         else:
-            # 追踪式：非阻塞下发，误差收窄到阈值（未停透）即换下一目标，
-            # 机械臂连续运动；轮询 sleep 放 GIL，后台推理不再被饿
+            # 追踪式（合步）：一条指令跨 spc 步，SDK 内部平滑轮廓一次滑到位
+            # ——每轮起停 1/spc 次。0.6 提速实测更抖（每点全停，冲击∝速度），
+            # 平滑靠减停顿次数而非提速
             robot.set_joint_positions(tgt.tolist(), joint_names=ARM_NAMES,
                                       is_blocking=False, speed_rad_s=args.speed)
-            gate = args.settle_frac * args.delta_max
+            if k == 0 and r < args.rounds - 1:
+                # 下一块推理藏进本指令执行期（观测取自滑行中途，即真实当前态）
+                job.start(*fresh_obs())
+            deadline = t_s + max(2.0, 1.5 * BUDGET / max(args.speed, 0.01))
             while True:
                 ach = read_joints(robot, ARM_NAMES)
                 if float(np.max(np.abs(ach - tgt))) <= gate:
                     break
-                if time.perf_counter() - t_s > 2.0:   # 单步兜底
+                if time.perf_counter() > deadline:   # 兜底（慢速时按预算放宽）
                     break
                 time.sleep(0.02)
             st = "ControlStatus.SUCCESS(tracked)"
@@ -417,12 +431,14 @@ for r in range(args.rounds):
         ach = read_joints(robot, ARM_NAMES)
         err = float(np.max(np.abs(ach - tgt))) * 1000
         track_err.append(err)
-        print(f"  步{k}: |Δcmd| {float(np.max(np.abs(cmd_delta))) * 1000:5.1f} mrad | "
+        print(f"  指令[步{k}-{k_end - 1}]: |Δcmd| "
+              f"{float(np.max(np.abs(cmd_delta))) * 1000:5.1f} mrad | "
               f"执行 {step_ms[-1]:5.0f} ms | 回读偏差 {err:4.1f} mrad | {st}")
         if not str(st).startswith("ControlStatus.SUCCESS"):
             print("⛔ 下发非 SUCCESS，停止循环")
             aborted = True
             break
+        k = k_end
     round_ms.append((time.perf_counter() - t_r) * 1000)
     if round_ms[-1] > 1:
         print(f"  轮耗时 {round_ms[-1]:.0f} ms（重规划频率 {1000 / round_ms[-1]:.1f} Hz）")
@@ -436,7 +452,7 @@ if infer_ms:
 if grab_ms:
     print(f"取图+读关节: {pstats(grab_ms)}")
 if step_ms:
-    print(f"单步执行(阻塞): {pstats(step_ms)}")
+    print(f"单指令执行({spc} 步合步): {pstats(step_ms)}")
 if round_ms:
     print(f"整轮(重规划周期): {pstats(round_ms)}")
 if track_err:
