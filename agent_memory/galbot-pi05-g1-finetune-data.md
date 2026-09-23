@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 24ded4cc-d86c-4589-8234-2f1634018dc7
-  modified: 2026-09-23T01:34:56.495Z
+  modified: 2026-09-23T01:44:32.887Z
 ---
 
 **G1 真机数据集判读（2026-09-21，echo 机 `~/datasets/pick_place_balence/`，zip 857M 解压 870M）**
@@ -23,3 +23,5 @@ metadata:
 
 **归一化语义（最隐蔽坑）**：norm_mode 选错=动作系统性畸变。lerobot 管线默认 MEAN_STD→`mean_std`；openpi 默认分位→`q01_q99`。数据集窄维 7 个（leg/head，分位宽 <1e-3）：部署摆位须与采集一致否则 bin 打满；run 脚本已内置越界维提示。**剩余待办**：① 夹爪标定（数据集 0~100% vs SDK 开口宽度米，`--grip-wmin/--grip-wmax` 钩子已留）；② x86 微调本身；③ 微调权重到手后 `prep → align → run` 三步接入。
 - 系统 python3.8 有 pandas+pyarrow（读 lerobot parquet 用它）；flash_pyrt311 无 pandas（勿装，numpy 钉版红线）。
+
+**闭环执行现状（2026-09-23，run_g1_loop 真机 5/5 轮全绿）**：推理 p50 255 / max 257ms 恒定（fixed 模式），合步 3 步/指令 400ms，推理全重叠零站桩，重规划 2.5Hz。参数组合：`--speed 0.25 --settle-frac 0.5 --steps-per-cmd 3 --switch-dist 0.06`。**残留待调**：指令切换间仍有可见抖动（switch-dist 40% 处转向已消大部分停-走，剩切换瞬间一次）——方向：更早转向/更小合步间隔/流式重定向试验，或等厂商轨迹接口。模型漂移持续同号（~95 mrad/指令）属场景不匹配，护栏兜底正常。A/B 实验脚本 `g1_state_prompt_mode_test.py`、探针 `g1_alloc_probe.py` 均已入库留证。
