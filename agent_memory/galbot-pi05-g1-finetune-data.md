@@ -25,3 +25,5 @@ metadata:
 - 系统 python3.8 有 pandas+pyarrow（读 lerobot parquet 用它）；flash_pyrt311 无 pandas（勿装，numpy 钉版红线）。
 
 **闭环执行现状（2026-09-23，run_g1_loop 真机 5/5 轮全绿）**：推理 p50 255 / max 257ms 恒定（fixed 模式），合步 3 步/指令 400ms，推理全重叠零站桩，重规划 2.5Hz。参数组合：`--speed 0.25 --settle-frac 0.5 --steps-per-cmd 3 --switch-dist 0.06`。**残留待调**：指令切换间仍有可见抖动（switch-dist 40% 处转向已消大部分停-走，剩切换瞬间一次）——方向：更早转向/更小合步间隔/流式重定向试验，或等厂商轨迹接口。模型漂移持续同号（~95 mrad/指令）属场景不匹配，护栏兜底正常。A/B 实验脚本 `g1_state_prompt_mode_test.py`、探针 `g1_alloc_probe.py` 均已入库留证。
+
+**部署机 G1 权重接入完成（2026-09-23）**：`pi05_g1_040000`（lerobot 布局 `pretrained_model/`，model.safetensors 9,354,050,752 字节 bf16，train_config `normalization_mapping=QUANTILES` → `--mode q01_q99` 显式指定）三步走完：lerobot_stats_extract（夹爪维 q01=-0.00 ⚠ 为分位端毛刺非异常，q99≈100 正常）→ `g1_ckpt_prep --out ~/holy/models/pi05_g1_ft`（813 张量、32 维隐空间未动、16/23 维三方一致）→ `norm_align_check` 全绿（语义分发/同噪声确定性/落域 0% 越界；窄维 7 个=leg/head 属预期）。数据集同日到位 `~/holy/datasets/pick_place_balence`（199 轨/97,149 帧，meta names 右臂在前已核）。SDK 运行库 `/data/galbot/lib` 在位。**剩余**：真机 `run_g1_inference --ckpt pi05_g1_ft`（manifest 零参数）+ 夹爪标定（manifest width_min/max 仍 null，运行时透传并警告，拿到 SDK 满/零开度宽度后 prep 重跑带上 `--grip-wmin/--grip-wmax`）。
