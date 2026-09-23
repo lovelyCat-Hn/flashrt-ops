@@ -13,46 +13,47 @@ import tomllib
 DEFAULT_PATH = "/home/galbot/holy/config/g1.toml"
 
 # 与 config/g1.toml 同源；改这里时同步改 toml（反之亦然）
+# 单位：角度 rad｜时长 s｜速度 rad/s（夹爪 m/s）｜力 N｜百分比 %｜频率 Hz
 BUILTIN = {
     "run": {
         "ckpt": "/home/galbot/holy/models/pi05_g1_ft",
         "prompt": "Left arm pick up A. Right arm pick up A.",
     },
     "warmup": {
-        "speed": 0.15,        # 臂/头 rad/s（腿固定 0.2）
+        "speed": 0.15,        # 臂/头关节速度 rad/s（腿固定 0.2 rad/s）
         "skip_zero": False,
         "skip_leg": False,
     },
     "execute": {
-        "steps": 3,
-        "delta_max": 0.05,
-        "speed": 0.15,
+        "steps": 3,           # 步（chunk 前 K 步，≤10）
+        "delta_max": 0.05,    # rad/步
+        "speed": 0.15,        # rad/s
     },
     "loop": {
-        "rounds": 60,             # 单次抓取全程预算（10 轮会中途断）
-        "steps_per_round": 3,
-        "steps_per_cmd": 3,       # 合步：一条 SDK 指令跨 K 个 chunk 步
-        "delta_max": 0.05,
-        "speed": 0.25,            # 闭环实测最优（2026-09-23 5/5 全绿组合）
-        "max_excursion": 3.0,     # 按数据集包络重标（合法抓取 max 2.785；
+        "rounds": 60,             # 轮；单次抓取全程预算（10 轮会中途断）
+        "steps_per_round": 3,     # 步/轮
+        "steps_per_cmd": 3,       # 步/条（合步：一条 SDK 指令跨 K 个 chunk 步）
+        "delta_max": 0.05,        # rad/步
+        "speed": 0.25,            # rad/s；闭环实测最优（2026-09-23 5/5 全绿）
+        "max_excursion": 3.0,     # rad；按数据集包络重标（合法抓取 max 2.785，
                                   # 旧 0.25 真任务 100% 误触）
         "settle": False,
-        "settle_frac": 0.5,
-        "switch_dist": 0.06,
+        "settle_frac": 0.5,       # 比例（无量纲 0~1）
+        "switch_dist": 0.06,      # rad
         "chunk_mode": "track",
-        "traj_dt": 0.1,
+        "traj_dt": 0.1,           # s/点
     },
     "gripper": {
         "enabled": True,          # --grip 的 config 形态
         "speed": 0.05,            # m/s
         "effort": 30,             # N
-        "chg": 2.0,               # 重发变化阈值 %
+        "chg": 2.0,               # %（0~100% 语义）
     },
     "inference": {
-        "rounds": 10,
-        "hold": 10,
+        "rounds": 10,             # 轮
+        "hold": 10,               # 次
         "tier": "int8_full",
-        "ctrl_hz": 30.0,
+        "ctrl_hz": 30.0,          # Hz（=数据集 fps）
     },
 }
 
