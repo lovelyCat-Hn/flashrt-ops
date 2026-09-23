@@ -201,6 +201,26 @@ STATE_NAMES = (RIGHT + ["right_gripper_joint1"]
                + LEFT + ["left_gripper_joint1"]
                + [f"leg_joint{i}" for i in range(1, 6)]
                + ["head_joint1", "head_joint2"])
+GRIP_IDX = (7, 15)                  # state 里的夹爪维：SDK 米 → 数据集 0~100%
+_gcal = mf.get("gripper", {})
+GRIP_WMIN, GRIP_WMAX = _gcal.get("width_min"), _gcal.get("width_max")
+
+
+def state_from_joints(vals) -> np.ndarray:
+    """原始关节读数 → 模型 state：夹爪两维按 manifest 标定换算 0~100%。
+
+    数据集 state dim7/15 是百分比；SDK 读数是米——直接喂会被归一化成
+    恒 ≈闭合（0.12m 当 0.12% 算），模型看到的夹爪状态永远错。
+    """
+    st = np.array(vals, dtype=np.float32)
+    if GRIP_WMIN is None or GRIP_WMAX is None:
+        print("⚠ 夹爪未标定：SDK 宽度(米)原样进 state，与数据集 0~100% 单位不符!")
+        return st
+    for i in GRIP_IDX:
+        st[i] = float(np.clip((st[i] - GRIP_WMIN)
+                              / (GRIP_WMAX - GRIP_WMIN + 1e-9) * 100.0,
+                              0.0, 100.0))
+    return st
 
 
 def read_joints(robot, names) -> np.ndarray:
@@ -277,7 +297,7 @@ ns = model._pipe.norm_stats
 print(f"tier=int8_full views={VIEWS} | load {time.time() - t0:.1f}s")
 
 obs = grab_views(robot)
-state0 = read_joints(robot, STATE_NAMES)
+state0 = state_from_joints(read_joints(robot, STATE_NAMES))
 state_n0 = normalize_state(state0, ns)
 chunk = np.asarray(model.predict(obs, prompt=args.prompt, state=state_n0))  # 建管线
 # 首用引擎构建吸收：真实控制轮 0 曾撞 ~800ms 惰性构建（autotune 中途重现，
@@ -406,10 +426,10 @@ class _PredictJob:
 
 
 def fresh_obs():
-    """取图+读关节+归一化（主线程，~22ms），耗时计入 grab_ms。"""
+    """取图+读关节+夹爪换算+归一化（主线程，~22ms），耗时计入 grab_ms。"""
     t_g = time.perf_counter()
     obs = grab_views(robot)
-    st_n = normalize_state(read_joints(robot, STATE_NAMES), ns)
+    st_n = normalize_state(state_from_joints(read_joints(robot, STATE_NAMES)), ns)
     grab_ms.append((time.perf_counter() - t_g) * 1000)
     return obs, st_n
 

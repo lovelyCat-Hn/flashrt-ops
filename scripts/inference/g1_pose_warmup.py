@@ -10,7 +10,9 @@
      已验证用法），先脱离收拢/折叠等大偏移姿态。--skip-zero 可跳过
   ② 双臂 7×2 + 头 2 关节 set_joint_positions → 数据集 state.mean（采集平均
      工作姿态，与零位接近，小步幅）。限速默认 0.15 rad/s
-夹爪不标定不下发；腿部不动（站立平衡归底盘控制器管，脚本只对照打印）。
+夹爪：读数按 manifest 标定换算 0~100% 展示；--grip 显式开启时闭合到数据集
+起点 0%（width_min；199 轨全部从 0% 起步——2026-09-23 实证），默认不动。
+腿部不动（站立平衡归底盘控制器管，脚本只对照打印）。
 完成后回读 23 维 state 按部署 stats 归一化，报告 [-1,1] 外维数——arms
 dim0-11 入域即达标；leg/head 窄维（宽 <1e-3）可能仍亮，属传感器噪声量级。
 
@@ -18,7 +20,7 @@ dim0-11 入域即达标；leg/head 窄维（宽 <1e-3）可能仍亮，属传感
   LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
   ~/miniforge3/envs/flash_pyrt311/bin/python \
       ~/holy/scripts/inference/g1_pose_warmup.py \
-      [--ckpt ~/holy/models/pi05_g1_deploy] [--skip-zero] [--speed 0.15]
+      [--ckpt ~/holy/models/pi05_g1_deploy] [--skip-zero] [--speed 0.15] [--grip]
 
 中断：随时按 q 即退（含 SDK 阻塞运动中——Ctrl-C 会被阻塞 C++ 调用推迟，
 q 走独立监听线程不受限）；需立即断运动拍物理急停。
@@ -41,6 +43,8 @@ ap.add_argument("--ckpt", default="/home/galbot/holy/models/pi05_g1_deploy",
                 help="部署目录（读 norm_stats.json 的 state.mean 作目标）")
 ap.add_argument("--skip-zero", action="store_true", help="跳过零位段（已在工作位附近时）")
 ap.add_argument("--speed", type=float, default=0.15, help="关节速度上限 rad/s")
+ap.add_argument("--grip", action="store_true",
+                help="闭合夹爪到数据集起点 0%%（width_min；需 manifest 标定）")
 args = ap.parse_args()
 
 
@@ -141,14 +145,24 @@ IDX = {"right_arm": list(range(0, 7)), "left_arm": list(range(8, 15)),
 
 sys.path.insert(0, "/home/galbot/holy/FlashRT")
 from flash_rt.core.utils.actions import normalize_state  # noqa: E402
-from galbot_sdk.g1 import GalbotRobot, GalbotMotion  # noqa: E402
+from galbot_sdk.g1 import GalbotRobot, GalbotMotion, G1JointGroup  # noqa: E402
+
+# 夹爪标定（manifest；有则读数换算 0~100%，与数据集 state 单位对齐）
+mf_p = CKPT / "flashrt_deploy.json"
+mf = json.loads(mf_p.read_text()) if mf_p.exists() else {}
+_gcal = mf.get("gripper", {})
+GRIP_WMIN, GRIP_WMAX = _gcal.get("width_min"), _gcal.get("width_max")
 
 
 def read23(robot):
     vals = robot.get_joint_positions([], STATE_NAMES)
     if not vals or len(vals) != 23:
         raise SystemExit(f"关节读取失败（返回 {len(vals) if vals else 0} 维）")
-    return [float(v) for v in vals]
+    st = [float(v) for v in vals]
+    if GRIP_WMIN is not None and GRIP_WMAX is not None:
+        for i in (7, 15):   # SDK 米 → 数据集 0~100%
+            st[i] = (st[i] - GRIP_WMIN) / (GRIP_WMAX - GRIP_WMIN + 1e-9) * 100.0
+    return st
 
 
 def report(cur):
@@ -196,6 +210,28 @@ st = robot.set_joint_positions(arm_tgt, joint_names=arm_names,
                                timeout_s=45.0)
 print(f"set_joint_positions(臂+头) → {st}")
 time.sleep(1.0)
+
+# ── 段③（可选）：夹爪闭合到数据集起点 ──
+# 199 轨全部从夹爪 0% 起步（2026-09-23 数据集实证）——不闭合则模型首帧
+# 观测与训练分布错位（开→0.12m 喂成 100% 而训练起点全是 0）
+if args.grip:
+    if GRIP_WMIN is None:
+        raise SystemExit("--grip 需要 manifest 标定；先跑 g1_ckpt_prep "
+                         "--grip-wmin/--grip-wmax（2026-09-23 实测 0.0005/0.1200 m）")
+    WATCH.pause()
+    input(f"\n⚠ 段③：双夹爪闭合到 0%（width={GRIP_WMIN} m，速度 0.05 m/s）。"
+          "急停就绪回车...")
+    WATCH.resume()
+    s1 = robot.set_gripper_command(G1JointGroup.right_gripper,
+                                   GRIP_WMIN, 0.05, 30, False)
+    s2 = robot.set_gripper_command(G1JointGroup.left_gripper,
+                                   GRIP_WMIN, 0.05, 30, False)
+    print(f"夹爪闭合命令 → 右 {s1} / 左 {s2}；反馈滞后 ~6.3s（实测），等 8s 再核对")
+    time.sleep(8.0)
+    cur = read23(robot)
+    print(f"夹爪回读: 右 {cur[7]:.1f}% / 左 {cur[15]:.1f}%（目标 0%）")
+    if cur[7] > 10 or cur[15] > 10:
+        print("⚠ 夹爪未收到位，重跑或手查")
 
 # ── 达标判定：归一化 [-1,1] 外维数 ──
 cur = read23(robot)

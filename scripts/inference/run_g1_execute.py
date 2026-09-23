@@ -72,6 +72,9 @@ if args.grip:
             "chg": args.grip_chg, "sent": {}}
     print(f"夹爪下发开启: 0%→{wmin} m | 100%→{wmax} m | 速度 {args.grip_speed} m/s | "
           f"力矩 {args.grip_effort} N | 变化阈值 {args.grip_chg}%")
+_gcal = mf.get("gripper", {})    # state 侧夹爪换算标定（--grip 关闭也要读）
+GRIP_WMIN = _gcal.get("width_min")
+GRIP_WMAX = _gcal.get("width_max")
 
 # ── 开关必须在 load_model 之前设 ──
 os.environ.setdefault("FVK_PI05_RTX_FORCE_INT8", "1")   # 全 INT8（echo 定档）
@@ -116,6 +119,26 @@ def read_joints(robot, names) -> np.ndarray:
     if not vals or len(vals) != len(names):
         raise SystemExit(f"关节读取失败（{names[0]}...，返回 {len(vals) if vals else 0} 维）")
     return np.array(vals, dtype=np.float32)
+
+
+GRIP_IDX = (7, 15)   # state 里的夹爪维：SDK 米 → 数据集 0~100%
+
+
+def state_from_joints(vals) -> np.ndarray:
+    """原始关节读数 → 模型 state：夹爪两维按 manifest 标定换算 0~100%。
+
+    数据集 state dim7/15 是百分比；SDK 读数是米——直接喂会被归一化成
+    恒 ≈闭合（0.12m 当 0.12% 算），模型看到的夹爪状态永远错。
+    """
+    st = np.array(vals, dtype=np.float32)
+    if GRIP_WMIN is None or GRIP_WMAX is None:
+        print("⚠ 夹爪未标定：SDK 宽度(米)原样进 state，与数据集 0~100% 单位不符!")
+        return st
+    for i in GRIP_IDX:
+        st[i] = float(np.clip((st[i] - GRIP_WMIN)
+                              / (GRIP_WMAX - GRIP_WMIN + 1e-9) * 100.0,
+                              0.0, 100.0))
+    return st
 
 
 def grab_views(robot) -> dict:
@@ -169,7 +192,7 @@ if not str(st).startswith("ControlStatus.SUCCESS"):
     print("⚠ 控制器启动非 SUCCESS，--exec 大概率会被拒，先干跑看数据")
 
 # ── ② state + 模型 ──
-state_raw = read_joints(robot, STATE_NAMES)
+state_raw = state_from_joints(read_joints(robot, STATE_NAMES))
 t0 = time.time()
 model = flash_rt.load_model(str(CKPT), config="pi05", num_views=VIEWS,
                             cache_frames=1, action_dim=ACTION_DIM)
