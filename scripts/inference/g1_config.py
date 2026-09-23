@@ -40,6 +40,7 @@ BUILTIN = {
         "settle": False,
         "settle_frac": 0.5,       # 比例（无量纲 0~1）
         "switch_dist": 0.06,      # rad
+        "catch_timeout": 8.0,     # s；回放步末追平门超时（run_g1_replay 用）
         "chunk_mode": "track",
         "traj_dt": 0.1,           # s/点
     },

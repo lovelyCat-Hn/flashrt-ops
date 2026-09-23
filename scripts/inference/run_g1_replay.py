@@ -12,8 +12,11 @@ episode（与 tf_rollout.py 验证过的输入完全一致），机器人只负�
      限幅，速度 --speed（config [loop].speed）限速
   3. 漂移护栏：任一关节偏离起始位 > --max-excursion（config [loop].
      max_excursion=3.0，按 199 轨抓取包络标定）→ 立即停
-  4. 追赶门控：数据集 30fps 机器人跟不上 → 每子步下发后等回读进入
-     switch-dist（或超时），再推进数据集时钟——按机器人速度时间展宽
+  4. 轨迹锁定（2026-09-24 抖动定案）：子步追赶门控 + 步末追平门——先把臂
+     拉到数据集参考位（switch-dist 内，超时 catch_timeout 警告推进）再喂
+     下一帧。数据集自动慢放：纯时间锁会让参考以 ~0.23 rad/s 硬闯数据集
+     ~1 rad/s 快相位，臂满速追赶、滞后累计 1 rad 连续颤震，抓取时序在
+     错误位姿误触发；观测全来自数据集，慢放零语义损失
   5. 夹爪：模型 chunk dim7/15（绝对 %）→ manifest 标定宽度下发（非阻塞）
   6. q 键即时退出；物理急停第一优先级；执行前回车确认
 
@@ -52,6 +55,9 @@ ap.add_argument("--max-excursion", type=float, default=None,
                 help="偏离起始位护栏 rad（config [loop].max_excursion）")
 ap.add_argument("--switch-dist", type=float, default=None,
                 help="追赶门控阈值 rad：回读误差收到该值即推进数据集时钟（config [loop].switch_dist）")
+ap.add_argument("--catch-timeout", type=float, default=None,
+                help="步末追平门超时 s：等臂到数据集参考位，超时警告并推进"
+                     "（config [loop].catch_timeout）")
 ap.add_argument("--dwell", type=float, default=0.12,
                 help="每子步最短驻留 s（节奏下限，防指令洪泛；默认 0.12≈数据集周期×3.6 展宽）")
 ap.add_argument("--grip", action="store_true", default=None,
@@ -73,6 +79,7 @@ g1_config.apply(args, {
     "delta_max": ("loop", "delta_max"),
     "max_excursion": ("loop", "max_excursion"),
     "switch_dist": ("loop", "switch_dist"),
+    "catch_timeout": ("loop", "catch_timeout"),
     "grip": ("gripper", "enabled"),
     "grip_speed": ("gripper", "speed"),
     "grip_effort": ("gripper", "effort"),
@@ -344,7 +351,7 @@ input(f"\n⚠ 将按数据集 ep{args.ep} 回放真机执行 {len(ctrl_ts)} 控�
       f"（速度 {args.speed} rad/s、子步限幅 ±{args.delta_max}、护栏 ±{args.max_excursion} rad"
       + ("，夹爪下发开启）" if GRIP else "）") + "。急停就绪后回车开始，随时按 q 退出...")
 
-lag_l, ms_l, exc_max, n_cmd = [], [], 0.0, 0
+lag_l, ms_l, wait_l, exc_max, n_cmd = [], [], [], 0.0, 0
 t_start = time.perf_counter()
 aborted = False
 for t in ctrl_ts:
@@ -352,6 +359,7 @@ for t in ctrl_ts:
     ms_l.append(ms)
     cur = read_joints(robot, ARM_NAMES)
     tgts, rows = plan_ctrl(t, chunk, cur)
+    last_cmd = None
     for k, (tgt, row) in enumerate(zip(tgts, rows)):
         drift = float(np.max(np.abs(tgt - HOME)))
         exc_max = max(exc_max, drift)
@@ -361,9 +369,12 @@ for t in ctrl_ts:
             aborted = True
             break
         gp = send_grip(robot, row)
-        robot.set_joint_positions(tgt.tolist(), joint_names=ARM_NAMES,
-                                  is_blocking=False, speed_rad_s=args.speed)
-        n_cmd += 1
+        # 与上一条目标几乎相同就不重发（指令切换=一次速度不连续，能省则省）
+        if last_cmd is None or float(np.max(np.abs(tgt - last_cmd))) > 5e-3:
+            robot.set_joint_positions(tgt.tolist(), joint_names=ARM_NAMES,
+                                      is_blocking=False, speed_rad_s=args.speed)
+            last_cmd = tgt
+            n_cmd += 1
         t_s = time.perf_counter()
         deadline = t_s + max(args.dwell, 1.5 * args.delta_max / max(args.speed, 0.01))
         while True:
@@ -372,17 +383,43 @@ for t in ctrl_ts:
             if time.perf_counter() - t_s >= args.dwell and \
                     float(np.max(np.abs(ach - tgt))) <= SW:
                 break
-            if time.perf_counter() > deadline:      # 超时：记录滞后，继续推进
+            if time.perf_counter() > deadline:      # 超时：步末追平门兜底
                 break
         if gp:
             print(f"  帧 {t} 夹爪: {gp}", flush=True)
     if aborted:
         break
-    lag = float(np.max(np.abs(read_joints(robot, ARM_NAMES)
-                              - np.asarray(states[min(t + args.stride, len(states) - 1)][ARM_DIMS]))))
+    # ── 步末追平门（轨迹锁定，2026-09-24 抖动定案）：纯时间锁回放让参考以
+    # ~0.23 rad/s 硬闯数据集 ~1 rad/s 快相位，臂满速追 80 s、滞后 1 rad 连续
+    # 颤震，抓取闭合在偏位姿 1 rad 处误触发。观察全部来自数据集，慢放零语义
+    # 损失——先把臂拉到数据集参考位再喂下一帧，位置忠实、时序在正确位姿触发。
+    goal = np.asarray(states[min(t + args.stride, len(states) - 1)][ARM_DIMS], np.float32)
+    drift = float(np.max(np.abs(goal - HOME)))
+    exc_max = max(exc_max, drift)
+    if drift > args.max_excursion:
+        print(f"⛔ 漂移护栏：{drift * 1000:.0f} mrad > "
+              f"{args.max_excursion * 1000:.0f}，停止（机械臂留在原地）", flush=True)
+        aborted = True
+        break
+    robot.set_joint_positions(goal.tolist(), joint_names=ARM_NAMES,
+                              is_blocking=False, speed_rad_s=args.speed)
+    n_cmd += 1
+    t_g = time.perf_counter()
+    while True:
+        time.sleep(0.05)
+        gap = float(np.max(np.abs(read_joints(robot, ARM_NAMES) - goal)))
+        if gap <= SW:
+            break
+        if time.perf_counter() - t_g > args.catch_timeout:
+            print(f"  ⚠ 追平超时 {args.catch_timeout:.0f} s（滞后 {gap * 1000:.0f} mrad），推进",
+                  flush=True)
+            break
+    wait_l.append(time.perf_counter() - t_g)
+    lag = gap                                    # 门后即真实残余
     lag_l.append(lag)
     print(f"  帧 {t:>3}/{end} | 推理 {ms:4.0f} ms | 跟踪滞后 {lag * 1000:4.0f} mrad | "
-          f"累计 {time.perf_counter() - t_start:5.1f} s", flush=True)
+          f"追平 {time.perf_counter() - t_g:4.1f} s | 累计 {time.perf_counter() - t_start:5.1f} s",
+          flush=True)
 
 # ── ⑤ 汇总 ──
 if GRIP:
@@ -393,10 +430,12 @@ if GRIP:
             print(f"夹爪终态 {name}: {gs.width * 1000:.1f} mm (moving={gs.is_moving})", flush=True)
 a = np.asarray(lag_l) * 1000 if lag_l else np.array([0.0])
 m = np.asarray(ms_l) if ms_l else np.array([0.0])
+w = np.asarray(wait_l) if wait_l else np.array([0.0])
 print(f"""
 == 回放汇总（{'⚠ 护栏中止' if aborted else '完成'}）==
 控制步 {len(lag_l)}/{len(ctrl_ts)} | 指令 {n_cmd} 条 | 总时长 {time.perf_counter() - t_start:.0f} s
 跟踪滞后（vs 数据集轨迹）: p50 {np.percentile(a, 50):.0f} / max {a.max():.0f} mrad
+步末追平等待: p50 {np.percentile(w, 50):.1f} / max {w.max():.1f} s（轨迹锁定慢放的主要开销）
 推理: p50 {np.percentile(m, 50):.0f} / p95 {np.percentile(m, 95):.0f} ms（bf16）
 离起始位峰值: {exc_max * 1000:.0f} mrad（护栏 {args.max_excursion * 1000:.0f}）""", flush=True)
 
