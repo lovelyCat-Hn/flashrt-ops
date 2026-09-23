@@ -11,7 +11,9 @@
   ② 双臂 7×2 + 头 2 关节 set_joint_positions → 数据集 state.mean（采集平均
      工作姿态，与零位接近，小步幅）。限速默认 0.15 rad/s
 夹爪：读数按 manifest 标定换算 0~100% 展示；--grip 显式开启时闭合到数据集
-起点 0%（width_min；199 轨全部从 0% 起步——2026-09-23 实证），默认不动。
+起点 0%（width_min；199 轨全部从 0% 起步——2026-09-23 实证）。闭合命令在
+段① 前一次性发出（非阻塞，与整身/臂动作并行——夹爪与臂位无物理耦合，
+反馈滞后 ~6.3s 的等待被动作重叠掉），达标判定处统一核对，默认不动。
 腿部不动（站立平衡归底盘控制器管，脚本只对照打印）。
 完成后回读 23 维 state 按部署 stats 归一化，报告 [-1,1] 外维数——arms
 dim0-11 入域即达标；leg/head 窄维（宽 <1e-3）可能仍亮，属传感器噪声量级。
@@ -152,6 +154,9 @@ mf_p = CKPT / "flashrt_deploy.json"
 mf = json.loads(mf_p.read_text()) if mf_p.exists() else {}
 _gcal = mf.get("gripper", {})
 GRIP_WMIN, GRIP_WMAX = _gcal.get("width_min"), _gcal.get("width_max")
+if args.grip and (GRIP_WMIN is None or GRIP_WMAX is None):
+    raise SystemExit("--grip 需要 manifest 标定；先跑 g1_ckpt_prep "
+                     "--grip-wmin/--grip-wmax（2026-09-23 实测 0.0005/0.1200 m）")
 
 
 def read23(robot):
@@ -189,11 +194,23 @@ print(f"start_controller('all') → {st}")
 cur = read23(robot)
 report(cur)
 
+def fire_grip_close():
+    """夹爪闭合命令一次性发出（非阻塞），与臂动作并行；末端统一核对。"""
+    s1 = robot.set_gripper_command(G1JointGroup.right_gripper,
+                                   GRIP_WMIN, 0.05, 30, False)
+    s2 = robot.set_gripper_command(G1JointGroup.left_gripper,
+                                   GRIP_WMIN, 0.05, 30, False)
+    print(f"夹爪闭合命令已发（右 {s1} / 左 {s2}）——与臂动作并行，"
+          f"反馈滞后 ~6.3s 由动作期重叠，达标判定处核对")
+
 if not args.skip_zero:
     WATCH.pause()
-    input("\n⚠ 段①：move_whole_body_joint_zero（SDK 碰撞检查零位）。急停就绪回车，"
+    input("\n⚠ 段①：move_whole_body_joint_zero（SDK 碰撞检查零位）"
+          + ("+ 夹爪闭合（并行）" if args.grip else "") + "。急停就绪回车，"
           "Ctrl-C 中止...")
     WATCH.resume()
+    if args.grip:
+        fire_grip_close()
     st = motion.move_whole_body_joint_zero(is_blocking=True,
                                            leg_head_speed_rad_s=0.2,
                                            leg_head_timeout_s=30.0)
@@ -203,6 +220,8 @@ if not args.skip_zero:
 WATCH.pause()
 input(f"\n⚠ 段②：双臂+头 → 数据集均值位（限速 {args.speed} rad/s）。急停就绪回车...")
 WATCH.resume()
+if args.grip and args.skip_zero:
+    fire_grip_close()   # 跳过段① 时在段② 前发，闭合仍与臂动作并行
 arm_names = RIGHT + LEFT + HEAD   # 名字与目标值逐位配对，顺序跟数据集维序
 arm_tgt = [TARGET[i] for i in IDX["right_arm"] + IDX["left_arm"] + IDX["head"]]
 st = robot.set_joint_positions(arm_tgt, joint_names=arm_names,
@@ -210,28 +229,6 @@ st = robot.set_joint_positions(arm_tgt, joint_names=arm_names,
                                timeout_s=45.0)
 print(f"set_joint_positions(臂+头) → {st}")
 time.sleep(1.0)
-
-# ── 段③（可选）：夹爪闭合到数据集起点 ──
-# 199 轨全部从夹爪 0% 起步（2026-09-23 数据集实证）——不闭合则模型首帧
-# 观测与训练分布错位（开→0.12m 喂成 100% 而训练起点全是 0）
-if args.grip:
-    if GRIP_WMIN is None:
-        raise SystemExit("--grip 需要 manifest 标定；先跑 g1_ckpt_prep "
-                         "--grip-wmin/--grip-wmax（2026-09-23 实测 0.0005/0.1200 m）")
-    WATCH.pause()
-    input(f"\n⚠ 段③：双夹爪闭合到 0%（width={GRIP_WMIN} m，速度 0.05 m/s）。"
-          "急停就绪回车...")
-    WATCH.resume()
-    s1 = robot.set_gripper_command(G1JointGroup.right_gripper,
-                                   GRIP_WMIN, 0.05, 30, False)
-    s2 = robot.set_gripper_command(G1JointGroup.left_gripper,
-                                   GRIP_WMIN, 0.05, 30, False)
-    print(f"夹爪闭合命令 → 右 {s1} / 左 {s2}；反馈滞后 ~6.3s（实测），等 8s 再核对")
-    time.sleep(8.0)
-    cur = read23(robot)
-    print(f"夹爪回读: 右 {cur[7]:.1f}% / 左 {cur[15]:.1f}%（目标 0%）")
-    if cur[7] > 10 or cur[15] > 10:
-        print("⚠ 夹爪未收到位，重跑或手查")
 
 # ── 达标判定：归一化 [-1,1] 外维数 ──
 cur = read23(robot)
@@ -246,6 +243,10 @@ print(f"双臂维(0-7,8-15) 外 {len(arms_out)} 维 → "
 print("（leg/head 窄维亮灯属传感器噪声量级， Part B 已知）")
 leg_dev = max(abs(cur[IDX['leg'][k]] - TARGET[IDX['leg'][k]]) for k in range(5))
 print(f"腿部最大偏差 {leg_dev:.3f} rad（未下发，仅对照；偏大请考虑手动/底盘调整）")
+if args.grip:
+    ok_g = cur[7] <= 10 and cur[15] <= 10
+    print(f"夹爪闭合核对: 右 {cur[7]:.1f}% / 左 {cur[15]:.1f}%（目标 0%）→ "
+          + ("✅" if ok_g else "⚠ 未收到位，查夹爪或重跑（--grip 已含在段① 并行发出）"))
 
 robot.request_shutdown(); robot.wait_for_shutdown(); robot.destroy()
 print("SDK 已关闭")
