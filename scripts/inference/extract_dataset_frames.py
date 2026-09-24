@@ -42,30 +42,38 @@ CAM_KEYS = sorted(k for k in feat if k.startswith("observation.images."))
 print(f"dataset: {ds.name} | fps={fps} | episodes={info['total_episodes']} "
       f"| frames={info['total_frames']} | cams={CAM_KEYS}")
 
-# ── tasks（parquet：task_index → 句子）──
+# ── tasks（本数据集：句子在 DataFrame 索引、编号在 task_index 列）──
 tasks_df = pd.read_parquet(ds / "meta" / "tasks.parquet")
-tcol = "task" if "task" in tasks_df.columns else tasks_df.columns[-1]
-tasks = tasks_df[tcol].astype(str).tolist()
+if "task" in tasks_df.columns:
+    order = tasks_df.sort_values("task_index")
+    tasks = order["task"].astype(str).tolist()
+else:  # sentences-in-index 布局（pick_place_balence 实际如此）
+    order = tasks_df.sort_values("task_index")
+    tasks = [str(x) for x in order.index]
 print(f"tasks: {tasks}")
 
-# ── episodes 表（v3.0：parquet，含 chunk_index/file_index/length）──
+# ── episodes 表（v3.0：每相机独立寻址列 videos/<cam>/{chunk_index,file_index,from_timestamp}）──
 ep_files = sorted(glob.glob(str(ds / "meta" / "episodes" / "chunk-*" / "file-*.parquet")))
 assert ep_files, "meta/episodes 下没有 parquet？"
 ep = pd.concat(pd.read_parquet(f) for f in ep_files).sort_values("episode_index")
-need = {"episode_index", "chunk_index", "file_index", "length"}
+need = {"episode_index", "length"} | {f"videos/{c}/{k}" for c in CAM_KEYS
+                                      for k in ("chunk_index", "file_index", "from_timestamp")}
 missing = need - set(ep.columns)
 assert not missing, f"episodes 表缺列 {missing}（实际列：{list(ep.columns)}）——v3.0 布局假设失效"
 
 sel = (list(range(int(ep["episode_index"].max()) + 1))
        if args.episodes == "all" else [int(x) for x in args.episodes.split(",")])
 ep = ep[ep["episode_index"].isin(sel)]
-# 视频按 (chunk,file) 分块连续拼接：同组内按 episode 序累加长度 = 组内帧偏移
-ep["vid_offset"] = ep.groupby(["chunk_index", "file_index"])["length"].cumsum() - ep["length"]
-ep_map = {int(r.episode_index): (int(r.chunk_index), int(r.file_index),
-                                 int(r.vid_offset), int(r.length))
-          for r in ep.itertuples()}
+# 每相机的 (chunk, file, 帧偏移=round(from_timestamp*fps))——表内权威值，零重构
+ep_map = {}
+for _, r in ep.iterrows():   # 列名带斜杠，itertuples 会改名，必须 iterrows
+    ep_map[int(r["episode_index"])] = (
+        int(r["length"]),
+        [(int(r[f"videos/{c}/chunk_index"]), int(r[f"videos/{c}/file_index"]),
+          int(round(float(r[f"videos/{c}/from_timestamp"]) * fps)))
+         for c in CAM_KEYS])
 print(f"选中 {len(ep_map)} 条: " + ", ".join(
-    f"ep{e}(len {v[3]})" for e, v in sorted(ep_map.items())))
+    f"ep{e}(len {v[0]})" for e, v in sorted(ep_map.items())))
 
 # ── 数据 parquet（多 episode 混在一个 file 里，按 episode_index 过滤）──
 data_files = sorted(glob.glob(str(ds / "data" / "chunk-*" / "file-*.parquet")))
@@ -88,12 +96,13 @@ frame_idx = df["frame_index"].to_numpy().astype(np.int32)
 task_idx = df["task_index"].to_numpy().astype(np.int32)
 assert states.shape[1] == ST_DIM and actions.shape[1] == AC_DIM
 
-# 每帧视频寻址（三相机共用同一 episode→(chunk,file)→偏移 映射）
-vc = np.array([ep_map[int(e)][0] for e in ep_id], np.int32)
-vf = np.array([ep_map[int(e)][1] for e in ep_id], np.int32)
-vframe = np.array([ep_map[int(e)][2] for e in ep_id], np.int32) + frame_idx
+# 每帧视频寻址（N × 相机数；列序 = CAM_KEYS）
+vc = np.array([[ep_map[int(e)][1][k][0] for k in range(len(CAM_KEYS))] for e in ep_id], np.int32)
+vf = np.array([[ep_map[int(e)][1][k][1] for k in range(len(CAM_KEYS))] for e in ep_id], np.int32)
+vframe = np.array([[ep_map[int(e)][1][k][2] for k in range(len(CAM_KEYS))]
+                   for e in ep_id], np.int32) + frame_idx[:, None]
 # 与数据文件对照：长度守恒
-for e, (c, fi, off, ln) in ep_map.items():
+for e, (ln, _) in ep_map.items():
     got = int((ep_id == e).sum())
     assert got == ln, f"ep{e} 数据帧数 {got} != episodes 表 length {ln}"
 
@@ -116,6 +125,7 @@ np.savez_compressed(
     state_names_json=json.dumps(feat["observation.state"].get("names", [])),
     action_names_json=json.dumps(feat["action"].get("names", [])),
     video_template=str(info.get("video_path", "")),
+    dataset_root=str(ds),   # 回放脚本按它解析视频相对路径（npz 不在数据集目录里）
     fps=np.int32(fps),
     ep_list=np.array(sorted(ep_map)),
     ep_offsets=np.array([int((ep_id == e).argmax()) for e in sorted(ep_map)], np.int32),

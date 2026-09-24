@@ -1,20 +1,20 @@
 #!/usr/bin/env python
-"""数据集回放推理：pick_place_balence 的帧+state 喂 G1 16 维 pi0.5，与真值动作对比。
+"""数据集回放推理：pick_place_balence 的帧+state 喂 G1 16 维 pi0.5，与真值对比。
 
 与 run_g1_inference.py（真机版）同一条模型链路，只是输入从 SDK 换成数据集：
   npz(extract_dataset_frames.py 产出) → cv2 解码三相机 mp4 帧 →
   state 归一化（数据集夹爪已是 0~100% 训练单位，不做 SDK 宽度换算）→
   model.infer(显式固定噪声——predict 的随机噪声会让单帧对比撞上
-  "两两 cos≈0.25"的混沌底，见 ab_real_camera 教训) → (10,16) chunk →
-  与数据集未来 10 步真值动作对比余弦/MAE + q01/q99 落域 + OOD 判读。
+  "两两 cos≈0.25"的混沌底，见 ab_real_camera 教训) → (10,16) chunk。
+【动作语义 = 增量】模型输出 Δ(arm rad/夹爪%)，真值 Δ = action[t] − state[t]；
+保持帧（真值Δ≈0）输出≈0 是正确行为，cos 对绝对 action 无意义。
 
 用法:
   ~/holy/run.sh ~/holy/scripts/inference/run_dataset_replay.py \
-      [--ckpt ~/holy/models/pi05_g1_deploy] [--npz ~/holy/datasets/replay_input.npz] \
-      [--stride 30] [--max 20] [--seed 0] [--tier int8_full] [--check-graph]
-判读提示：场景不复现（图/摆位不符）时模型输出"无条件均值"（臂 ≈0 rad、
-夹爪 10~13%）是 OOD 标准行为——cos 全面偏低且动作贴近 act_mean 即此象，
-对照 COMMANDS.md §4。
+      [--ckpt .../pretrained_model] [--npz ~/holy/datasets/replay_input.npz] \
+      [--stride 30] [--max 20] [--seed 0] [--tier bf16] [--check-graph] [--dump]
+判读提示：cosΔ 在运动帧高、保持帧标 (保持帧) 即链路健康；模型对陌生场景
+（图/摆位不符）会输出贴 0 的"不动"增量，别误读成精度高。
 """
 import argparse
 import functools
@@ -39,6 +39,7 @@ ap.add_argument("--tier", default=None, choices=("bf16", "int8_enc", "int8_full"
 ap.add_argument("--force-state-dim", action="store_true",
                 help="state/stats 维数不符时截断/零补适配（仅 smoke 用）")
 ap.add_argument("--check-graph", action="store_true", help="计数 CUDAGraph.replay 确认走图")
+ap.add_argument("--dump", action="store_true", help="逐维打印 chunk[0] vs 真值（排维序/归一化用）")
 ap.add_argument("--config", default=g1_config.DEFAULT_PATH)
 args = ap.parse_args()
 g1_config.apply(args, {"ckpt": ("run", "ckpt"), "tier": ("inference", "tier")})
@@ -88,8 +89,11 @@ states, actions = z["states"], z["actions"]
 ep_id, frame_idx, task_idx = z["ep_id"], z["frame_idx"], z["task_idx"]
 vid_chunk, vid_file, vid_frame = z["vid_chunk"], z["vid_file"], z["vid_frame"]
 tasks, cams = z["tasks"].tolist(), z["cams"].tolist()
-act_q01, act_q99, act_mean = z["act_q01"], z["act_q99"], z["act_mean"]
+act_q01, act_q99 = z["act_q01"], z["act_q99"]
 video_template = str(z["video_template"])
+# 视频路径基准：npz 里的 dataset_root（新）；旧 npz 回退 npz 所在目录
+video_base = (pathlib.Path(str(z["dataset_root"])) if "dataset_root" in z
+              else npz_p.parent)
 assert cams == sorted(c for c in cams if "images" in c), "npz 相机键异常"
 
 # 模型 obs 键 → 数据集视频键（manifest 的 SDK 枚举名 → observation.images.*）
@@ -122,14 +126,17 @@ caps = {}
 def grab(row) -> dict | None:
     out = {}
     for mkey, dskey in ds_of.items():
-        path = dskey and video_template.format(
-            video_key=dskey, chunk_index=int(vid_chunk[row]),
-            file_index=int(vid_file[row]))
-        path = str(npz_p.parent / path) if path else None
+        if dskey is None:
+            return None
+        ci = cams.index(dskey)          # 相机列序 = npz 寻址数组列序
+        path = video_template.format(
+            video_key=dskey, chunk_index=int(vid_chunk[row, ci]),
+            file_index=int(vid_file[row, ci]))
+        path = str(video_base / path)
         cap = caps.get(path)
         if cap is None:
             cap = caps[path] = cv2.VideoCapture(path)
-        cap.set(cv2.CAP_PROP_POS_FRAMES, int(vid_frame[row]))
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(vid_frame[row, ci]))
         ok, img = cap.read()
         if not ok:
             return None
@@ -168,18 +175,19 @@ def _acts(x):
 
 
 def chunk_vs_labels(chunk: np.ndarray, row: int):
-    """chunk (10,16) vs 数据集未来 10 步真值；两种对齐约定都报（数据自证）。"""
+    """chunk (10,16) 与真值对比。模型输出是【增量】(action−state，右臂在前16维，
+    夹爪是百分比增量)：对绝对 action 的余弦无意义，主对比 = 增量 vs 增量。"""
     e, f = int(ep_id[row]), int(frame_idx[row])
     s0 = np.where((ep_id == e) & (frame_idx == f))[0][0]
-    lab = actions[s0:s0 + 10]              # 0 对齐: chunk[j] ↔ action[t+j]
-    lab1 = actions[s0 + 1:s0 + 11]         # 1 对齐: chunk[j] ↔ action[t+1+j]
+    dl0 = actions[s0:s0 + 10] - states[s0:s0 + 10, :ACTION_DIM]    # 0对齐: Δ[t+j]
+    dl1 = actions[s0 + 1:s0 + 11] - states[s0 + 1:s0 + 11, :ACTION_DIM]
     def cos_err(l):
         c = [float(chunk[j] @ l[j] /
                (np.linalg.norm(chunk[j]) * np.linalg.norm(l[j]) + 1e-9))
              for j in range(10)]
         mae0 = float(np.abs(chunk[0] - l[0]).mean())
         return c, mae0
-    return lab, cos_err(lab), cos_err(lab1)
+    return dl0, cos_err(dl0), cos_err(dl1)
 
 
 state0 = to_model_state(states[rows[0]])
@@ -188,8 +196,8 @@ model.predict(grab(rows[0]), prompt=str(tasks[task_idx[rows[0]]]),
               state=state0)                                   # 建管线（不计入统计）
 
 gen = torch.Generator().manual_seed(args.seed)
-lat, cos0, cos1, ood_flags = [], [], [], 0
-print("\n 帧 |  ep | frame |  ms | cos(0对齐) | cos(1对齐) | MAE0")
+lat, cos0, cos1, hold_n = [], [], [], 0
+print("\n 帧 |  ep | frame |  ms | cosΔ(0对齐) | cosΔ(1对齐) | MAEΔ0")
 for n, r in enumerate(rows):
     obs = grab(r)
     if obs is None:
@@ -199,26 +207,34 @@ for n, r in enumerate(rows):
     st_n = to_model_state(states[r])
     noise = torch.randn(10, 32, generator=gen)   # 显式固定噪声（可复现对比）
     t0 = time.perf_counter()
+    # infer 只换图+噪声、复用上次 prompt/state 嵌入——逐帧 state 必须先重设
+    # （fixed 模式定长 prompt 只换 embeds；换 task 句才重编码）
+    model.set_prompt(prompt, state=st_n)
     chunk = _acts(model.infer(obs, noise=noise))
     lat.append((time.perf_counter() - t0) * 1000)
     if chunk.shape[0] != 10 or chunk.shape[1] != ACTION_DIM:
         raise SystemExit(f"输出 shape {chunk.shape} ≠ (10,{ACTION_DIM})")
-    _, (c0, m0), (c1, m1) = chunk_vs_labels(chunk, r)
+    dl0, (c0, m0), (c1, m1) = chunk_vs_labels(chunk, r)
+    if args.dump:
+        names = json.loads(str(z["action_names_json"]))
+        print(f"  chunk[0](增量): {np.round(chunk[0], 3).tolist()}")
+        print(f"  真值Δ[0]     : {np.round(dl0[0], 3).tolist()}")
+        if len(names) == ACTION_DIM:
+            print("  维名        : " + " | ".join(n.split(".")[-1] for n in names))
+        print(f"  |chunk|={np.linalg.norm(chunk[0]):.3f} |真值Δ|={np.linalg.norm(dl0[0]):.3f}")
     cos0.append(float(np.mean(c0))); cos1.append(float(np.mean(c1)))
     out_q = float(np.mean((chunk < act_q01) | (chunk > act_q99)))
-    if abs(float(chunk[0] @ act_mean / (np.linalg.norm(chunk[0]) * np.linalg.norm(act_mean) + 1e-9))) > 0.99 \
-            and float(np.abs(chunk[0][[7, 15]].mean() - 12)) < 4:
-        ood_flags += 1   # 动作贴均值+夹爪 10~13%：COMMANDS.md §4 的 OOD 特征
+    hold = np.linalg.norm(dl0[0]) < 0.1 and np.linalg.norm(chunk[0]) < 0.1
+    hold_n += hold        # 真值和输出都≈0 的保持帧：cos 数值无意义，方向对了就行
     print(f" {n:3d} | {ep_id[r]:3d} | {frame_idx[r]:5d} | {lat[-1]:3.0f} "
           f"| {np.mean(c0):.3f} | {np.mean(c1):.3f} | {m0:.3f}"
-          + ("  ← OOD 嫌疑" if ood_flags and n and False else ""))
+          + ("  (保持帧)" if hold else ""))
 
 print(f"\n[延迟 ×{len(lat)}] mean {np.mean(lat):.1f} | p50 "
       f"{np.percentile(lat, 50):.1f} | max {np.max(lat):.1f} ms")
-print(f"[对比真值] 平均 cos：0对齐 {np.mean(cos0):.3f} | 1对齐 {np.mean(cos1):.3f}"
-      "（哪个高说明该数据集的 chunk 对齐约定；单帧 cos 混沌底 ≈0.25）")
-print(f"[落域] chunk 步越出数据集 q01~q99 的维占比 = "
-      f"{out_q:.0%}；OOD 嫌疑帧 {ood_flags}/{len(rows)}")
+print(f"[对比真值Δ] 平均 cos：0对齐 {np.mean(cos0):.3f} | 1对齐 {np.mean(cos1):.3f}"
+      "（增量语义：哪个高即该数据的 chunk 对齐约定；保持帧 cos 无意义）")
+print(f"[落域] chunkΔ 步越出数据集 q01~q99 的维占比 = {out_q:.0%}；保持帧 {hold_n}/{len(rows)}")
 if args.check_graph:
     print(f"[graph] CUDAGraph.replay 调用 {_replays[0]} 次（>0=图重放生效）")
 print("（开环单帧对比仅验链路/维序/归一化；真机 KPI 看闭环执行成功率）")
