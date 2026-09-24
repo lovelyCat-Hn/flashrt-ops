@@ -314,16 +314,20 @@ if not args.do_exec:
     os._exit(0)
 
 # ── 执行 ──
-def guarded_move_to(target14, label):
-    """限幅慢速挪到目标位姿（对齐段/回安全位用）；返回是否达成。"""
+def guarded_move_to(target14, label, guard_rad=None):
+    """限幅慢速挪到目标位姿（对齐段用）；返回是否达成。
+
+    guard_rad 默认 args.max_excursion；对齐目标本身可在护栏外（录制安全位姿），
+    调用方按 |target−HOME| 放宽——路径仍是限幅+限速的小步逼近。
+    """
+    g = guard_rad if guard_rad is not None else args.max_excursion
     for it in range(60):
         cur = read_joints(ARM_NAMES)
         d = target14 - cur
         if float(np.max(np.abs(d))) <= args.switch_dist:
             return True
-        if float(np.max(np.abs(cur + np.clip(d, -BUDGET, BUDGET)) - HOME)) \
-                > args.max_excursion:
-            print(f"⛔ {label}: 途中越护栏，停在半程")
+        if float(np.max(np.abs(cur + np.clip(d, -BUDGET, BUDGET)) - HOME)) > g:
+            print(f"⛔ {label}: 途中越护栏（{g * 1000:.0f} mrad），停在半程")
             return False
         robot.set_joint_positions((cur + np.clip(d, -BUDGET, BUDGET)).tolist(),
                                   joint_names=ARM_NAMES, is_blocking=False,
@@ -346,8 +350,11 @@ WATCH.resume()
 
 if args.align:
     tgt0 = np.concatenate([states[base][:7], states[base][8:15]]).astype(np.float32)
-    print(f"\n== 对齐段：挪到 ep{EP} 帧 0 录制位姿（限幅 {BUDGET:.2f} rad/指令）==")
-    if not guarded_move_to(tgt0, "对齐"):
+    off = float(np.max(np.abs(tgt0 - HOME)))
+    g_align = max(args.max_excursion, off * 1.1)
+    print(f"\n== 对齐段：挪到 ep{EP} 帧 0 录制位姿（限幅 {BUDGET:.2f} rad/指令，"
+          f"距当前 {off * 1000:.0f} mrad，本段护栏放宽至 {g_align * 1000:.0f}）==")
+    if not guarded_move_to(tgt0, "对齐", guard_rad=g_align):
         print("⛔ 对齐未达成，终止（臂留在原地）")
         WATCH.restore()
         robot.request_shutdown(); robot.wait_for_shutdown(); robot.destroy()
