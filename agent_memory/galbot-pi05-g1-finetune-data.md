@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 24ded4cc-d86c-4589-8234-2f1634018dc7
-  modified: 2026-09-24T03:15:15.531Z
+  modified: 2026-09-24T03:24:02.056Z
 ---
 
 **G1 真机数据集判读（2026-09-21，echo 机 `~/datasets/pick_place_balence/`，zip 857M 解压 870M）**
@@ -24,7 +24,7 @@ metadata:
 
 **FlashRT 本地补丁（未推上游）**：`6425fe8d` action_dim 参数+三处切片可配置；`bff59419` `unnormalize_actions` 按 norm_stats 顶层 `"norm_mode"` 分发（`q01_q99` 默认旧行为逐位不变 / `mean_std` = x*std+mean）+ 新增 `normalize_state`（flash_rt/core/utils/actions.py）。**关键事实：FlashRT 不归一化 state**——`discretize_pi05_state` 直接把输入按 [-1,1] 分 256 bin 进 prompt，喂原始关节值=静默打满 bin，必须调用方先 `normalize_state`。**教训：monkeypatch 前端 `__init__` 必须 `functools.wraps`，否则 api.py 按签名转发静默丢参**。**坑：跨两次模型实例同噪声 raw 不逐位一致**（14G 常驻改变显存布局/cuBLAS 路径），对齐实验须同实例内做（stats 翻转法）。
 
-**归一化语义（最隐蔽坑）**：norm_mode 选错=动作系统性畸变。lerobot 管线默认 MEAN_STD→`mean_std`；openpi 默认分位→`q01_q99`。数据集窄维 7 个（leg/head，分位宽 <1e-3）：部署摆位须与采集一致否则 bin 打满；run 脚本已内置越界维提示。**剩余待办**：① 夹爪标定（数据集 0~100% vs SDK 开口宽度米，`--grip-wmin/--grip-wmax` 钩子已留）；② x86 微调本身；③ 微调权重到手后 `prep → align → run` 三步接入。
+**归一化语义（最隐蔽坑）**：norm_mode 选错=动作系统性畸变。lerobot 管线默认 MEAN_STD→`mean_std`；openpi 默认分位→`q01_q99`。数据集窄维 7 个（leg/head，分位宽 <1e-3）：部署摆位须与采集一致否则 bin 打满；run 脚本已内置越界维提示。**夹爪标定已落地（2026-09-24）**：SDK 宽度米 0.0005/0.1200（2026-09-23 实测）已写进 pi05_g1_deploy/flashrt_deploy.json 的 gripper 块——models 不入库，**重跑 g1_ckpt_prep 必须带 `--grip-wmin 0.0005 --grip-wmax 0.1200` 否则标定又变 null**。**config [run].ckpt 坑（2026-09-24 修）**：g1.toml 曾写计划名 pi05_g1_ft（本机从未存在）致 warmup 首行就退出，已改指 pi05_g1_deploy；BUILTIN 保留 pi05_g1_ft 因其他设备可能真有该目录（用户口径）；right_arm_recover.py 仍硬编码 pi05_g1_ft 无覆盖。
 - 系统 python3.8 有 pandas+pyarrow；**2026-09-24 用户把 pandas 2.1.4 + pyarrow 16.1.0 也装进了 flash_pyrt311**（numpy==1.26.4 幸存未被动，红线组合仍成立）——环境自此与打包 bundle 有分化：重打 FlashRT 环境包时要么带上这两个包、要么保留 npz 两段式兼容；extract_dataset_frames 现在环境 python 直跑，一阶段即可。
 
 **闭环执行现状（2026-09-23，run_g1_loop 真机 5/5 轮全绿）**：推理 p50 255 / max 257ms 恒定（fixed 模式），合步 3 步/指令 400ms，推理全重叠零站桩，重规划 2.5Hz。参数组合：`--speed 0.25 --settle-frac 0.5 --steps-per-cmd 3 --switch-dist 0.06`。**残留待调**：指令切换间仍有可见抖动（switch-dist 40% 处转向已消大部分停-走，剩切换瞬间一次）——方向：更早转向/更小合步间隔/流式重定向试验，或等厂商轨迹接口。模型漂移持续同号（~95 mrad/指令）属场景不匹配，护栏兜底正常。A/B 实验脚本 `g1_state_prompt_mode_test.py`、探针 `g1_alloc_probe.py` 均已入库留证。
