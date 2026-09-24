@@ -15,3 +15,5 @@ G1 Jetson（L4T r35.6，iGPU）"动态图无法加载"破案实录（2026-09-24�
 - **教训**：脚本注释当时误记为"cudaStreamEndCapture 段错误/r35.5"，实为 Instantiate 段/r35.6——崩溃现场要 gdb 拿第一手，别信二手注释。
 - **现状**：所有推理脚本 `PI05_NO_GRAPH` 默认已翻转 1→0（ops d73282f，已推）；回退 = 前缀 `PI05_NO_GRAPH=1`。bench 实测收益约 3%（int8_full 189.2 vs 195.2ms；bf16 261.5 vs 268.1ms）——流水线 GPU-bound，派发开销小，**别期待图带来翻倍加速**。replay 已挂计数器确认稳态真实命中。
 - **待办**：真机闭环（run_g1_loop）尚未用图模式验证，[[galbot-flashrt-env-migration-pack]] 部署的新机如遇 graph 崩先查驱动版本是否 r35.x iGPU。
+
+**源机 2026-09-24 复测：能跑但更慢，两机定档分叉**：hotfix（FlashRT 快照 7a445131）打上后 `PI05_NO_GRAPH=0` 不再段错误、autotune/输出正常，但 run_g1_inference bf16/3 视角纯推理 p50 391.5ms vs 本机 eager 基线 304ms——**慢 ~29% 且超 333ms 控制窗**（部署机同修是快 ~3%）。同一修复两机性能相反，机理未深究（嫌疑抓图期 autotune 选型对 iGPU 不优）。定档：**源机全脚本 `PI05_NO_GRAPH=1`**（ops echo-unified 分支默认即 1），部署机维持 =0；热修两机都保留（段错误隐患消除）。复测时机：FlashRT/驱动升级后。
