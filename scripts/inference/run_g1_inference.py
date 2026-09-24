@@ -85,7 +85,7 @@ import cv2  # noqa: E402
 import torch  # noqa: E402
 
 # graph 抓图在 r35.5 驱动上段错误，默认绕过（DEPLOY.md 处置表 #6）
-os.environ.setdefault("PI05_NO_GRAPH", "0")
+os.environ.setdefault("PI05_NO_GRAPH", "1")  # 本机 FlashRT 未打 hotfix_flashrt WithFlags 补丁（cuda_graph.py 仍旧式 Instantiate，r35.6 必段错误），必须 eager；打上热修后可翻回 0
 # state 文本进 prompt，值漂→token 数变；exact 模式换长即整条 pipeline 重建
 # +重 autotune（~800ms）。fixed=定长 pipeline 只换 embeds，恒定 ~250ms
 os.environ.setdefault("FLASHRT_PI05_STATE_PROMPT_MODE", "fixed")

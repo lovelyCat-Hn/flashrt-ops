@@ -113,11 +113,11 @@ class QuitWatcher:
         while True:
             if not self.active.is_set() or not select.select([sys.stdin], [], [], 0.2)[0]:
                 continue
-                if sys.stdin.read(1) in ("q", "Q"):
-                    print("\n⛔ 按下 q —— 立即退出脚本（已下发目标可能仍在"
-                          "限速执行中；需立即断运动请拍急停）")
-                    self.restore()
-                    os._exit(2)   # os._exit 跳过 atexit，终端状态先手动还原
+            if sys.stdin.read(1) in ("q", "Q"):
+                print("\n⛔ 按下 q —— 立即退出脚本（已下发目标可能仍在"
+                      "限速执行中；需立即断运动请拍急停）")
+                self.restore()
+                os._exit(2)   # os._exit 跳过 atexit，终端状态先手动还原
 
 
 WATCH = QuitWatcher()
@@ -140,13 +140,27 @@ def _kb_hook(t, v, tb):
 
 sys.excepthook = _kb_hook
 
-# ── 目标姿态：部署 stats 的 state.mean（单一事实来源）──
+# ── 目标姿态：优先 task 起始位姿（episode_start_task0.json），兜底 state.mean ──
+# ⚠ 2026-09-23 实证：state.mean 是 task0（夹爪 0%/j7=-1.54，98 条）与 task1
+# （夹爪 33%/高位，101 条）两组起始位的平均——不对应任何任务起点，臂维差达
+# 0.83 rad；模型训练轨迹全部从各 task 起始位姿出发。本文件由
+# `分析脚本`从数据集 task_index=0 的 98 条起始帧取中位数生成。
 CKPT = pathlib.Path(args.ckpt)
 ns_p = CKPT / "norm_stats.json"
-if ns_p.exists():                       # prep 产物：{norm_mode, actions{...}, state{...}}
+start_p = CKPT / "episode_start_task0.json"
+if start_p.exists():
+    blk = json.loads(start_p.read_text())
+    TARGET = blk["start_pose"]
+    ns = json.loads(ns_p.read_text()) if ns_p.exists() else None
+    MODE = ns.get("norm_mode", "q01_q99") if isinstance(ns, dict) else "q01_q99"
+    print(f"[warm] 目标 = {start_p.name}（{blk.get('n_episodes')} 条 task0 起始中位，"
+          f"组内最大波动 {blk.get('spread_max_dev', 0):.2f} rad）")
+elif ns_p.exists():                     # prep 产物：{norm_mode, actions{...}, state{...}}
     ns = json.loads(ns_p.read_text())
     TARGET = ns["state"]["mean"]
     MODE = ns.get("norm_mode", "q01_q99")
+    print("[warm] ⚠ 无 episode_start_task0.json，退回 state.mean（两 task 起始的"
+          "平均值，非任务起点——建议生成起始位姿文件）")
 else:                                   # 兜底：lerobot 数据集 schema
     ms_p = CKPT.parent / "meta" / "stats.json"
     if not ms_p.exists():
@@ -155,7 +169,7 @@ else:                                   # 兜底：lerobot 数据集 schema
     TARGET = lg["observation.state"]["mean"]
     MODE = "q01_q99"
 if len(TARGET) != 23:
-    raise SystemExit(f"state.mean 应 23 维，实得 {len(TARGET)}")
+    raise SystemExit(f"目标姿态应 23 维，实得 {len(TARGET)}")
 
 LEFT = [f"left_arm_joint{i}" for i in range(1, 8)]
 RIGHT = [f"right_arm_joint{i}" for i in range(1, 8)]
@@ -203,7 +217,7 @@ def report(cur):
         print(f"{i:>4} {n:<22} {cur[i]:>8.3f} {TARGET[i]:>8.3f} {d:>+8.3f}{mark}")
 
 
-print(f"目标 = {CKPT.name} 的 state.mean（norm_mode={MODE}）")
+print(f"目标姿态已就绪（norm_mode={MODE}）——来源见上方 [warm] 行")
 cur = None
 
 print("\n== ① SDK 初始化（确认急停可及！）==")

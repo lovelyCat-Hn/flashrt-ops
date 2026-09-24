@@ -16,8 +16,8 @@ DEFAULT_PATH = "/home/galbot/holy/config/g1.toml"
 # 单位：角度 rad｜时长 s｜速度 rad/s（夹爪 m/s）｜力 N｜百分比 %｜频率 Hz
 BUILTIN = {
     "run": {
-        # 保留 pi05_g1_ft：其他设备上可能真有该目录；本机以 config/g1.toml 为准
-        # （echo 机实际产物是 pi05_g1_deploy，toml 已指向它，见 g1.toml [run] 注释）
+        # 两台设备产物目录名不同：echo 机=pi05_g1_ft，另一设备=pi05_g1_deploy；
+        # BUILTIN 给 echo 机的值，运行时以各机 config/g1.toml 为准（见 toml [run] 注释）
         "ckpt": "/home/galbot/holy/models/pi05_g1_ft",
         "prompt": "Left arm pick up A. Right arm pick up A.",
     },
@@ -42,6 +42,16 @@ BUILTIN = {
         "settle": False,
         "settle_frac": 0.5,       # 比例（无量纲 0~1）
         "switch_dist": 0.06,      # rad
+        "catch_timeout": 8.0,     # s；回放步末追平门超时（run_g1_replay 用）
+    },
+    "replay": {
+        # run_g1_replay 专用（与 loop 解耦）：速度按 ep0 增量分布定标——
+        # 每控制步最忙关节位移 p95 0.147 rad ÷ 0.75s 自然窗口 ≈ 0.2，
+        # 取 0.15：90% 步在窗口内自然完成，全程无满速冲刺（冲击∝速度）
+        "speed": 0.15,
+        "pace": 0.95,             # s；节拍窗口：每步位移摊满窗口单条指令，
+                                  # 推理重叠在内（治衔接停走，2026-09-24）
+        "catch_timeout": 8.0,     # 步末追平门超时
         "chunk_mode": "track",
         "traj_dt": 0.1,           # s/点
     },

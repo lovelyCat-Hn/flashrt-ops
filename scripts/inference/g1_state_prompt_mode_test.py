@@ -22,7 +22,7 @@ import time
 mode = sys.argv[1] if len(sys.argv) > 1 else "fixed"
 os.environ["FLASHRT_PI05_STATE_PROMPT_MODE"] = mode
 os.environ.setdefault("FVK_PI05_RTX_FORCE_INT8", "1")
-os.environ.setdefault("PI05_NO_GRAPH", "0")
+os.environ.setdefault("PI05_NO_GRAPH", "1")  # 本机 FlashRT 未打 hotfix_flashrt WithFlags 补丁（cuda_graph.py 仍旧式 Instantiate，r35.6 必段错误），必须 eager；打上热修后可翻回 0
 
 import numpy as np  # noqa: E402
 import flash_rt.frontends.torch.pi05_rtx as _fe  # noqa: E402

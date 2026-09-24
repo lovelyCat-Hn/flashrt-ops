@@ -20,7 +20,7 @@ ap.add_argument("--long", type=float, default=0.0,
 args = ap.parse_args()
 
 os.environ.setdefault("FVK_PI05_RTX_FORCE_INT8", "1")
-os.environ.setdefault("PI05_NO_GRAPH", "0")
+os.environ.setdefault("PI05_NO_GRAPH", "1")  # 本机 FlashRT 未打 hotfix_flashrt WithFlags 补丁（cuda_graph.py 仍旧式 Instantiate，r35.6 必段错误），必须 eager；打上热修后可翻回 0
 
 import numpy as np  # noqa: E402
 import cv2  # noqa: E402
