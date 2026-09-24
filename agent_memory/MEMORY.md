@@ -14,3 +14,5 @@
 - [G1 PVT 轨迹接口危险实录](galbot-g1-pvt-trajectory-hazard.md) — 零运动探针仍致剧烈抖动，traj 路线封存；提速加剧抖动(每点全停,冲击∝速度)，平滑走 track+合步
 - 基准报告在 `~/holy/BENCHMARKS.md`（对外汇报用，echo 机 2026-09-21 全部实测数据）；操作手册在 `~/holy/USAGE.md`（装机+日常使用，随 DEPLOY.md 构成三件套文档）
 - [安装类命令用户亲自执行](galbot-user-runs-install-commands.md) — conda/pip/apt 安装发命令清单给用户跑;我只做只读检查和判读
+- [本机 GitHub 连接](galbot-github-remote-setup.md) — SSH 账号 lovelyCat-Hn 可用；ghproxy 镜像会卡死 fetch 已移除勿加回；push 仅限 SSH；上游 flashrt-project 无写权限
+- [G1 CUDA graph 段错误修复](galbot-g1-cuda-graph-instantiate-fix.md) — L4T r35.6 iGPU 旧式 Instantiate 必崩走 WithFlags；PI05_NO_GRAPH 已默认关；bench 收益仅 ~3% 勿期待翻倍
