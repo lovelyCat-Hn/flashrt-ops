@@ -326,8 +326,9 @@ def guarded_move_to(target14, label, guard_rad=None):
         d = target14 - cur
         if float(np.max(np.abs(d))) <= args.switch_dist:
             return True
-        if float(np.max(np.abs(cur + np.clip(d, -BUDGET, BUDGET)) - HOME)) > g:
-            print(f"⛔ {label}: 途中越护栏（{g * 1000:.0f} mrad），停在半程")
+        if float(np.max(np.abs((cur + np.clip(d, -BUDGET, BUDGET)) - HOME))) > g:
+            print(f"⛔ {label}: 第{it + 1}步判读越护栏（限 {g * 1000:.0f} mrad），"
+                  f"停在半程")
             return False
         robot.set_joint_positions((cur + np.clip(d, -BUDGET, BUDGET)).tolist(),
                                   joint_names=ARM_NAMES, is_blocking=False,
