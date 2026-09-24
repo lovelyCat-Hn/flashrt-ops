@@ -104,9 +104,11 @@ execute/loop 脚本已自动加回预测时刻臂位再执行，无需手工换�
   **0.15 rad/s**（config `[replay].speed`，按 ep0 每步增量 p95=0.147 rad÷0.75s
   窗口定标，90% 步自然完成无满速冲刺）、离起始位 >3.0 rad 自动停；
   夹爪按 chunk 维 7/15 下发（config [gripper]）
-- 预期节奏：比数据集原速慢（快相位自动放慢），以汇总"步末追平等待"为准；
-  **跟踪滞后应全程 <100 mrad**，若再看到数百 mrad 平台=追平门失效，停机报修
-- `--ep N` 换 episode；`--no-grip` 关夹爪；参数在 config `[loop]/[gripper]/[run]`
+- **2026-09-24 全绿基线**：198/198 控制步 / 滞后 p50 20、max 59 mrad /
+  门等待 p50 0.1、max 1.2 s / 总时长 235 s（慢放 ~12×）/ 峰值行程 2611 mrad
+  （护栏内）/ 双爪终态闭合 ✅。日常验收：**跟踪滞后全程 <100 mrad**，
+  数百 mrad 平台=追平门失效，按 q 停；退出用 q（Ctrl-C 在 SDK 阻塞中无效）
+- `--ep N` 换 episode；`--no-grip` 关夹爪；参数在 config `[replay]/[loop]/[gripper]/[run]`
 
 ---
 
