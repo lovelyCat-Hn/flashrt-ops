@@ -37,6 +37,8 @@ BUILTIN = {
         "steps_per_cmd": 3,       # 步/条（合步：一条 SDK 指令跨 K 个 chunk 步）
         "delta_max": 0.05,        # rad/步
         "speed": 0.25,            # rad/s；闭环实测最优（2026-09-23 5/5 全绿）
+        "pace": 0.6,              # s；追踪式半程配速窗口（v4，与回放同款：
+                                  # 速度=导程÷(2×窗口)，臂恒在途永不到点）
         "max_excursion": 3.0,     # rad；按数据集包络重标（合法抓取 max 2.785，
                                   # 旧 0.25 真任务 100% 误触）
         "settle": False,

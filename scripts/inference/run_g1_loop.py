@@ -6,7 +6,10 @@
   1. 只动双臂 14 关节；腿/头维度永不下发；夹爪仅 --grip 显式开启时下发
      （0~100% → manifest 标定宽度，变化超 --grip-chg 才发，非阻塞不等反馈）
   2. 每条指令目标 = 当前读数 ± steps-per-cmd×--delta-max 限幅（默认
-     1×0.05 rad；合步 3 → 0.15 rad，与逐 3 步一轮的行程上限相同），限速 --speed
+     1×0.05 rad；合步 3 → 0.15 rad，与逐 3 步一轮的行程上限相同）；
+     速度 = 半程配速 clip(导程÷(2×--pace), 0.02, --speed)——每窗只走一半
+     导程，臂恒在途永不到点，被下一轮指令滑行重定向（2026-09-24 v4，
+     与回放同款，治指令边界换向抖动；闭环每轮从真实状态重规划，滞后自校正）
   3. 漂移护栏：任一关节偏离起始位超 --max-excursion（默认 0.25 rad）→ 立即
      停止循环（语义测试期防模型单向漂移拖走机械臂）
   4. q 键即时退出（后台监听线程，SDK 阻塞中也可退）；物理急停第一优先级
@@ -56,6 +59,9 @@ ap.add_argument("--steps-per-cmd", type=int, default=None,
                      "每点全停的冲击，减停顿才是平滑正解；config [loop].steps_per_cmd）")
 ap.add_argument("--delta-max", type=float, default=None, help="每步限幅 rad（config [loop].delta_max）")
 ap.add_argument("--speed", type=float, default=None, help="关节速度上限 rad/s（config [loop].speed）")
+ap.add_argument("--pace", type=float, default=None,
+                help="节拍窗口 s：速度=导程÷(2×窗口) 半程配速，每窗只走一半导程"
+                     "（须 ≥ 推理耗时+取图，否则退化为续航频发；config [loop].pace）")
 ap.add_argument("--max-excursion", type=float, default=None,
                 help="偏离起始位护栏 rad（任一关节超限即停；config [loop].max_excursion）")
 ap.add_argument("--settle", action="store_true", default=None,
@@ -89,6 +95,7 @@ g1_config.apply(args, {
     "steps_per_cmd": ("loop", "steps_per_cmd"),
     "delta_max": ("loop", "delta_max"),
     "speed": ("loop", "speed"),
+    "pace": ("loop", "pace"),
     "max_excursion": ("loop", "max_excursion"),
     "settle": ("loop", "settle"),
     "settle_frac": ("loop", "settle_frac"),
@@ -343,6 +350,10 @@ print("预热推理 ×3 完成（吸收惰性引擎构建）")
 n_steps = max(1, min(args.steps_per_round, 10))
 spc = max(1, min(args.steps_per_cmd, n_steps))   # 合步宽度（≤ 每轮步数）
 BUDGET = spc * args.delta_max                    # 每条指令位移限幅
+V_MIN = 0.02                                     # 半程配速下限 rad/s（驻停时缓爬）
+if args.pace < 0.55:
+    print(f"⚠ --pace {args.pace}s 偏小：bf16 推理+取图水位 ~0.42s 余量紧张，"
+          "推理未就绪段会以旧 chunk 续航指令填补（机制仍在，非站桩）")
 
 
 def plan_step(k, cur, budget=None):
@@ -412,12 +423,14 @@ if not args.do_exec:
 # ── ③ 连续循环（流水线：推理与执行重叠，消除轮间停顿）──
 WATCH.pause()
 input(f"\n⚠ 将连续 {args.rounds} 轮 × 每轮 {n_steps} 步真实驱动双臂"
-      f"（合步 {spc} 步/指令，每条限幅 ±{BUDGET} rad，漂移护栏 ±{args.max_excursion} rad"
+      f"（合步 {spc} 步/指令，每条限幅 ±{BUDGET} rad，半程配速窗口 {args.pace}s，"
+      f"漂移护栏 ±{args.max_excursion} rad"
       + ("，夹爪下发开启）。\n" if GRIP else ")。\n")
       + "急停就绪后回车开始，循环期间随时按 q 退出...")
 WATCH.resume()
 
 infer_ms, grab_ms, round_ms, step_ms, track_err = [], [], [], [], []
+pace_hist = []                       # 半程配速 rad/s（追踪式 v4）
 cmd_hist = None
 aborted = False
 sustain_cmds = 0                     # 配额外"续航"指令条数（掩盖慢推理）
@@ -526,7 +539,6 @@ for r in range(args.rounds):
         if round_ms[-1] > 1:
             print(f"  轮耗时 {round_ms[-1]:.0f} ms（重规划频率 {1000 / round_ms[-1]:.1f} Hz）")
         continue
-    gate = args.settle_frac * args.delta_max   # 换目标阈值按单步尺度（到位未停透）
     # 消费配额 n_steps 步后若新块未就绪 → 用旧 chunk 剩余步"续航"追踪，
     # 轮间零站桩（推理 825ms 实测 > 滑行 539ms 的对策）；chunk 耗尽才需等待。
     # 每条指令仍受 ±BUDGET 限幅 + 漂移护栏，续航不放大行程风险
@@ -553,28 +565,21 @@ for r in range(args.rounds):
                                            is_blocking=True, speed_rad_s=args.speed,
                                            timeout_s=10.0)
         else:
-            # 追踪式（合步）：一条指令跨 spc 步，SDK 内部平滑轮廓一次滑到位
-            # ——每轮起停 1/spc 次。0.6 提速实测更抖（每点全停，冲击∝速度），
-            # 平滑靠减停顿次数而非提速
+            # 追踪式 v4（合步 + 半程配速）：速度=导程÷(2×窗口)，每窗只走一半
+            # 导程 → 臂恒在途永不到点，窗口末被下一轮指令滑行重定向（速度
+            # 不过零，无到达门）。闭环每轮从真实状态重规划，半程滞后自校正。
+            # 窗口自发令前起算（推理重叠在内）。0.6 提速实测更抖（每点全停，
+            # 冲击∝速度），平滑靠永不到点而非提速
+            gap0 = float(np.max(np.abs(tgt - cur)))
+            pace_v = max(V_MIN, min(gap0 / (2.0 * args.pace), args.speed))
             robot.set_joint_positions(tgt.tolist(), joint_names=ARM_NAMES,
-                                      is_blocking=False, speed_rad_s=args.speed)
+                                      is_blocking=False, speed_rad_s=pace_v)
+            pace_hist.append(pace_v)
             if k == 0 and r < args.rounds - 1:
                 # 下一块推理藏进本指令执行期（观测取自滑行中途，即真实当前态）
                 job.start(*fresh_obs())
-            # 提前换目标：剩余误差收到 switch-dist（>0）即重定向——机械臂
-            # 滑行中转向、速度不过零，消指令边界的停-走；0 = 旧近停透语义。
-            # 最短驻留 0.15s 防止目标太近时连环刷指令
-            sw_gate = args.switch_dist if args.switch_dist > 0 else gate
-            min_dwell = 0.15 if args.switch_dist > 0 else 0.0
-            deadline = t_s + max(2.0, 1.5 * BUDGET / max(args.speed, 0.01))
-            while True:
-                ach = read_joints(robot, ARM_NAMES)
-                if (time.perf_counter() - t_s >= min_dwell
-                        and float(np.max(np.abs(ach - tgt))) <= sw_gate):
-                    break
-                if time.perf_counter() > deadline:   # 兜底（慢速时按预算放宽）
-                    break
-                time.sleep(0.02)
+            while time.perf_counter() - t_s < args.pace:
+                time.sleep(0.02)          # 主线程小睡，GIL 让给推理线程
             st = "ControlStatus.SUCCESS(tracked)"
         step_ms.append((time.perf_counter() - t_s) * 1000)
         ach = read_joints(robot, ARM_NAMES)
@@ -585,7 +590,7 @@ for r in range(args.rounds):
             sustain_cmds += 1
         print(f"  {tag}: |Δcmd| "
               f"{float(np.max(np.abs(cmd_delta))) * 1000:5.1f} mrad | "
-              f"执行 {step_ms[-1]:5.0f} ms | 回读偏差 {err:4.1f} mrad | {st}")
+              f"执行 {step_ms[-1]:5.0f} ms | 导程残差 {err:4.1f} mrad | {st}")
         if not str(st).startswith("ControlStatus.SUCCESS"):
             print("⛔ 下发非 SUCCESS，停止循环")
             aborted = True
@@ -617,7 +622,10 @@ if step_ms:
 if round_ms:
     print(f"整轮(重规划周期): {pstats(round_ms)}")
 if track_err:
-    print(f"跟踪误差: mean {np.mean(track_err):.1f} | max {max(track_err):.1f} mrad")
+    print(f"导程残差: mean {np.mean(track_err):.1f} | max {max(track_err):.1f} mrad"
+          f"（追踪式 v4 半程配速，残差>0 属预期=臂恒在途；归零=在停走）")
+if pace_hist:
+    print(f"配速: {pstats(pace_hist)} rad/s（半程配速，上限 {args.speed}，下限 {V_MIN}）")
     print("抖动判读：|Δcmd| 快速变号=抖动；持续同号=漂移（由护栏兜底）")
 if sustain_cmds:
     print(f"续航指令: {sustain_cmds} 条（配额外消费旧 chunk 步，掩盖慢推理轮间站桩）")
