@@ -8,7 +8,10 @@
 
 [run]
 # 部署目录（g1_ckpt_prep 产物；norm_stats/manifest 从这里读）
-ckpt = "/home/galbot/holy/models/pi05_g1_ft"
+# = pi05_g1_pretrain/pi05_g1_040000/pretrained_model 的包装：权重软链同一 safetensors，
+# 另带 norm_stats.json（2026-09-24 三方核对与 checkpoint normalizer 逐维一致）。
+# warmup 等脚本直接读 <ckpt>/norm_stats.json，所以默认指这里而非裸 pretrained_model。
+ckpt = "/home/galbot/holy/models/pi05_g1_deploy"
 # 任务指令——必须是训练 tasks.parquet 里的原句（就这两条）：
 #   "Left arm pick up A. Right arm pick up A."
 #   "Left arm places A in the top-left corner. Right arm places A in the top-left corner."

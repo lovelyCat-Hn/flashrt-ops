@@ -16,6 +16,8 @@ DEFAULT_PATH = "/home/galbot/holy/config/g1.toml"
 # 单位：角度 rad｜时长 s｜速度 rad/s（夹爪 m/s）｜力 N｜百分比 %｜频率 Hz
 BUILTIN = {
     "run": {
+        # 保留 pi05_g1_ft：其他设备上可能真有该目录；本机以 config/g1.toml 为准
+        # （echo 机实际产物是 pi05_g1_deploy，toml 已指向它，见 g1.toml [run] 注释）
         "ckpt": "/home/galbot/holy/models/pi05_g1_ft",
         "prompt": "Left arm pick up A. Right arm pick up A.",
     },
