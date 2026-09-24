@@ -8,11 +8,11 @@ episode（与 tf_rollout.py 验证过的输入完全一致），机器人只负�
 
 安全设计（⚠ 加 --exec 会真实驱动双臂+夹爪！）：
   1. 只动双臂 14 关节 + 夹爪；腿/头永不下发
-  2. 节拍执行（2026-09-24 衔接抖动定案）：每控制步仅 1 条臂目标=数据集
-     参考位，速度=位移÷窗口（自适应 0.02~speed rad/s）——参考永远在臂
-     前方，消除子步到点停车与"走完停等推理"（外部平滑方案根因 A/B 的
-     SDK 等效实现：1ms RT 滤波层不可得，用速度匹配等效）；推理重叠在
-     窗口内
+  2. 节拍执行（2026-09-24 v4，治"一顿一顿"）：每控制步 1 条臂目标=数据集
+     参考位【前视 2 窗口/6 帧】，速度=导程÷(2×窗口)（自适应 0.02~speed
+     rad/s）——每窗只走一半导程，臂恒在途中、永不到点，被下一条指令
+     滑行重定向；窗口自发令前起算、推理重叠在内（外部平滑方案根因 A/B
+     的 SDK 等效实现：1ms RT 滤波层不可得，用前视+速度匹配等效）
   3. 漂移护栏：任一关节偏离起始位 > --max-excursion（config [loop].
      max_excursion=3.0，按 199 轨抓取包络标定）→ 立即停
   4. 轨迹锁定（2026-09-24 抖动定案）：到位确认 switch-dist 内才推进
@@ -318,14 +318,14 @@ def predict_step(t):
 
 # ── ③ 干跑：前 2 个控制步计划，绝不下发 ──
 if not args.do_exec:
-    print(f"\n== [干跑] 节拍模式：每控制步 1 条臂目标（速度自适应 {V_MIN}~{args.speed} rad/s，"
-          f"窗口 {args.pace:.2f} s，推理重叠在内）未下发任何命令 ==")
+    print(f"\n== [干跑] 节拍 v4：每控制步 1 条臂目标（前视 6 帧、半程配速 "
+          f"{V_MIN}~{args.speed} rad/s、窗口 {args.pace:.2f} s 含推理）未下发任何命令 ==")
     prev_chunk = None
     for t in ctrl_ts[:2]:
-        goal = np.asarray(states[min(t + args.stride, len(states) - 1)][ARM_DIMS], np.float32)
+        goal = np.asarray(states[min(t + 2 * args.stride, len(states) - 1)][ARM_DIMS], np.float32)
         cur = read_joints(robot, ARM_NAMES)
         gap = float(np.max(np.abs(goal - cur)))
-        pace = float(np.clip(gap / args.pace, V_MIN, args.speed))
+        pace = float(np.clip(gap / (2 * args.pace), V_MIN, args.speed))
         chunk, ms = predict_step(t)
         grip_txt = "-"
         if GRIP and prev_chunk is not None:
@@ -343,23 +343,25 @@ if not args.do_exec:
 
 # ── ④ 回放执行 ──
 input(f"\n⚠ 将按数据集 ep{args.ep} 节拍回放真机执行 {len(ctrl_ts)} 控制步"
-      f"（每步 1 条目标、速度自适应 {V_MIN}~{args.speed} rad/s 摊满 {args.pace:.2f} s 窗口、"
+      f"（目标前视 6 帧、半程配速 {V_MIN}~{args.speed} rad/s、窗口 {args.pace:.2f} s 含推理、"
       f"护栏 ±{args.max_excursion} rad"
       + ("，夹爪下发开启）" if GRIP else "）") + "。急停就绪后回车开始，随时按 q 退出...")
 
-# ── ④ 节拍回放（2026-09-24 衔接抖动定案的 SDK 等效实现）：
-# 每控制步仅 1 条臂目标=数据集参考位，速度=位移÷窗口（自适应 V_MIN~speed），
-# 参考永远在臂前方 → 无"走完停等推理"的到点停车；推理与运动重叠在窗口内；
-# 夹爪用上一 chunk 末行（滞后 1 数据集帧）。到位确认（switch-dist）保持
-# 轨迹锁定：仅当节拍速度被 cap 时才需要等待，数据集自动慢放。
+# ── ④ 节拍回放（2026-09-24 v4，治"一顿一顿"）：
+# 每控制步 1 条臂目标=数据集参考位【前视 2 窗口（6 帧）】——目标永远比臂一个
+# 周期能走的更远，臂永不到点，途中被下一条指令滑行重定向（停走根因：
+# v3 速度恰好匹配到点 + 窗口计时 bug 让推理串行在窗外，每步干等 ~0.5s）。
+# 速度=位移÷窗口（自适应 V_MIN~speed），窗口自【发令前】起算，推理重叠在内；
+# 夹爪用上一 chunk 末行（滞后 1 数据集帧）。到位确认（switch-dist）保留：
+# 仅当节拍速度被 cap 时才需要等待，数据集自动慢放。
 lag_l, ms_l, pace_l, gap_l, exc_max = [], [], [], [], 0.0
 n_cmd = n_skip = 0
 t_start = time.perf_counter()
 aborted = False
 prev_chunk = None
 for t in ctrl_ts:
-    # ① 本步参考位 + 护栏
-    goal = np.asarray(states[min(t + args.stride, len(states) - 1)][ARM_DIMS], np.float32)
+    # ① 本步参考位（前视 2×stride）+ 护栏
+    goal = np.asarray(states[min(t + 2 * args.stride, len(states) - 1)][ARM_DIMS], np.float32)
     drift = float(np.max(np.abs(goal - HOME)))
     exc_max = max(exc_max, drift)
     if drift > args.max_excursion:
@@ -367,12 +369,16 @@ for t in ctrl_ts:
               f"{args.max_excursion * 1000:.0f}，停止（机械臂留在原地）", flush=True)
         aborted = True
         break
-    # ② 节拍发令：速度把本步位移摊满窗口
+    # ② 节拍发令：窗口从发令前起算（推理重叠在内）
+    t_s = time.perf_counter()
     cur = read_joints(robot, ARM_NAMES)
     gap = float(np.max(np.abs(goal - cur)))
     gap_l.append(gap)
     if gap > 5e-3:
-        pace = float(np.clip(gap / args.pace, V_MIN, args.speed))
+        # 前视减半配速：每窗只走导程的一半（≈本窗 3 帧的参考量），到达下一个
+        # 6 帧目标永远"差一半"→ 臂恒在途中，无到点停车（配速若按全导程，
+        # 又会窗口末恰好到点=每步一停）
+        pace = float(np.clip(gap / (2 * args.pace), V_MIN, args.speed))
         robot.set_joint_positions(goal.tolist(), joint_names=ARM_NAMES,
                                   is_blocking=False, speed_rad_s=pace)
         n_cmd += 1
@@ -388,11 +394,10 @@ for t in ctrl_ts:
     # ④ 推理与运动重叠
     chunk, ms = predict_step(t)
     ms_l.append(ms)
-    # ⑤ 补满节拍窗口
-    t_s = time.perf_counter()
+    # ⑤ 补满节拍窗口（含推理耗时）
     while time.perf_counter() - t_s < args.pace:
         time.sleep(0.05)
-    # ⑥ 到位确认（节拍速度被 cap 时才需要等）
+    # ⑥ 到位确认（前视设计下通常臂仍在途，仅超时兜底推进）
     t_g = time.perf_counter()
     while True:
         lag = float(np.max(np.abs(read_joints(robot, ARM_NAMES) - goal)))
@@ -406,7 +411,7 @@ for t in ctrl_ts:
     lag_l.append(lag)
     prev_chunk = chunk
     print(f"  帧 {t:>3}/{end} | gap {gap * 1000:3.0f} mrad | 速度 {pace:.3f} | "
-          f"推理 {ms:4.0f} ms | 滞后 {lag * 1000:4.0f} mrad | "
+          f"推理 {ms:4.0f} ms | 残差 {lag * 1000:4.0f} mrad | "
           f"累计 {time.perf_counter() - t_start:5.1f} s", flush=True)
 
 # ── ⑤ 汇总 ──
@@ -424,7 +429,7 @@ print(f"""
 == 回放汇总（{'⚠ 护栏中止' if aborted else '完成'}）==
 控制步 {len(lag_l)}/{len(ctrl_ts)} | 臂指令 {n_cmd} 条（驻停跳过 {n_skip}） | 总时长 {time.perf_counter() - t_start:.0f} s
 跟踪滞后（vs 数据集轨迹）: p50 {np.percentile(a, 50):.0f} / max {a.max():.0f} mrad
-发令衔接间隙: p50 {np.percentile(g, 50):.0f} / p95 {np.percentile(g, 95):.0f} mrad（≈每步数据集位移，参考 <20）
+前视导程 gap（6 帧）: p50 {np.percentile(g, 50):.0f} / p95 {np.percentile(g, 95):.0f} mrad（≈2×每步位移；恒>0=臂恒在途）
 节拍速度: p50 {np.percentile(p, 50):.3f} / max {p.max():.3f} rad/s（窗口 {args.pace:.2f} s）
 推理: p50 {np.percentile(m, 50):.0f} / p95 {np.percentile(m, 95):.0f} ms（bf16）
 离起始位峰值: {exc_max * 1000:.0f} mrad（护栏 {args.max_excursion * 1000:.0f}）""", flush=True)
