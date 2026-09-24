@@ -361,7 +361,7 @@ if args.align:
         robot.request_shutdown(); robot.wait_for_shutdown(); robot.destroy()
         os._exit(1)
     HOME = read_joints(ARM_NAMES)   # 护栏重基准：对齐后漂移从帧 0 位姿起算
-    print("对齐完成，护栏基准更新: " + np.round(HOME, 3).tolist())
+    print(f"对齐完成，护栏基准更新: {np.round(HOME, 3).tolist()}")
 
 cmd_hist = None
 aborted = False
