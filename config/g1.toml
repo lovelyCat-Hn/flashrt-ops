@@ -47,6 +47,8 @@ max_excursion = 3.0    # 偏离起始位护栏，rad，任一关节超限即停�
 settle = false      # true=停走（旧行为）；false=追踪式（v4 半程配速）
 settle_frac = 0.5   # settle 模式换目标阈值，比例（追踪式已不用，保留兼容）
 switch_dist = 0.06  # 【追踪式 v4 起不再使用，保留兼容】旧提前重定向阈值，rad
+chunk_mode = "track"    # track / settle / traj（traj 走 PVT，已封存慎用）
+traj_dt = 0.1       # traj 模式轨迹点周期，s/点（0.033=采集原速 30fps）
 
 [replay]            # run_g1_replay（数据集影子回放）专用，与 loop 解耦
 speed = 0.15        # 关节速度上限，rad/s。按 ep0 增量分布定标（2026-09-24）：

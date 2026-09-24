@@ -44,6 +44,8 @@ BUILTIN = {
         "settle": False,
         "settle_frac": 0.5,       # 比例（无量纲 0~1）
         "switch_dist": 0.06,      # rad
+        "chunk_mode": "track",    # track / settle / traj（traj 已封存慎用）
+        "traj_dt": 0.1,           # s/点（traj 模式）
         "catch_timeout": 8.0,     # s；回放步末追平门超时（run_g1_replay 用）
     },
     "replay": {
