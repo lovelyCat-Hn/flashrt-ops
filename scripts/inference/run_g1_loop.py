@@ -269,6 +269,10 @@ def read_joints(robot, names) -> np.ndarray:
     return np.array(vals, dtype=np.float32)
 
 
+_LAST_FRAMES = {}     # 相机冻结守卫：逐轮像素级对比（2026-09-24 右臂下压排查引入）
+_FREEZE_STREAK = {}
+
+
 def grab_views(robot) -> dict:
     out = {}
     for key, cam in list(CAM_MAP.items())[:VIEWS]:
@@ -278,6 +282,16 @@ def grab_views(robot) -> dict:
         img = cv2.imdecode(np.frombuffer(d["data"], np.uint8), cv2.IMREAD_COLOR)
         if img is None:
             raise SystemExit(f"解码失败: {cam}")
+        last = _LAST_FRAMES.get(cam)
+        _LAST_FRAMES[cam] = img
+        if last is not None and np.array_equal(last, img):
+            _FREEZE_STREAK[cam] = _FREEZE_STREAK.get(cam, 0) + 1
+        else:
+            _FREEZE_STREAK[cam] = 0
+        if _FREEZE_STREAK[cam] >= 3:
+            raise SystemExit(f"⛔ 相机流疑似冻结：{cam} 连续 3 轮逐字节相同"
+                             f"（实时流有传感器噪声不可能全等）——观测已失真，"
+                             f"停止循环。排查 RT 相机服务")
         out[key] = np.ascontiguousarray(
             cv2.cvtColor(cv2.resize(img, (224, 224)), cv2.COLOR_BGR2RGB))
     return out
