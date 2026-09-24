@@ -96,7 +96,7 @@ GRIP_WMAX = _gcal.get("width_max")
 
 # ── 开关必须在 load_model 之前设 ──
 os.environ.setdefault("FVK_PI05_RTX_FORCE_INT8", "1")   # 全 INT8（echo 定档）
-os.environ.setdefault("PI05_NO_GRAPH", "1")             # r35.5 驱动 graph 段错误绕法
+os.environ.setdefault("PI05_NO_GRAPH", "0")             # 已修复(L4T r35.6 iGPU 走 WithFlags)；回退 eager 设 PI05_NO_GRAPH=1
 
 import numpy as np  # noqa: E402
 import cv2  # noqa: E402

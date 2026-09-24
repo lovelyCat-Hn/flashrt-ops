@@ -88,7 +88,7 @@ if not args.skip_model:
     import os
     for v in ("LD_LIBRARY_PATH", "PYTHONPATH", "LD_PRELOAD"):
         os.environ.pop(v, None)
-    os.environ.setdefault("PI05_NO_GRAPH", "1")
+    os.environ.setdefault("PI05_NO_GRAPH", "0")
 
     import functools
     import torch  # noqa: E402

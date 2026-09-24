@@ -28,9 +28,9 @@ import numpy as np  # noqa: E402
 import torch  # noqa: E402
 import flash_rt  # noqa: E402
 
-# Orin 上 CUDA graph 抓图（cudaStreamEndCapture）确定性段错误，默认关图跑 eager。
-# PI05_NO_GRAPH=0 可重新启用抓图（待排查）。
-if os.environ.get("PI05_NO_GRAPH", "1") == "1":
+# 2026-09-24 修复：L4T r35.6 iGPU 驱动旧式 cudaGraphInstantiate 必崩（实为 Instantiate 段非 EndCapture），
+# FlashRT 改走 InstantiateWithFlags 后抓图正常。默认开图；回退 eager 设 PI05_NO_GRAPH=1。
+if os.environ.get("PI05_NO_GRAPH", "0") == "1":
     import flash_rt.frontends.torch.pi05_rtx as _fe
 
     _orig_init = _fe.Pi05TorchFrontendRtx.__init__

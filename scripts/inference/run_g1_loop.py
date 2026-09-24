@@ -191,7 +191,7 @@ if args.grip:
           f"力矩 {args.grip_effort} N | 变化阈值 {args.grip_chg}%")
 
 os.environ.setdefault("FVK_PI05_RTX_FORCE_INT8", "1")
-os.environ.setdefault("PI05_NO_GRAPH", "1")   # r35.5 graph 段错误绕法
+os.environ.setdefault("PI05_NO_GRAPH", "0")   # 已修复(L4T r35.6 iGPU 走 WithFlags)；回退 eager 设 PI05_NO_GRAPH=1
 # state 以十进制文本拼进 prompt（format_pi05_prompt）：关节值一漂、bin 数位
 # 变化 → token 数变；默认 exact 模式每种长度一条 pipeline，换长=整条重建+
 # 重 autotune（~800ms，2026-09-23 合成实验实锤）。fixed=定长 200 一条

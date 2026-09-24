@@ -20,7 +20,7 @@ ap.add_argument("--long", type=float, default=0.0,
 args = ap.parse_args()
 
 os.environ.setdefault("FVK_PI05_RTX_FORCE_INT8", "1")
-os.environ.setdefault("PI05_NO_GRAPH", "1")
+os.environ.setdefault("PI05_NO_GRAPH", "0")
 
 import numpy as np  # noqa: E402
 import cv2  # noqa: E402

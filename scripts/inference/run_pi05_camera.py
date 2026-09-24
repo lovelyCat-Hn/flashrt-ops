@@ -40,7 +40,7 @@ import cv2  # noqa: E402
 import torch  # noqa: E402
 
 # graph 抓图在 r35.5 驱动上段错误，默认绕过（详见 DEPLOY.md 处置表 #6）
-os.environ.setdefault("PI05_NO_GRAPH", "1")
+os.environ.setdefault("PI05_NO_GRAPH", "0")
 import flash_rt.frontends.torch.pi05_rtx as _fe  # noqa: E402
 
 _orig_init = _fe.Pi05TorchFrontendRtx.__init__
