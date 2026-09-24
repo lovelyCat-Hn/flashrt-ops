@@ -625,7 +625,9 @@ if track_err:
     print(f"导程残差: mean {np.mean(track_err):.1f} | max {max(track_err):.1f} mrad"
           f"（追踪式 v4 半程配速，残差>0 属预期=臂恒在途；归零=在停走）")
 if pace_hist:
-    print(f"配速: {pstats(pace_hist)} rad/s（半程配速，上限 {args.speed}，下限 {V_MIN}）")
+    qp = np.percentile(pace_hist, [50, 95])
+    print(f"配速: p50 {qp[0]:.3f} | p95 {qp[1]:.3f} | max {max(pace_hist):.3f} rad/s"
+          f"（半程配速，上限 {args.speed}，下限 {V_MIN}）")
     print("抖动判读：|Δcmd| 快速变号=抖动；持续同号=漂移（由护栏兜底）")
 if sustain_cmds:
     print(f"续航指令: {sustain_cmds} 条（配额外消费旧 chunk 步，掩盖慢推理轮间站桩）")

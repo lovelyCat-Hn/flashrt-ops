@@ -32,7 +32,8 @@ BUILTIN = {
         "speed": 0.15,        # rad/s
     },
     "loop": {
-        "rounds": 60,             # 轮；单次抓取全程预算（10 轮会中途断）
+        "rounds": 200,            # 轮；数据集抓取 ≈198 控制步，v4 半程配速
+                                  # 下 60 轮只走 1/3（09-24 首跑实证）
         "steps_per_round": 3,     # 步/轮
         "steps_per_cmd": 3,       # 步/条（合步：一条 SDK 指令跨 K 个 chunk 步）
         "delta_max": 0.05,        # rad/步
