@@ -65,6 +65,10 @@ ap.add_argument("--align", action="store_true",
                 help="执行前先把双臂限幅慢速挪到该 episode 帧 0 的真实录制位姿"
                      "（warmup 目标是 state.mean，与帧 0 可差 ~0.8 rad；不对齐则"
                      "模型会先花数轮把臂拉向帧 0 位姿，护栏要放够）")
+ap.add_argument("--seed", type=int, default=0,
+                help="flow-matching 噪声种子（按 帧号+seed 定种，同帧必同输出；"
+                     "ab_real_camera 教训：predict 的随机噪声=每轮抽签，"
+                     "同图换噪声两两 cos≈0.25，会抽出抬臂等野策略）")
 ap.add_argument("--tier", default="bf16", choices=("bf16", "int8_enc", "int8_full"),
                 help="量化档（默认 bf16；int8 数值已 A/B 验证等价，快 ~100ms）")
 ap.add_argument("--grip", action="store_true",
@@ -152,6 +156,7 @@ CAM_MAP = mf.get("camera_map", {"image": "HEAD_RIGHT_CAMERA",
 
 import numpy as np  # noqa: E402
 import cv2  # noqa: E402
+import torch  # noqa: E402
 import flash_rt  # noqa: E402
 from flash_rt.core.utils.actions import normalize_state  # noqa: E402
 from galbot_sdk.g1 import GalbotRobot  # noqa: E402
@@ -264,8 +269,31 @@ print(f"tier={args.tier} views={VIEWS} | prompt={PROMPT!r} | "
 obs0 = grab_frame(args.start_frame)
 state_n = lambda: normalize_state(
     state_from_joints(read_joints(STATE_NAMES)), ns)
-for _ in range(2):                 # 吸收惰性引擎构建（烧在计时区外）
-    model.predict(obs0, prompt=PROMPT, state=state_n())
+
+
+def _acts(x):
+    """infer 返回 dict → (10,16) 动作数组（与回放脚本同提取）。"""
+    if isinstance(x, dict):
+        x = x.get("actions", x.get("raw_actions",
+                    next(v for v in x.values() if hasattr(v, "shape"))))
+    return np.asarray(x, dtype=np.float32)
+
+
+def predict_chunk(obs, fidx):
+    """set_prompt + 按帧号固定噪声（与回放验证同路径）。
+
+    不用 predict：它每轮掷随机噪声——同图换噪声两两 cos≈0.25（混沌底，
+    ab_real_camera 实测），等于每轮从动作分布重新抽签，会抽出抬臂等野
+    策略。固定噪声下回放帧 0-21 的输出就是"保持小步接近"，与此处预期
+    一致。state 每次仍取真机实时值。
+    """
+    model.set_prompt(PROMPT, state=state_n())
+    gen = torch.Generator().manual_seed(args.seed + fidx)
+    return _acts(model.infer(obs, noise=torch.randn(10, 32, generator=gen)))
+
+
+model.predict(obs0, prompt=PROMPT, state=state_n())   # 首次必须走 predict 建管线
+predict_chunk(obs0, args.start_frame)                 # 再吸收一次（固定噪声路径）
 print("预热推理 ×2 完成")
 
 n_steps = max(1, min(args.steps_per_round, 10))
@@ -294,8 +322,7 @@ if not args.do_exec:
     base_ref = cur if args.align else HOME   # 对齐后护栏从帧 0 位姿起算
     for r in range(args.rounds):
         f = min(cursor + r * n_steps, ep_last)
-        chunk = np.asarray(model.predict(grab_frame(f), prompt=PROMPT,
-                                         state=state_n()))
+        chunk = predict_chunk(grab_frame(f), f)
         tgt = plan_cmd(chunk, n_steps - 1, cur)
         drift = float(np.max(np.abs(tgt - base_ref)))
         step_d = [float(np.max(np.abs(
@@ -367,8 +394,7 @@ cmd_hist = None
 aborted = False
 for r in range(args.rounds):
     f = min(cursor, ep_last)
-    chunk = np.asarray(model.predict(grab_frame(f), prompt=PROMPT,
-                                     state=state_n()))
+    chunk = predict_chunk(grab_frame(f), f)
     print(f"\n── 轮 {r} | 数据集帧 {f} | 推理完成 ──")
     for k in range(0, n_steps, spc):
         cur = read_joints(ARM_NAMES)
