@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 24ded4cc-d86c-4589-8234-2f1634018dc7
-  modified: 2026-09-24T05:01:09.187Z
+  modified: 2026-09-24T05:30:05.609Z
 ---
 
 **G1 真机数据集判读（2026-09-21，echo 机 `~/datasets/pick_place_balence/`，zip 857M 解压 870M）**
@@ -28,4 +28,4 @@ metadata:
 - 系统 python3.8 有 pandas+pyarrow；**2026-09-24 用户把 pandas 2.1.4 + pyarrow 16.1.0 也装进了 flash_pyrt311**（numpy==1.26.4 幸存未被动，红线组合仍成立）——环境自此与打包 bundle 有分化：重打 FlashRT 环境包时要么带上这两个包、要么保留 npz 两段式兼容；extract_dataset_frames 现在环境 python 直跑，一阶段即可。
 
 **闭环执行现状（2026-09-23，run_g1_loop 真机 5/5 轮全绿）**：推理 p50 255 / max 257ms 恒定（fixed 模式），合步 3 步/指令 400ms，推理全重叠零站桩，重规划 2.5Hz。参数组合：`--speed 0.25 --settle-frac 0.5 --steps-per-cmd 3 --switch-dist 0.06`。**残留待调**：指令切换间仍有可见抖动（switch-dist 40% 处转向已消大部分停-走，剩切换瞬间一次）——方向：更早转向/更小合步间隔/流式重定向试验，或等厂商轨迹接口。A/B 实验脚本 `g1_state_prompt_mode_test.py`、探针 `g1_alloc_probe.py` 均已入库留证。
-**⚠ 闭环旧案翻案线索（2026-09-24）**："模型漂移持续同号 ~95 mrad/指令"当时归因场景不匹配——真因很可能是 **run_g1_loop 把 chunk 当绝对目标执行**（plan_step: arm_tgt−cur），与模型增量输出错位 → 每条指令恒向同向滑 delta_max。loop 尚未按增量语义修正（跑真机前必须改）；同坑：send_grip 把增量 % 当绝对 0~100% 下发，负增量会被 clip 成 0% = 砸紧。**正确增量执行范式见 `run_dataset_execute.py`**（数据集图像→真机执行：图像走 mp4 帧时间线、state 用真机读数、目标=当前+clip(Δ合步和)；--align 先对齐 episode 帧 0 录制位姿——warmup 目标是 state.mean 与帧 0 可差 ~0.8 rad——护栏基准随之重置）。
+**⚠ 闭环旧案翻案线索（2026-09-24）**："模型漂移持续同号 ~95 mrad/指令"当时归因场景不匹配——真因很可能是 **run_g1_loop 把 chunk 当绝对目标执行**（plan_step: arm_tgt−cur），与模型增量输出错位 → 每条指令恒向同向滑 delta_max。loop 尚未按增量语义修正（跑真机前必须改）；同坑：send_grip 把增量 % 当绝对 0~100% 下发，负增量会被 clip 成 0% = 砸紧。**正确增量执行范式见 `run_dataset_execute.py`**（数据集图像→真机执行：图像走 mp4 帧时间线、state 用真机读数、目标=当前+clip(Δ合步和)；--align 先对齐 episode 帧 0 录制位姿——warmup 目标是 state.mean 与帧 0 可差 ~0.8 rad——护栏基准随之重置）。**推理必须固定噪声（2026-09-24）**：真机"机械臂抬得很高"破案=model.predict 每轮掷随机噪声（同图换噪声两两 cos≈0.25 混沌底）＝每轮从动作分布抽签；修法=set_prompt+infer+manual_seed(seed+帧号)（与回放验证同路径）。**坑：进程内第一次模型调用必须走 predict 建管线**，直接 set_prompt+infer 炸 `_graph_torch_stream` AttributeError（前端图捕获流属性未初始化）——先 predict 一次再走 infer 即可。
