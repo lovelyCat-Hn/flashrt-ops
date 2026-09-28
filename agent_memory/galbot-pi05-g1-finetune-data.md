@@ -87,3 +87,5 @@ metadata:
 **【2026-09-28 execute 适配 horizon + 推理重叠（deploy 机）】**：run_dataset_execute 加 `--horizon`（env 自动设，噪声/消费上限全跟）+ `_PredictJob` 后台推理作业（移植 run_g1_loop：result 后立即 start 下一块，推理藏进执行期，轮间零等待；取图/读关节/下发留主线程）。真机验证过 15 步/轮后用户提出重叠需求，落地 holy 7f8bc9c + 9ae3cc6。⚠ 与 RTC（prefix 对齐，仅 FlashRT Thor 路径有）的差别：条件 state 比消费时刻早一个执行窗，由 plan_cmd"当前+Δ"自校正消化。loop 的 horizon 消费未适配（另一台机的实时脚本，按需）。
 
 **【2026-09-28 loop 也适配 horizon（f762def）】**：run_g1_loop 加 `--horizon`（env 前端导入前自动设；n_steps 上限跟 horizon）。loop 本就有推理重叠，无需改。**⚠ 跨机坑：env 覆盖依赖 FlashRT 侧补丁（本机 FlashRT 本地 2522a304，上游无写权限不会传播）——另一台机 pull 后跑 `--horizon 50` 会因其 FlashRT 无此补丁仍建 10 块而 shape 崩；需先同步 pi05_rtx/pi05_rtx_fp16 的 CHUNK_SIZE env 化两文件**。
+
+**【2026-09-28 horizon+中断修复补齐两个 smoke 入口（holy aa2a7ce）】**：run_g1_inference/run_g1_execute 也加上 `--horizon`（env 自动设）+ QuitWatcher 直通管道——至此 6 个真机入口全覆盖。execute 的 QuitWatcher 类体与 dataset_execute 逐字节一致（input() 确认处 pause/resume）；inference 退出提示改"只读不下发运动"，步率/实时性窗口硬编码 10 全改随 horizon。**推理重叠（_PredictJob）刻意不进这两个 smoke**：单发同步才有测量意义。至此 smoke 工具链闭环：inference（只读测延迟）→ execute（半环限幅执行）→ dataset_execute/loop（闭环）。
