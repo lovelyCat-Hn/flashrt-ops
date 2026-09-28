@@ -38,6 +38,7 @@ import json
 import os
 import pathlib
 import select
+import signal
 import sys
 import termios
 import threading
@@ -117,14 +118,21 @@ class QuitWatcher:
     def __init__(self):
         self.fd = sys.stdin.fileno()
         self._old = None
+        self._wake_r = None
         self.active = threading.Event()
         if os.isatty(self.fd):
             self._old = termios.tcgetattr(self.fd)
             tty.setcbreak(self.fd)
             atexit.register(self.restore)
+            r, w = os.pipe()                # 信号直通管道：C 层收信号即写字节，
+            os.set_blocking(w, False)       # 主线程卡死在 SDK C++ 调用也能退出
+            signal.set_wakeup_fd(w)
+            signal.signal(signal.SIGINT, lambda *_: None)     # 退出走管道，别靠
+            signal.signal(signal.SIGTERM, lambda *_: None)    # 会被推迟的异常
+            self._wake_r = r
             self.active.set()
             threading.Thread(target=self._loop, daemon=True).start()
-            print("（循环期间随时按 q 退出；确认提示符处用回车/Ctrl-C；急停第一优先级）")
+            print("（循环期间随时按 q 或 Ctrl-C 退出；确认提示符处用回车；急停第一优先级）")
 
     def restore(self):
         if self._old is not None:
@@ -142,12 +150,26 @@ class QuitWatcher:
 
     def _loop(self):
         while True:
-            if not self.active.is_set() or not select.select([sys.stdin], [], [], 0.2)[0]:
-                continue
-            if sys.stdin.read(1) in ("q", "Q"):
-                print("\n⛔ 按下 q —— 立即退出（已下发目标可能仍在限速执行）")
+            try:
+                fds = [self._wake_r] if self._wake_r is not None else []
+                if self.active.is_set():
+                    fds.append(sys.stdin)
+                if not fds or not select.select(fds, [], [], 0.2)[0]:
+                    continue
+                if (self._wake_r is not None
+                        and select.select([self._wake_r], [], [], 0)[0]):
+                    os.read(self._wake_r, 1)
+                    print("\n⛔ 收到中断信号 —— 立即退出"
+                          "（已下发目标可能仍在限速执行）")
+                    self.restore()
+                    os._exit(130)
+                if sys.stdin.read(1) in ("q", "Q"):
+                    print("\n⛔ 按下 q —— 立即退出（已下发目标可能仍在限速执行）")
+                    self.restore()
+                    os._exit(2)
+            except Exception:
                 self.restore()
-                os._exit(2)
+                os._exit(3)   # 监听线程死了比静默更危险：宁可误退不可失控
 
 
 WATCH = QuitWatcher()

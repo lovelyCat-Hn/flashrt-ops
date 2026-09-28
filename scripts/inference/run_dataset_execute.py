@@ -15,8 +15,8 @@
   无需换算，但本脚本 --grip 未真机验证前仍拒绝（闭环 grip 走 run_g1_loop）。
 
 安全设计（同 run_g1_loop）：
-  只动双臂 14 关节；每条指令位移限幅；偏离起始位护栏（默认 0.5 rad，比
-  loop 的 3.0 紧——首测小行程）；回车确认 + q 即退 + 物理急停第一优先级；
+  只动双臂 14 关节；每条指令位移限幅；偏离起始位护栏；回车确认 + q/Ctrl-C
+  即退（信号直通管道，主线程卡死也能退）+ 物理急停第一优先级；
   默认干跑只打印计划，--exec 才真实执行。
 
 用法:
@@ -33,6 +33,7 @@ import json
 import os
 import pathlib
 import select
+import signal
 import sys
 import termios
 import threading
@@ -58,8 +59,10 @@ ap.add_argument("--steps-per-cmd", type=int, default=3,
 ap.add_argument("--delta-max", type=float, default=0.05,
                 help="每步增量限幅 rad（夹爪维不执行，见 --grip）")
 ap.add_argument("--speed", type=float, default=0.15, help="关节速度上限 rad/s")
-ap.add_argument("--max-excursion", type=float, default=0.5,
-                help="偏离起始位护栏 rad（首测收紧；ep0 全程左臂包络 2.64）")
+ap.add_argument("--max-excursion", type=float, default=3.0,
+                help="偏离起始位护栏 rad（2026-09-28 放宽=loop 同款数据集标定："
+                     "199 轨合法抓取全程包络 max 2.785；首测值 0.5 会把正常 "
+                     "reach 半途掐断——ep0 实测 7 轮即触 635 mrad）")
 ap.add_argument("--switch-dist", type=float, default=0.06,
                 help="提前换目标阈值 rad（滑行中转向，消指令边界停顿）")
 ap.add_argument("--align", action="store_true",
@@ -91,19 +94,31 @@ os.environ.setdefault("FLASHRT_PI05_STATE_PROMPT_MODE", "fixed")
 
 
 class QuitWatcher:
-    """后台线程监听键盘 q：任何阶段即时退出（SDK 阻塞 C++ 调用吞 Ctrl-C）。"""
+    """后台线程监听键盘 q：任何阶段即时退出（SDK 阻塞 C++ 调用吞 Ctrl-C）。
+
+    Ctrl-C/SIGTERM 直通本线程：signal.set_wakeup_fd 让 C 层收到信号即往管道
+    写字节（不等主线程跑 Python 处理函数——主线程卡死在 SDK C++ 调用时那才
+    是致命的，2026-09-29 真机实录：q 之外所有中断全被吞，只能 kill -9）。
+    管道有字节 → 恢复终端 + os._exit，绕过一切被吞的可能。"""
 
     def __init__(self):
         self.fd = sys.stdin.fileno()
         self._old = None
+        self._wake_r = None
         self.active = threading.Event()
         if os.isatty(self.fd):
             self._old = termios.tcgetattr(self.fd)
             tty.setcbreak(self.fd)
             atexit.register(self.restore)
+            r, w = os.pipe()
+            os.set_blocking(w, False)
+            signal.set_wakeup_fd(w)
+            signal.signal(signal.SIGINT, lambda *_: None)     # 退出走管道，别靠
+            signal.signal(signal.SIGTERM, lambda *_: None)    # 会被推迟的异常
+            self._wake_r = r
             self.active.set()
             threading.Thread(target=self._loop, daemon=True).start()
-            print("（随时按 q 退出；确认提示符处用回车/Ctrl-C；急停第一优先级）")
+            print("（随时按 q 或 Ctrl-C 退出；急停第一优先级）")
 
     def restore(self):
         if self._old is not None:
@@ -121,12 +136,26 @@ class QuitWatcher:
 
     def _loop(self):
         while True:
-            if not self.active.is_set() or not select.select([sys.stdin], [], [], 0.2)[0]:
-                continue
-            if sys.stdin.read(1) in ("q", "Q"):
-                print("\n⛔ 按下 q —— 立即退出（已下发目标可能仍在限速执行）")
+            try:
+                fds = [self._wake_r] if self._wake_r is not None else []
+                if self.active.is_set():
+                    fds.append(sys.stdin)
+                if not fds or not select.select(fds, [], [], 0.2)[0]:
+                    continue
+                if (self._wake_r is not None
+                        and select.select([self._wake_r], [], [], 0)[0]):
+                    os.read(self._wake_r, 1)
+                    print("\n⛔ 收到中断信号 —— 立即退出"
+                          "（已下发目标可能仍在限速执行）")
+                    self.restore()
+                    os._exit(130)
+                if sys.stdin.read(1) in ("q", "Q"):
+                    print("\n⛔ 按下 q —— 立即退出（已下发目标可能仍在限速执行）")
+                    self.restore()
+                    os._exit(2)
+            except Exception:
                 self.restore()
-                os._exit(2)
+                os._exit(3)   # 监听线程死了比静默更危险：宁可误退不可失控
 
 
 WATCH = QuitWatcher()
@@ -394,10 +423,13 @@ if args.align:
 
 cmd_hist = None
 aborted = False
+lat = []
 for r in range(args.rounds):
     f = min(cursor, ep_last)
+    t0 = time.perf_counter()
     chunk = predict_chunk(grab_frame(f), f)
-    print(f"\n── 轮 {r} | 数据集帧 {f} | 推理完成 ──")
+    lat.append((time.perf_counter() - t0) * 1000)
+    print(f"\n── 轮 {r} | 数据集帧 {f} | 推理 {lat[-1]:.0f} ms ──")
     for k in range(0, n_steps, spc):
         cur = read_joints(ARM_NAMES)
         tgt = plan_cmd(chunk, k, cur)
@@ -437,6 +469,10 @@ fin = read_joints(ARM_NAMES)
 print(f"\n== 汇总 ==\n最终偏离起始位: "
       f"{float(np.max(np.abs(fin - HOME))) * 1000:.0f} mrad"
       f"（护栏 {args.max_excursion * 1000:.0f}）" + (" ⛔护栏触发过" if aborted else ""))
+if lat:
+    print(f"[推理延迟 ×{len(lat)}] mean {np.mean(lat):.0f} | p50 "
+          f"{np.percentile(lat, 50):.0f} | max {np.max(lat):.0f} ms"
+          "（首轮含管线构建，偏大属正常）")
 WATCH.restore()
 print("SDK 关闭中...")
 robot.request_shutdown(); robot.wait_for_shutdown(); robot.destroy()
