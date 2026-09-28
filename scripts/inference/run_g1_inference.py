@@ -2,7 +2,7 @@
 """G1 双臂 16 维 pi0.5 整体推理入口（真机版，只读不执行任何运动）。
 
 链路: SDK 三相机取图 + SDK 显式名读 23 维关节 → state 归一化（ckpt 自带
-norm_stats 的语义）→ pi0.5 推理 → (10, 16) 动作打印 + 三层实时性打点。
+norm_stats 的语义）→ pi0.5 推理 → (H, 16) 动作打印（H=--horizon）+ 三层实时性打点。
 
 配置自动来自部署目录的 flashrt_deploy.json（g1_ckpt_prep.py 产出）：
   action_dim / state_dim / views / camera_map / gripper 标定 / norm_mode
@@ -25,7 +25,7 @@ meta/info.json 权威定义；显式名字读取，group 模式返回顺序不�
       ~/holy/scripts/inference/run_g1_inference.py \
       [--ckpt ~/holy/models/pi05_g1_smoke] [--prompt "..."] \
       [--rounds 10] [--hold 10] [--tier int8_full] [--ctrl-hz 50] \
-      [--grip-wmin 0.0 --grip-wmax 0.08]
+      [--horizon 50] [--grip-wmin 0.0 --grip-wmax 0.08]
 """
 import argparse
 import functools
@@ -33,6 +33,8 @@ import g1_config  # noqa: E402  同目录共享配置（CLI > config/g1.toml > �
 import json
 import os
 import pathlib
+import sys
+import threading
 import time
 
 ap = argparse.ArgumentParser(description=__doc__,
@@ -45,6 +47,9 @@ ap.add_argument("--tier", default=None, choices=("bf16", "int8_enc", "int8_full"
                 help="量化档（config [inference].tier）")
 ap.add_argument("--ctrl-hz", type=float, default=None,
                 help="控制频率（数据集 fps=30，10 步 chunk 窗口=333ms；config [inference].ctrl_hz）")
+ap.add_argument("--horizon", type=int, default=10,
+                help="chunk 长度（训练=50，2026-09-28 实锤；10=部署切片。"
+                     "50 块延迟几乎不变，质量甜点区≈前 15-20 步；env 自动设）")
 ap.add_argument("--grip-wmin", type=float, help="夹爪零开度 SDK 宽度(米)，覆盖 manifest（不进配置）")
 ap.add_argument("--grip-wmax", type=float, help="夹爪满开度 SDK 宽度(米)，覆盖 manifest（不进配置）")
 ap.add_argument("--force-state-dim", action="store_true",
@@ -89,6 +94,8 @@ os.environ.setdefault("PI05_NO_GRAPH", "1")  # 本机 FlashRT 未打 hotfix_flas
 # state 文本进 prompt，值漂→token 数变；exact 模式换长即整条 pipeline 重建
 # +重 autotune（~800ms）。fixed=定长 pipeline 只换 embeds，恒定 ~250ms
 os.environ.setdefault("FLASHRT_PI05_STATE_PROMPT_MODE", "fixed")
+# chunk 长度：pi05_rtx 前端模块导入时读此 env，必须在下面 import flash_rt 前定死
+os.environ["FLASH_RT_PI05_ACTION_CHUNK_SIZE"] = str(args.horizon)
 import flash_rt.frontends.torch.pi05_rtx as _fe  # noqa: E402
 
 _orig_init = _fe.Pi05TorchFrontendRtx.__init__
@@ -158,6 +165,80 @@ def stats(ms):
     return (f"mean {ms.mean():.1f} | p50 {np.percentile(ms, 50):.1f} | "
             f"min {ms.min():.1f} | max {ms.max():.1f} ms")
 
+
+# ── q/Ctrl-C 即时退出（SDK 阻塞 C++ 调用会吞中断；类与 run_dataset_execute.py 同源）──
+import atexit  # noqa: E402
+import select  # noqa: E402
+import signal  # noqa: E402
+import termios  # noqa: E402
+import tty  # noqa: E402
+
+
+class QuitWatcher:
+    """后台线程监听键盘 q：任何阶段即时退出（SDK 阻塞 C++ 调用吞 Ctrl-C）。
+
+    Ctrl-C/SIGTERM 直通本线程：signal.set_wakeup_fd 让 C 层收到信号即往管道
+    写字节（不等主线程跑 Python 处理函数——主线程卡死在 SDK C++ 调用时那才
+    是致命的，2026-09-29 真机实录：q 之外所有中断全被吞，只能 kill -9）。
+    管道有字节 → 恢复终端 + os._exit，绕过一切被吞的可能。"""
+
+    def __init__(self):
+        self.fd = sys.stdin.fileno()
+        self._old = None
+        self._wake_r = None
+        self.active = threading.Event()
+        if os.isatty(self.fd):
+            self._old = termios.tcgetattr(self.fd)
+            tty.setcbreak(self.fd)
+            atexit.register(self.restore)
+            r, w = os.pipe()
+            os.set_blocking(w, False)
+            signal.set_wakeup_fd(w)
+            signal.signal(signal.SIGINT, lambda *_: None)     # 退出走管道，别靠
+            signal.signal(signal.SIGTERM, lambda *_: None)    # 会被推迟的异常
+            self._wake_r = r
+            self.active.set()
+            threading.Thread(target=self._loop, daemon=True).start()
+            print("（随时按 q 或 Ctrl-C 退出；本脚本只读不下发运动）")
+
+    def restore(self):
+        if self._old is not None:
+            try:
+                termios.tcsetattr(self.fd, termios.TCSADRAIN, self._old)
+            except Exception:
+                pass
+            self._old = None
+
+    def pause(self):
+        self.active.clear()
+
+    def resume(self):
+        self.active.set()
+
+    def _loop(self):
+        while True:
+            try:
+                fds = [self._wake_r] if self._wake_r is not None else []
+                if self.active.is_set():
+                    fds.append(sys.stdin)
+                if not fds or not select.select(fds, [], [], 0.2)[0]:
+                    continue
+                if (self._wake_r is not None
+                        and select.select([self._wake_r], [], [], 0)[0]):
+                    os.read(self._wake_r, 1)
+                    print("\n⛔ 收到中断信号 —— 立即退出（本脚本只读不下发运动）")
+                    self.restore()
+                    os._exit(130)
+                if sys.stdin.read(1) in ("q", "Q"):
+                    print("\n⛔ 按下 q —— 立即退出（本脚本只读不下发运动）")
+                    self.restore()
+                    os._exit(2)
+            except Exception:
+                self.restore()
+                os._exit(3)   # 监听线程死了比静默更危险：宁可误退不可失控
+
+
+WATCH = QuitWatcher()
 
 # ── ① SDK 初始化（只读）──
 robot = GalbotRobot()
@@ -240,12 +321,13 @@ try:
     print(f"[② 取图+读关节+解码 ×{n}] {stats(grab_ms)}")
     if n:
         print(f"[③ 端到端节拍 ×{n}] {stats(round_ms)} | 动作步率 "
-              f"{10 / (np.mean(round_ms) / 1000):.1f} 步/秒（每轮出 10 步）")
+              f"{args.horizon / (np.mean(round_ms) / 1000):.1f} 步/秒"
+              f"（每轮出 {args.horizon} 步）")
 
     # ── ⑤ 实时性判定 ──
-    window = 10 * 1000.0 / args.ctrl_hz
+    window = args.horizon * 1000.0 / args.ctrl_hz
     p50 = float(np.percentile(infer_ms, 50)) if infer_ms else float("nan")
-    print(f"[实时性] 控制窗口 = 10 步 ÷ {args.ctrl_hz}Hz = {window:.0f} ms → "
+    print(f"[实时性] 控制窗口 = {args.horizon} 步 ÷ {args.ctrl_hz}Hz = {window:.0f} ms → "
           + ("✅ 推理追得上执行" if p50 <= window
              else f"❌ 推理落后 {(p50 - window):.0f} ms（降控制频率/减视角/修 graph）"))
     base = BASELINE.get((args.tier, VIEWS))

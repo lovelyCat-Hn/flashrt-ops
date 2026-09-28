@@ -14,7 +14,7 @@
   LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
   ~/miniforge3/envs/flash_pyrt311/bin/python \
       ~/holy/scripts/inference/run_g1_execute.py \
-      [--ckpt ~/holy/models/pi05_lerobot_base] [--exec] [--steps 3] \
+      [--ckpt ~/holy/models/pi05_lerobot_base] [--exec] [--steps 3] [--horizon 50] \
       [--delta-max 0.05] [--force-state-dim] [--prompt "..."] [--grip]
 
 真微调权重到位后: --ckpt <g1_ckpt_prep 产出的部署目录>，去掉 --force-state-dim，
@@ -26,6 +26,8 @@ import g1_config  # noqa: E402  同目录共享配置（CLI > config/g1.toml > �
 import json
 import os
 import pathlib
+import sys
+import threading
 import time
 
 ap = argparse.ArgumentParser(description=__doc__,
@@ -34,7 +36,11 @@ ap.add_argument("--ckpt", default=None, help="部署目录（默认 config [run]
 ap.add_argument("--prompt", default=None, help="任务指令（默认 config [run].prompt，须用训练原句）")
 ap.add_argument("--exec", dest="do_exec", action="store_true",
                 help="真实下发关节命令（默认干跑只打印；不进配置，仅 CLI）")
-ap.add_argument("--steps", type=int, default=None, help="执行 chunk 前 K 步，≤10（config [execute].steps）")
+ap.add_argument("--steps", type=int, default=None,
+                help="执行 chunk 前 K 步，≤ --horizon（config [execute].steps）")
+ap.add_argument("--horizon", type=int, default=10,
+                help="chunk 长度（训练=50，2026-09-28 实锤；10=部署切片。"
+                     "50 块延迟几乎不变，质量甜点区≈前 15-20 步；env 自动设）")
 ap.add_argument("--delta-max", type=float, default=None,
                 help="每步相对当前读数的限幅 rad（config [execute].delta_max）")
 ap.add_argument("--speed", type=float, default=None, help="关节速度上限 rad/s（config [execute].speed）")
@@ -101,6 +107,8 @@ GRIP_WMAX = _gcal.get("width_max")
 os.environ.setdefault("FVK_PI05_RTX_FORCE_BF16", "1")
 os.environ.setdefault("PI05_NO_GRAPH", "1")             # r35.6 Instantiate 段错误：本机 FlashRT
                                                         # 未打 WithFlags 热修(hotfix_flashrt/)前必须 eager
+# chunk 长度：pi05_rtx 前端模块导入时读此 env，必须在下面 import flash_rt 前定死
+os.environ["FLASH_RT_PI05_ACTION_CHUNK_SIZE"] = str(args.horizon)
 
 import numpy as np  # noqa: E402
 import cv2  # noqa: E402
@@ -201,6 +209,81 @@ def send_grip(robot, chunk_row):
     return "  ".join(parts)
 
 
+# ── q/Ctrl-C 即时退出（SDK 阻塞 C++ 调用会吞中断；类与 run_dataset_execute.py 同源）──
+import atexit  # noqa: E402
+import select  # noqa: E402
+import signal  # noqa: E402
+import termios  # noqa: E402
+import tty  # noqa: E402
+
+
+class QuitWatcher:
+    """后台线程监听键盘 q：任何阶段即时退出（SDK 阻塞 C++ 调用吞 Ctrl-C）。
+
+    Ctrl-C/SIGTERM 直通本线程：signal.set_wakeup_fd 让 C 层收到信号即往管道
+    写字节（不等主线程跑 Python 处理函数——主线程卡死在 SDK C++ 调用时那才
+    是致命的，2026-09-29 真机实录：q 之外所有中断全被吞，只能 kill -9）。
+    管道有字节 → 恢复终端 + os._exit，绕过一切被吞的可能。"""
+
+    def __init__(self):
+        self.fd = sys.stdin.fileno()
+        self._old = None
+        self._wake_r = None
+        self.active = threading.Event()
+        if os.isatty(self.fd):
+            self._old = termios.tcgetattr(self.fd)
+            tty.setcbreak(self.fd)
+            atexit.register(self.restore)
+            r, w = os.pipe()
+            os.set_blocking(w, False)
+            signal.set_wakeup_fd(w)
+            signal.signal(signal.SIGINT, lambda *_: None)     # 退出走管道，别靠
+            signal.signal(signal.SIGTERM, lambda *_: None)    # 会被推迟的异常
+            self._wake_r = r
+            self.active.set()
+            threading.Thread(target=self._loop, daemon=True).start()
+            print("（随时按 q 或 Ctrl-C 退出；急停第一优先级）")
+
+    def restore(self):
+        if self._old is not None:
+            try:
+                termios.tcsetattr(self.fd, termios.TCSADRAIN, self._old)
+            except Exception:
+                pass
+            self._old = None
+
+    def pause(self):
+        self.active.clear()
+
+    def resume(self):
+        self.active.set()
+
+    def _loop(self):
+        while True:
+            try:
+                fds = [self._wake_r] if self._wake_r is not None else []
+                if self.active.is_set():
+                    fds.append(sys.stdin)
+                if not fds or not select.select(fds, [], [], 0.2)[0]:
+                    continue
+                if (self._wake_r is not None
+                        and select.select([self._wake_r], [], [], 0)[0]):
+                    os.read(self._wake_r, 1)
+                    print("\n⛔ 收到中断信号 —— 立即退出"
+                          "（已下发目标可能仍在限速执行）")
+                    self.restore()
+                    os._exit(130)
+                if sys.stdin.read(1) in ("q", "Q"):
+                    print("\n⛔ 按下 q —— 立即退出（已下发目标可能仍在限速执行）")
+                    self.restore()
+                    os._exit(2)
+            except Exception:
+                self.restore()
+                os._exit(3)   # 监听线程死了比静默更危险：宁可误退不可失控
+
+
+WATCH = QuitWatcher()
+
 # ── ① SDK 初始化（控制器前置，模式同 reset_pos.py 已验证用法）──
 print("== ① SDK 初始化（确认急停可及！）==")
 robot = GalbotRobot()
@@ -270,11 +353,14 @@ for k in range(n_steps):
 if not args.do_exec:
     print("\n[干跑] 未下发任何命令。确认急停可及后，加 --exec 真实执行。")
     robot.request_shutdown(); robot.wait_for_shutdown(); robot.destroy()
+    WATCH.restore()
     os._exit(0)
 
+WATCH.pause()   # 提示符期间 stdin 交给 input()，q 监听暂停（Ctrl-C 管道仍直通）
 input(f"\n⚠ 将按 ≤{args.speed} rad/s 真实驱动双臂 {n_steps} 步"
       + ("并下发夹爪（标定宽度）" if GRIP else "") + "。急停就绪后回车开始，"
-      f"Ctrl-C 中止...")
+      f"Ctrl-C/q 中止...")
+WATCH.resume()
 
 errs = []
 try:
@@ -310,4 +396,5 @@ finally:
               f"max {max(errs) * 1000:.1f} mrad（<20 mrad 视为到位）")
     robot.request_shutdown(); robot.wait_for_shutdown(); robot.destroy()
     print("SDK 已关闭")
+    WATCH.restore()
     os._exit(0)   # SDK 残留线程，干净退出（fleet 已知坑）
