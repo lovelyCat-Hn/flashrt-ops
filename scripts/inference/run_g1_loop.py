@@ -53,7 +53,11 @@ ap.add_argument("--exec", dest="do_exec", action="store_true",
                 help="真实连续驱动双臂（默认干跑只打印首轮计划；不进配置，仅 CLI）")
 ap.add_argument("--rounds", type=int, default=None, help="推理→执行循环轮数（config [loop].rounds）")
 ap.add_argument("--steps-per-round", type=int, default=None,
-                help="每轮执行 chunk 前 K 步（模型 10 步/次；config [loop].steps_per_round）")
+                help="每轮执行 chunk 前 K 步（≤ --horizon；config [loop].steps_per_round）")
+ap.add_argument("--horizon", type=int, default=10,
+                help="chunk 长度（训练=50，2026-09-28 实锤；10=部署切片。"
+                     "50 块延迟几乎不变，质量甜点区≈前 15-20 步，配合 "
+                     "--steps-per-round 消费；env 自动设，回放实验见 execute）")
 ap.add_argument("--steps-per-cmd", type=int, default=None,
                 help="合步：一条 SDK 指令跨 K 个 chunk 步（1=逐步；"
                      "3=整轮一条平滑轮廓，起停次数 1/3，实测提速只会加剧"
@@ -229,6 +233,8 @@ os.environ.setdefault("PI05_NO_GRAPH", "1")   # r35.6 Instantiate 段错误：�
 # 重 autotune（~800ms，2026-09-23 合成实验实锤）。fixed=定长 200 一条
 # pipeline 只换 embeds，实测含 state 切换恒定 240-253ms
 os.environ.setdefault("FLASHRT_PI05_STATE_PROMPT_MODE", "fixed")
+# chunk 长度：pi05_rtx 前端模块导入时读此 env，必须在下面 import flash_rt 前定死
+os.environ["FLASH_RT_PI05_ACTION_CHUNK_SIZE"] = str(args.horizon)
 
 import numpy as np  # noqa: E402
 import cv2  # noqa: E402
@@ -383,7 +389,7 @@ for _ in range(3):
     model.predict(grab_views(robot), prompt=args.prompt,
                   state=normalize_state(read_joints(robot, STATE_NAMES), ns))
 print("预热推理 ×3 完成（吸收惰性引擎构建）")
-n_steps = max(1, min(args.steps_per_round, 10))
+n_steps = max(1, min(args.steps_per_round, args.horizon))
 spc = max(1, min(args.steps_per_cmd, n_steps))   # 合步宽度（≤ 每轮步数）
 BUDGET = spc * args.delta_max                    # 每条指令位移限幅
 V_MIN = 0.02                                     # 半程配速下限 rad/s（驻停时缓爬）
