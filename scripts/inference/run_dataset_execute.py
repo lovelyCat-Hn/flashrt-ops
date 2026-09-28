@@ -18,6 +18,9 @@
   只动双臂 14 关节；每条指令位移限幅；偏离起始位护栏；回车确认 + q/Ctrl-C
   即退（信号直通管道，主线程卡死也能退）+ 物理急停第一优先级；
   默认干跑只打印计划，--exec 才真实执行。
+  流水线：下一块推理与当前块执行重叠（_PredictJob，run_g1_loop 同款），
+  轮间零等待；条件 state 比消费时刻早一个执行窗，由 plan_cmd 的
+  "当前+Δ"自校正消化。
 
 用法:
   ~/holy/run.sh ~/holy/scripts/inference/run_dataset_execute.py \
@@ -319,21 +322,58 @@ def _acts(x):
     return np.asarray(x, dtype=np.float32)
 
 
-def predict_chunk(obs, fidx):
-    """set_prompt + 按帧号固定噪声（与回放验证同路径）。
+class _PredictJob:
+    """后台推理作业：GPU 推理与 SDK 阻塞执行重叠，消轮间 ~330ms 空窗
+    （移植自 run_g1_loop 的流水线。FlashRT 的 RTC=prefix 对齐只有 Thor
+    路径有，Orin 无此实现——本类是纯重叠版）。
 
-    不用 predict：它每轮掷随机噪声——同图换噪声两两 cos≈0.25（混沌底，
-    ab_real_camera 实测），等于每轮从动作分布重新抽签，会抽出抬臂等野
-    策略。固定噪声下回放帧 0-21 的输出就是"保持小步接近"，与此处预期
-    一致。state 每次仍取真机实时值。
+    只有 set_prompt+infer 放后台；取图/读关节/下发全留主线程，不碰 SDK
+    线程安全。同一时刻只有一个 predict 在飞（消费完才启动下一个）。
+    噪声仍按 帧号+seed 固定（同帧必同输出），语义与串行版一致。
     """
-    model.set_prompt(PROMPT, state=state_n())
-    gen = torch.Generator().manual_seed(args.seed + fidx)
-    return _acts(model.infer(obs, noise=torch.randn(args.horizon, 32, generator=gen)))
+
+    def __init__(self):
+        self._done = threading.Event()
+        self._res = None
+        self._err = None
+        self.dur_ms = 0.0
+
+    def start(self, obs, fidx, st_n):
+        """st_n 由主线程在启动时刻读（SDK 不进后台线程）。
+
+        ⚠ 与串行版的语义差：下一块的 state 取自本轮执行【前】，比消费
+        时刻早一个执行窗（15 步 ≈ 0.5s 数据集时）。执行侧 plan_cmd 是
+        "当前+Δ"自校正，staleness 由闭环消化（loop 同款真机 5/5 验证）。
+        """
+        self._done.clear()
+        self._err = None
+
+        def _run():
+            t = time.perf_counter()
+            try:
+                model.set_prompt(PROMPT, state=st_n)
+                gen = torch.Generator().manual_seed(args.seed + fidx)
+                self._res = _acts(model.infer(
+                    obs, noise=torch.randn(args.horizon, 32,
+                                           generator=gen)))
+            except Exception as e:          # 主线程 result() 时再抛
+                self._err = e
+            self.dur_ms = (time.perf_counter() - t) * 1000
+            self._done.set()
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def result(self):
+        self._done.wait()
+        if self._err is not None:
+            raise self._err
+        return self._res
 
 
 model.predict(obs0, prompt=PROMPT, state=state_n())   # 首次必须走 predict 建管线
-predict_chunk(obs0, args.start_frame)                 # 再吸收一次（固定噪声路径）
+_warm = _PredictJob()
+_warm.start(grab_frame(args.start_frame), args.start_frame, state_n())
+_warm.result()                                        # 再吸收一次（固定噪声路径）
 print("预热推理 ×2 完成")
 
 n_steps = max(1, min(args.steps_per_round, args.horizon))
@@ -362,7 +402,9 @@ if not args.do_exec:
     base_ref = cur if args.align else HOME   # 对齐后护栏从帧 0 位姿起算
     for r in range(args.rounds):
         f = min(cursor + r * n_steps, ep_last)
-        chunk = predict_chunk(grab_frame(f), f)
+        _j = _PredictJob()
+        _j.start(grab_frame(f), f, state_n())
+        chunk = _j.result()
         tgt = plan_cmd(chunk, n_steps - 1, cur)
         drift = float(np.max(np.abs(tgt - base_ref)))
         step_d = [float(np.max(np.abs(
@@ -433,12 +475,19 @@ if args.align:
 cmd_hist = None
 aborted = False
 lat = []
+job = _PredictJob()
+job.start(grab_frame(min(cursor, ep_last)), min(cursor, ep_last), state_n())   # 轮 0
 for r in range(args.rounds):
+    if aborted:
+        break
     f = min(cursor, ep_last)
-    t0 = time.perf_counter()
-    chunk = predict_chunk(grab_frame(f), f)
-    lat.append((time.perf_counter() - t0) * 1000)
-    print(f"\n── 轮 {r} | 数据集帧 {f} | 推理 {lat[-1]:.0f} ms ──")
+    chunk = job.result()             # 上轮执行期间启动的推理——此刻早已就绪
+    lat.append(job.dur_ms)
+    print(f"\n── 轮 {r} | 数据集帧 {f} | 推理 {job.dur_ms:.0f} ms"
+          "（与上轮执行重叠，零等待）──")
+    cursor_next = cursor + n_steps
+    if r + 1 < args.rounds and cursor_next + 1 <= ep_last:
+        job.start(grab_frame(cursor_next), cursor_next, state_n())   # 藏进本轮执行期
     for k in range(0, n_steps, spc):
         cur = read_joints(ARM_NAMES)
         tgt = plan_cmd(chunk, k, cur)
