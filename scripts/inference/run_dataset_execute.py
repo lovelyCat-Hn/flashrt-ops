@@ -23,8 +23,11 @@
   ~/holy/run.sh ~/holy/scripts/inference/run_dataset_execute.py \
       [--episode 0] [--start-frame 0] [--rounds 10] \
       [--steps-per-round 3] [--steps-per-cmd 3] [--delta-max 0.05] \
-      [--speed 0.15] [--max-excursion 0.5] [--switch-dist 0.06] \
-      [--tier bf16] [--exec]
+      [--speed 0.15] [--max-excursion 3.0] [--switch-dist 0.06] \
+      [--tier bf16] [--horizon 10] [--exec]
+horizon：--horizon 50 用训练原生长度整块推理（env 自动设，延迟几乎不变），
+配合 --steps-per-round 15~20 消费甜点区（2026-09-28 回放实验：pos20+ 衰减，
+pos40-49 不可用）。
 """
 import argparse
 import atexit
@@ -53,7 +56,7 @@ ap.add_argument("--exec", dest="do_exec", action="store_true",
                 help="真实驱动双臂（默认干跑只打印计划）")
 ap.add_argument("--rounds", type=int, default=10, help="推理→执行轮数")
 ap.add_argument("--steps-per-round", type=int, default=3,
-                help="每轮消费 chunk 前 K 步（模型 10 步/次）")
+                help="每轮消费 chunk 前 K 步（≤ --horizon；50 块甜点区 15-20）")
 ap.add_argument("--steps-per-cmd", type=int, default=3,
                 help="合步：一条 SDK 指令跨 K 个 chunk 步（track 平滑轮廓）")
 ap.add_argument("--delta-max", type=float, default=0.05,
@@ -75,10 +78,16 @@ ap.add_argument("--seed", type=int, default=0,
                      "同图换噪声两两 cos≈0.25，会抽出抬臂等野策略）")
 ap.add_argument("--tier", default="bf16", choices=("bf16", "int8_enc", "int8_full"),
                 help="量化档（默认 bf16；int8 数值已 A/B 验证等价，快 ~100ms）")
+ap.add_argument("--horizon", type=int, default=10,
+                help="chunk 长度（训练=50，2026-09-28 实锤；10=原部署切片。"
+                     "50 块延迟几乎不变，质量甜点区≈前 15-20 步，配合 "
+                     "--steps-per-round 消费）")
 ap.add_argument("--grip", action="store_true",
                 help="（未实现）夹爪增量语义换算完成前一律拒绝")
 args = ap.parse_args()
 sys.stdout.reconfigure(line_buffering=True)   # os._exit 不刷缓冲，管道跑必须行缓冲
+# chunk 长度：pi05_rtx 前端模块导入时读此 env，必须在 import flash_rt 前定死
+os.environ["FLASH_RT_PI05_ACTION_CHUNK_SIZE"] = str(args.horizon)
 g1_config.apply(args, {"ckpt": ("run", "ckpt")})
 if args.grip:
     raise SystemExit("夹爪维=绝对指令%（exclude_joints 实锤），下发本身无需换算，"
@@ -303,7 +312,7 @@ state_n = lambda: normalize_state(
 
 
 def _acts(x):
-    """infer 返回 dict → (10,16) 动作数组（与回放脚本同提取）。"""
+    """infer 返回 dict → (H,16) 动作数组（H=args.horizon，与回放脚本同提取）。"""
     if isinstance(x, dict):
         x = x.get("actions", x.get("raw_actions",
                     next(v for v in x.values() if hasattr(v, "shape"))))
@@ -320,14 +329,14 @@ def predict_chunk(obs, fidx):
     """
     model.set_prompt(PROMPT, state=state_n())
     gen = torch.Generator().manual_seed(args.seed + fidx)
-    return _acts(model.infer(obs, noise=torch.randn(10, 32, generator=gen)))
+    return _acts(model.infer(obs, noise=torch.randn(args.horizon, 32, generator=gen)))
 
 
 model.predict(obs0, prompt=PROMPT, state=state_n())   # 首次必须走 predict 建管线
 predict_chunk(obs0, args.start_frame)                 # 再吸收一次（固定噪声路径）
 print("预热推理 ×2 完成")
 
-n_steps = max(1, min(args.steps_per_round, 10))
+n_steps = max(1, min(args.steps_per_round, args.horizon))
 spc = max(1, min(args.steps_per_cmd, n_steps))
 BUDGET = spc * args.delta_max      # 每条指令位移限幅 = 步数×单步限幅
 cursor = args.start_frame
