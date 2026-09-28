@@ -10,8 +10,9 @@
   是增量——增量当绝对值会变成"每条指令恒向同方向滑 delta_max"，疑似闭环旧案
   "漂移持续同号 ~95 mrad/指令"的真正来源。本脚本目标 = 当前 + clip(Δ合步和,
   ±步数×delta_max)。
-  夹爪维度也是增量百分比（数据 Δ 可达 −33.5/帧），当绝对 0~100% 下发会把
-  负增量 clip 成 0% = 砸紧——增量→绝对目标的换算未设计完成前 --grip 拒绝。
+  夹爪维度=【绝对指令 %】（训练处理器 exclude_joints=["gripper"]，臂维才做
+  delta 化，2026-09-28 回放实证：模型爪输出对绝对 action MAE ~1%）——下发
+  无需换算，但本脚本 --grip 未真机验证前仍拒绝（闭环 grip 走 run_g1_loop）。
 
 安全设计（同 run_g1_loop）：
   只动双臂 14 关节；每条指令位移限幅；偏离起始位护栏（默认 0.5 rad，比
@@ -77,8 +78,9 @@ args = ap.parse_args()
 sys.stdout.reconfigure(line_buffering=True)   # os._exit 不刷缓冲，管道跑必须行缓冲
 g1_config.apply(args, {"ckpt": ("run", "ckpt")})
 if args.grip:
-    raise SystemExit("夹爪维度是增量百分比，直接当绝对目标下发=砸紧。增量→绝对"
-                     "换算未设计完成，本脚本暂只动双臂关节。")
+    raise SystemExit("夹爪维=绝对指令%（exclude_joints 实锤），下发本身无需换算，"
+                     "但本脚本 --grip 未真机验证。暂只动双臂关节；闭环 grip 用 "
+                     "run_g1_loop --grip（已干跑验证）。")
 
 if args.tier == "int8_full":
     os.environ.setdefault("FVK_PI05_RTX_FORCE_INT8", "1")

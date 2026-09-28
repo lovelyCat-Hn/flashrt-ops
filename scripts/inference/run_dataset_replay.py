@@ -6,8 +6,10 @@
   state 归一化（数据集夹爪已是 0~100% 训练单位，不做 SDK 宽度换算）→
   model.infer(显式固定噪声——predict 的随机噪声会让单帧对比撞上
   "两两 cos≈0.25"的混沌底，见 ab_real_camera 教训) → (10,16) chunk。
-【动作语义 = 增量】模型输出 Δ(arm rad/夹爪%)，真值 Δ = action[t] − state[t]；
-保持帧（真值Δ≈0）输出≈0 是正确行为，cos 对绝对 action 无意义。
+【动作语义 = 分通道】臂 14 维是增量 Δ rad（action−state，真值 Δ 同式）；
+夹爪 2 维是【绝对指令 %】（训练处理器 exclude_joints=["gripper"]，不做
+delta 化——持物时 state 被撑 33% 而指令仍是 0%，对 Δ 比会差出 state 基线）。
+臂保持帧（真值Δ≈0）输出≈0 是正确行为，cos 对绝对 action 无意义。
 
 用法:
   ~/holy/run.sh ~/holy/scripts/inference/run_dataset_replay.py \
@@ -31,7 +33,8 @@ ap.add_argument("--ckpt", default=None, help="部署目录（默认 config [run]
 ap.add_argument("--npz", default="~/holy/datasets/replay_input.npz")
 ap.add_argument("--episode", type=int, default=None, help="只回放该 episode（默认 npz 全部）")
 ap.add_argument("--stride", type=int, default=30, help="抽帧步长（30=每秒 1 帧）")
-ap.add_argument("--max", type=int, default=20, help="最多回放多少帧")
+ap.add_argument("--max", type=int, default=20,
+                help="每条 episode 最多回放多少帧（不给 --episode 时全部 episode 各取这么多）")
 ap.add_argument("--seed", type=int, default=0, help="固定噪声种子（每帧 seed+序号）")
 ap.add_argument("--prompt", default=None, help="覆盖任务句（默认用数据集 task 原句）")
 ap.add_argument("--tier", default=None, choices=("bf16", "int8_enc", "int8_full"),
@@ -116,7 +119,13 @@ for e in np.unique(ep_id):
     ep_last[int(e)] = frame_idx[ep_id == e].max()
 rows = np.where(mask)[0]
 rows = np.array([i for i in rows if frame_idx[i] + 10 <= ep_last[int(ep_id[i])]])
-rows = rows[:args.max]
+_per, keep = {}, []                    # --max 是每条 episode 的上限，不是全局
+for i in rows:
+    e = int(ep_id[i])
+    if _per.get(e, 0) < args.max:
+        _per[e] = _per.get(e, 0) + 1
+        keep.append(i)
+rows = np.array(keep)
 assert len(rows), "没有可选帧（--max/--stride/--episode 放宽试试）"
 print(f"回放 {len(rows)} 帧（stride={args.stride}, seed={args.seed}, "
       f"ckpt={CKPT.name}, tier={args.tier or 'config默认'}）")
@@ -174,19 +183,33 @@ def _acts(x):
     return np.asarray(x, dtype=np.float32)
 
 
+ARM_IDX = np.r_[0:7, 8:15]             # 14 臂维（跳过 dim7/15 夹爪 %）
+GRIP_IDX = [7, 15]
+
+
 def chunk_vs_labels(chunk: np.ndarray, row: int):
     """chunk (10,16) 与真值对比。模型输出是【增量】(action−state，右臂在前16维，
-    夹爪是百分比增量)：对绝对 action 的余弦无意义，主对比 = 增量 vs 增量。"""
+    夹爪是百分比增量)：对绝对 action 的余弦无意义，主对比 = 增量 vs 增量。
+    指标分通道：cos 只算 14 臂维——夹爪 % 增量（±30）会淹没臂维（±0.05 rad）
+    的方向，混算会把臂对了的帧拖崩（2026-09-28 实证：16 维全轨均值 0.247，
+    对方 tf_rollout 同 ep0 臂维口径 p50 0.92）。
+    ⚠ 夹爪维语义=【绝对指令 %】不是增量：训练处理器
+    relative_actions_processor(exclude_joints=["gripper"])，臂维 delta 化、
+    夹爪保持绝对（模型输出 ≈0=「闭合指令」，而持物时 state 被撑 33%）。
+    故爪 MAE 对【绝对 action】比（=部署下发语义），对 Δ 比会差出一个
+    state 基线（task1 起始恒 33% 的假错）。"""
     e, f = int(ep_id[row]), int(frame_idx[row])
     s0 = np.where((ep_id == e) & (frame_idx == f))[0][0]
     dl0 = actions[s0:s0 + 10] - states[s0:s0 + 10, :ACTION_DIM]    # 0对齐: Δ[t+j]
     dl1 = actions[s0 + 1:s0 + 11] - states[s0 + 1:s0 + 11, :ACTION_DIM]
     def cos_err(l):
-        c = [float(chunk[j] @ l[j] /
-               (np.linalg.norm(chunk[j]) * np.linalg.norm(l[j]) + 1e-9))
-             for j in range(10)]
-        mae0 = float(np.abs(chunk[0] - l[0]).mean())
-        return c, mae0
+        ca = [float(chunk[j][ARM_IDX] @ l[j][ARM_IDX] /
+               (np.linalg.norm(chunk[j][ARM_IDX]) * np.linalg.norm(l[j][ARM_IDX])
+                + 1e-9)) for j in range(10)]
+        mae_arm = float(np.abs(chunk[0][ARM_IDX] - l[0][ARM_IDX]).mean())
+        mae_grip = float(np.abs(chunk[0][GRIP_IDX]
+                                - actions[s0][GRIP_IDX]).mean())   # 绝对 vs 绝对
+        return ca, mae_arm, mae_grip
     return dl0, cos_err(dl0), cos_err(dl1)
 
 
@@ -197,7 +220,7 @@ model.predict(grab(rows[0]), prompt=str(tasks[task_idx[rows[0]]]),
 
 gen = torch.Generator().manual_seed(args.seed)
 lat, cos0, cos1, hold_n = [], [], [], 0
-print("\n 帧 |  ep | frame |  ms | cosΔ(0对齐) | cosΔ(1对齐) | MAEΔ0")
+print("\n 帧 |  ep | frame |  ms | cosΔ臂(0) | cosΔ臂(1) | MAE臂 mrad | 爪MAE%")
 for n, r in enumerate(rows):
     obs = grab(r)
     if obs is None:
@@ -214,7 +237,7 @@ for n, r in enumerate(rows):
     lat.append((time.perf_counter() - t0) * 1000)
     if chunk.shape[0] != 10 or chunk.shape[1] != ACTION_DIM:
         raise SystemExit(f"输出 shape {chunk.shape} ≠ (10,{ACTION_DIM})")
-    dl0, (c0, m0), (c1, m1) = chunk_vs_labels(chunk, r)
+    dl0, (c0, m0, g0), (c1, m1, g1) = chunk_vs_labels(chunk, r)
     if args.dump:
         names = json.loads(str(z["action_names_json"]))
         print(f"  chunk[0](增量): {np.round(chunk[0], 3).tolist()}")
@@ -224,16 +247,18 @@ for n, r in enumerate(rows):
         print(f"  |chunk|={np.linalg.norm(chunk[0]):.3f} |真值Δ|={np.linalg.norm(dl0[0]):.3f}")
     cos0.append(float(np.mean(c0))); cos1.append(float(np.mean(c1)))
     out_q = float(np.mean((chunk < act_q01) | (chunk > act_q99)))
-    hold = np.linalg.norm(dl0[0]) < 0.1 and np.linalg.norm(chunk[0]) < 0.1
-    hold_n += hold        # 真值和输出都≈0 的保持帧：cos 数值无意义，方向对了就行
+    hold = (np.linalg.norm(dl0[0][ARM_IDX]) < 0.1
+            and np.linalg.norm(chunk[0][ARM_IDX]) < 0.1)
+    hold_n += hold        # 真值和输出臂维都≈0 的保持帧：cos 数值无意义，方向对就行
     print(f" {n:3d} | {ep_id[r]:3d} | {frame_idx[r]:5d} | {lat[-1]:3.0f} "
-          f"| {np.mean(c0):.3f} | {np.mean(c1):.3f} | {m0:.3f}"
+          f"| {np.mean(c0):.3f} | {np.mean(c1):.3f} | {m0*1000:.0f} | {g0:.1f}"
           + ("  (保持帧)" if hold else ""))
 
 print(f"\n[延迟 ×{len(lat)}] mean {np.mean(lat):.1f} | p50 "
       f"{np.percentile(lat, 50):.1f} | max {np.max(lat):.1f} ms")
-print(f"[对比真值Δ] 平均 cos：0对齐 {np.mean(cos0):.3f} | 1对齐 {np.mean(cos1):.3f}"
-      "（增量语义：哪个高即该数据的 chunk 对齐约定；保持帧 cos 无意义）")
+print(f"[对比真值Δ] 臂维平均 cos：0对齐 {np.mean(cos0):.3f} | 1对齐 {np.mean(cos1):.3f}"
+      "（增量语义：哪个高即该数据的 chunk 对齐约定；保持帧 cos 无意义；"
+      "夹爪单独看 爪MAE% 列——臂好爪坏要分开判读）")
 print(f"[落域] chunkΔ 步越出数据集 q01~q99 的维占比 = {out_q:.0%}；保持帧 {hold_n}/{len(rows)}")
 if args.check_graph:
     print(f"[graph] CUDAGraph.replay 调用 {_replays[0]} 次（>0=图重放生效）")
