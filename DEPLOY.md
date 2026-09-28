@@ -44,6 +44,27 @@ v2 相比 v1 多了三块（都是踩坑补出来的，缺一不可）：
 2. `.cache/flash_rt/paligemma_tokenizer.model` — 4.26MB PaliGemMa tokenizer（HF google/paligemma 是 gated 仓，GCS 慢时用 `curl -C -` 续传）
 3. `holy/scripts/` — 全部验证/基准脚本 + 本指南
 
+### v3 = 纯环境包（2026-09-28，不含权重，7.5G）
+
+v2 的 21G+ 里 `holy/models`（现 23G）占大头；环境本体其实只有 7.5G
+（conda env 内对 pkgs 有大量硬链接，du 显示 ~3G、tar 实写 7.5G 属正常）。
+
+```bash
+cd ~
+tar --exclude='miniforge3/pkgs' --exclude='holy/FlashRT/build*' \
+    -cf ~/flashrt_bundle_v3_env.tar \
+    miniforge3 holy/FlashRT holy/cuda_warmup.py holy/pytorch/dist \
+    .cache/flash_rt
+# 成品 7.5G，NVMe 打包 35s；同样不要加 -z。v2 原方去掉 holy/models 即 v3。
+```
+
+内容 = v2 减 `holy/models`：conda 全环境（flash_pyrt311/flashrt/pi05）、
+FlashRT 源码、torch aarch64 wheel、PaliGemMa tokenizer。**权重/模型目录
+不随包**——新机要跑推理另拷 `holy/models`（或继续用 v2 全量包）；脚本/
+文档照旧走 git 轨。部署步骤同 §2（解压 → git pull → 热修 → 验收），
+仅第 ① 步的 tar 文件名换成 v3；没拷 models 前 verify_deploy.sh 的
+权重与推理项会报错（它检查 base 权重字节数并实际加载模型），属预期。
+
 ## 2. 目标机部署
 
 ```bash
