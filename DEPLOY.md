@@ -41,7 +41,7 @@ tar --exclude='miniforge3/pkgs' --exclude='holy/FlashRT/build*' \
 
 v2 相比 v1 多了三块（都是踩坑补出来的，缺一不可）：
 1. `holy/models/pi05_lerobot_base/` — 权重 14G + **`assets/physical-intelligence/libero/norm_stats.json`**（openpi 官方 q01/q99 统计，HF 仓不带！）
-2. `.cache/flash_rt/paligemma_tokenizer.model` — 4.26MB PaliGemMa tokenizer（HF google/paligemma 是 gated 仓，GCS 慢时用 `curl -C -` 续传）
+2. `.cache/flash_rt/paligemma_tokenizer.model` — 4.26MB PaliGemMa tokenizer（HF google/paligemma 是 gated 仓，GCS 慢时用 `curl -C -` 续传；**2026-09-29 起 ops 仓库 `assets/paligemma_tokenizer.model` 也有一份，git 拉取后拷到位即可，不依赖 GCS**）
 3. `holy/scripts/` — 全部验证/基准脚本 + 本指南
 
 ### v3 = 纯环境包（2026-09-28，不含权重，7.5G）
@@ -129,7 +129,7 @@ LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
 | 2 | 无 conda 命令 | `conda: command not found` | 用 `~/miniforge3/envs/flash_pyrt311/bin/python`；或 `source ~/miniconda3/etc/profile.d/conda.sh`（若存在 miniconda） |
 | 3 | 环境变量泄漏 | bashrc 125/132 行把 `/data/galbot/lib` 注入 LD/PYTHONPATH | 纯 FlashRT 先 unset；用 SDK 时显式带上（见上） |
 | 4 | norm_stats 缺失 | `FileNotFoundError: norm_stats not found` | HF 仓不带，必须 openpi GCS 版（包里已带）；勿用 lerobot 数据集 stats（min/max 假充 q01/q99 有 1~5% 漂移） |
-| 5 | tokenizer 缺失 | `paligemma_tokenizer.model not found` / `could not parse ModelProto` | 放 `~/.cache/flash_rt/`；下载 4.26MB 完整（截断会 parse 失败），慢用 `curl -C -` 续传 |
+| 5 | tokenizer 缺失 | `paligemma_tokenizer.model not found` / `could not parse ModelProto` | 放 `~/.cache/flash_rt/`；**首选从 ops 仓库 `assets/` 拷贝**（2026-09-29 起随仓走），或 GCS 下载 4.26MB 完整（截断会 parse 失败），慢用 `curl -C -` 续传 |
 | 6 | CUDA graph 段错误 | 首次 predict 100% 段错误，gdb 定位 `cudaGraphInstantiate` → tegra 驱动内部 | **驱动层缺陷**（r35.5），与代码无关。绕法 `use_cuda_graph=False`（脚本已内置 PI05_NO_GRAPH=1 monkeypatch）；新驱动版本可重测（verify 脚本会探） |
 | 7 | numpy 被升级 | 装任何带 numpy 依赖的包后 torch/flash_rt 报 ABI 错 | **红线：钉 `numpy==1.26.4`**；opencv 用 `==4.10.0.84`（5.x 要 numpy≥2） |
 | 8 | cuBLAS 阵发坏窗口 | 首调用 ALLOC_FAILED / 偶发失败 | `~/holy/cuda_warmup.py` 暖场兜底，启动入口必加 |
