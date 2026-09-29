@@ -8,20 +8,27 @@
 
 [run]
 # 部署目录（g1_ckpt_prep 产物；norm_stats/manifest 从这里读）。
-# warmup 等脚本直接读 <ckpt>/norm_stats.json。⚠ 两台设备产物目录名不同：
-# 本机（echo）= pi05_g1_ft（2026-09-23/24 全部真机验证用它）；
-# 另一设备 = pi05_g1_deploy（= pi05_g1_pretrain/pi05_g1_040000/pretrained_model
-# 的包装，权重软链同一 safetensors + norm_stats.json）——各机以本文件为准。
-ckpt = "/home/galbot/holy/models/pi05_g1_ft"
-# 任务指令——必须是训练 tasks.parquet 里的原句（就这两条）：
+# warmup 等脚本直接读 <ckpt>/norm_stats.json。⚠ 各机产物目录名不同：
+# 本机（第三台）= pi05_g1_place_deploy（pi05_g1_place/040000 的包装，
+# 2026-09-29 norm_align_check 全绿）；
+# echo 机 = pi05_g1_ft（2026-09-23/24 全部真机验证用它）；
+# 另一设备 = pi05_g1_deploy——各机以本文件为准。
+ckpt = "/home/galbot/holy/models/pi05_g1_place_deploy"
+# 任务指令——必须是训练 tasks.parquet 里的原句。当前 ckpt（pi05_g1_place，
+# 数据集 only_place）训练句就这一条：
+prompt = "Left arm places A in the top-left corner. Right arm places A in the top-left corner."
+# 旧 pick_place_balence 两句（换回旧 ckpt 时用）：
 #   "Left arm pick up A. Right arm pick up A."
 #   "Left arm places A in the top-left corner. Right arm places A in the top-left corner."
-prompt = "Left arm pick up A. Right arm pick up A."
 
 [warmup]
 speed = 0.15        # 臂/头关节速度，rad/s（腿固定 0.2 rad/s 不在此调）
 skip_zero = false   # true=跳过段①零位（已在工作位附近时）
 skip_leg  = false   # true=跳过段②b 躯干/腿对齐
+# 目标位姿文件（g1_pose_extract.py 从数据集起始帧生成的 23 维中位；
+# 优先级 --pose-file > 这里 > 部署目录 episode_start_task0.json 零配置发现）。
+# 手调初始位姿：直接改 json 的 start_pose，或生成变体文件换这一行指向。
+pose_file = "/home/galbot/holy/models/pi05_g1_place_deploy/episode_start_task0.json"
 
 [execute]           # run_g1_execute（3 步 smoke）
 steps = 3           # 执行 chunk 前 K 步，步（≤10）

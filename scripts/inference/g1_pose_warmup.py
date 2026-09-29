@@ -62,6 +62,9 @@ ap.add_argument("--no-grip", action="store_true",
                 help="显式不闭合夹爪（覆盖 config 的 gripper.enabled=true）")
 ap.add_argument("--skip-leg", action="store_true", default=None,
                 help="跳过躯干/腿对齐（腿部动作改变站高/前倾，默认对齐；config [warmup].skip_leg）")
+ap.add_argument("--pose-file", default=None,
+                help="外部位姿 json 覆盖（23 维 start_pose，g1_pose_extract.py 产物；"
+                     "config [warmup].pose_file）")
 ap.add_argument("--config", default=g1_config.DEFAULT_PATH,
                 help="配置文件路径（优先级 CLI > config > 内置默认）")
 args = ap.parse_args()
@@ -74,6 +77,11 @@ g1_config.apply(args, {
 })
 if args.no_grip:
     args.grip = False
+# pose_file 是可选键（BUILTIN 无兜底，不进 apply mapping，避免双双缺省即退出）
+POSE_FILE = args.pose_file
+if POSE_FILE is None:
+    _cfg, _ = g1_config.load(args.config)
+    POSE_FILE = _cfg.get("warmup", {}).get("pose_file")
 
 
 class QuitWatcher:
@@ -169,20 +177,26 @@ sys.excepthook = _kb_hook
 # `分析脚本`从数据集 task_index=0 的 98 条起始帧取中位数生成。
 CKPT = pathlib.Path(args.ckpt)
 ns_p = CKPT / "norm_stats.json"
-start_p = CKPT / "episode_start_task0.json"
+# 位姿来源三级：CLI --pose-file > config [warmup].pose_file > 部署目录同名文件
+start_p = (pathlib.Path(POSE_FILE) if POSE_FILE
+           else CKPT / "episode_start_task0.json")
 if start_p.exists():
     blk = json.loads(start_p.read_text())
     TARGET = blk["start_pose"]
     ns = json.loads(ns_p.read_text()) if ns_p.exists() else None
     MODE = ns.get("norm_mode", "q01_q99") if isinstance(ns, dict) else "q01_q99"
-    print(f"[warm] 目标 = {start_p.name}（{blk.get('n_episodes')} 条 task0 起始中位，"
-          f"组内最大波动 {blk.get('spread_max_dev', 0):.2f} rad）")
+    print(f"[warm] 目标 = {start_p}"
+          + ("" if POSE_FILE else "（部署目录零配置发现）")
+          + f"（{blk.get('n_episodes', '?')} 条起始中位"
+            f"{('，task: ' + blk['task']) if blk.get('task') else ''}，"
+            f"臂维组内最大波动 {blk.get('spread_max_dev', 0):.2f} rad）")
 elif ns_p.exists():                     # prep 产物：{norm_mode, actions{...}, state{...}}
     ns = json.loads(ns_p.read_text())
     TARGET = ns["state"]["mean"]
     MODE = ns.get("norm_mode", "q01_q99")
-    print("[warm] ⚠ 无 episode_start_task0.json，退回 state.mean（两 task 起始的"
-          "平均值，非任务起点——建议生成起始位姿文件）")
+    print("[warm] ⚠ 无位姿文件（--pose-file / config [warmup].pose_file / "
+          "部署目录 episode_start_task0.json 都没有），退回 state.mean"
+          "（多 task 起始的平均值，非任务起点——用 g1_pose_extract.py 生成）")
 else:                                   # 兜底：lerobot 数据集 schema
     ms_p = CKPT.parent / "meta" / "stats.json"
     if not ms_p.exists():
@@ -258,17 +272,29 @@ report(cur)
 _grip_sent = False
 
 
+def _grip_width(pct):
+    """数据集 0~100% 开度 → SDK 宽度（米），按 manifest 标定线性换算。"""
+    return GRIP_WMIN + float(pct) / 100.0 * (GRIP_WMAX - GRIP_WMIN)
+
+
 def fire_grip_close():
-    """夹爪闭合命令一次性发出（非阻塞），与臂动作并行；末端统一核对。"""
+    """夹爪对齐目标位姿开度（非阻塞一次性发出），与臂动作并行；末端统一核对。
+
+    目标取位姿文件的夹爪维（dim7/15，0~100%）——2026-09-29 only_place 实测
+    101 轨全部从 ≈33% 开度起步（places 任务持物起点），闭合到 0% 会错开
+    训练分布入口；旧 pick_place 数据集 0% 起步，位姿文件里即 0，行为不变。
+    """
     global _grip_sent
-    if _grip_sent:          # 零位重试路径不再重复发（已闭合状态下重发无害，省之）
+    if _grip_sent:          # 零位重试路径不再重复发（已到位状态下重发无害，省之）
         return
     _grip_sent = True
+    wr, wl = _grip_width(TARGET[7]), _grip_width(TARGET[15])
     s1 = robot.set_gripper_command(G1JointGroup.right_gripper,
-                                   GRIP_WMIN, 0.05, 30, False)
+                                   wr, 0.05, 30, False)
     s2 = robot.set_gripper_command(G1JointGroup.left_gripper,
-                                   GRIP_WMIN, 0.05, 30, False)
-    print(f"夹爪闭合命令已发（右 {s1} / 左 {s2}）——与臂动作并行，"
+                                   wl, 0.05, 30, False)
+    print(f"夹爪对齐命令已发（右 → {TARGET[7]:.1f}% = {wr:.4f} m / "
+          f"左 → {TARGET[15]:.1f}% = {wl:.4f} m）——与臂动作并行，"
           f"反馈滞后 ~6.3s 由动作期重叠，达标判定处核对")
 
 if not args.skip_zero:
@@ -305,7 +331,7 @@ if not args.skip_zero:
 
 WATCH.pause()
 input(f"\n⚠ 段②：双臂+头" + ("+躯干腿" if not args.skip_leg else "")
-      + f" → 数据集均值位（臂/头 {args.speed} rad/s，腿 0.2 rad/s）。"
+      + f" → 目标位姿（臂/头 {args.speed} rad/s，腿 0.2 rad/s）。"
       "腿动会改变站高/前倾，确认底盘平衡在位。急停就绪回车...")
 WATCH.resume()
 if args.grip and args.skip_zero:
@@ -318,7 +344,7 @@ st = robot.set_joint_positions(arm_tgt, joint_names=arm_names,
 print(f"set_joint_positions(臂+头) → {st}")
 time.sleep(1.0)
 
-# ── 段②b：躯干/腿 → state.mean（站高/前倾对齐采集起点）──
+# ── 段②b：躯干/腿 → 目标位姿（站高/前倾对齐采集起点）──
 if not args.skip_leg:
     leg_tgt = [TARGET[i] for i in IDX["leg"]]
     st_l = robot.set_joint_positions(leg_tgt, joint_names=LEG,
@@ -343,8 +369,9 @@ print(f"躯干/腿最大偏差 {leg_dev:.3f} rad"
       + ("（已下发对齐；偏大=未到位，查上方状态）" if not args.skip_leg
          else "（--skip-leg 未下发，仅对照）"))
 if args.grip:
-    ok_g = cur[7] <= 10 and cur[15] <= 10
-    print(f"夹爪闭合核对: 右 {cur[7]:.1f}% / 左 {cur[15]:.1f}%（目标 0%）→ "
+    ok_g = abs(cur[7] - TARGET[7]) <= 10 and abs(cur[15] - TARGET[15]) <= 10
+    print(f"夹爪核对: 右 {cur[7]:.1f}%（目标 {TARGET[7]:.1f}%）/ "
+          f"左 {cur[15]:.1f}%（目标 {TARGET[15]:.1f}%，±10% 容差）→ "
           + ("✅" if ok_g else "⚠ 未收到位，查夹爪或重跑（--grip 已含在段① 并行发出）"))
 
 robot.request_shutdown(); robot.wait_for_shutdown(); robot.destroy()

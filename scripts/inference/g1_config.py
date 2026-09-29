@@ -16,10 +16,10 @@ DEFAULT_PATH = "/home/galbot/holy/config/g1.toml"
 # 单位：角度 rad｜时长 s｜速度 rad/s（夹爪 m/s）｜力 N｜百分比 %｜频率 Hz
 BUILTIN = {
     "run": {
-        # 两台设备产物目录名不同：echo 机=pi05_g1_ft，另一设备=pi05_g1_deploy；
-        # BUILTIN 给 echo 机的值，运行时以各机 config/g1.toml 为准（见 toml [run] 注释）
-        "ckpt": "/home/galbot/holy/models/pi05_g1_ft",
-        "prompt": "Left arm pick up A. Right arm pick up A.",
+        # 各机产物目录名不同：本机（第三台）=pi05_g1_place_deploy，echo 机=pi05_g1_ft，
+        # 另一设备=pi05_g1_deploy；BUILTIN 是兜底镜像，运行时以各机 config/g1.toml 为准
+        "ckpt": "/home/galbot/holy/models/pi05_g1_place_deploy",
+        "prompt": "Left arm places A in the top-left corner. Right arm places A in the top-left corner.",
     },
     "warmup": {
         "speed": 0.15,        # 臂/头关节速度 rad/s（腿固定 0.2 rad/s）
