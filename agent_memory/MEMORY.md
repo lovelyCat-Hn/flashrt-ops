@@ -7,7 +7,7 @@
 - [G1 建图/定位栈要点](galbot-g1-slam-mapping-stack.md) — FAST-LIO 风格 IESKF；engine_tools 菜单 1 存图/4+5 增量更新/2 发初始位姿；Score≥0.8 看日志；updata_maps 工具集；bin 质心可判推车覆盖
 - [G1 导航栈排障](galbot-g1-navigation-stack-troubleshooting.md) — 换图必补 global_cloud_cleaned.pcd 软链；关节空=RT/急停侧问题用 wbcs_test 查；launcher 会组杀兄弟进程
 - [G1 底盘朝向与导航 UI](galbot-g1-chassis-frame-nav-ui.md) — 车头=yaw 直接所指(FRONT_OFF=0,曾误判 −x 已回退);2D 导航工具点障碍一律拒绝;SDK 残留线程需 os._exit
-- [pi0.5 环境准备](galbot-pi05-env-setup.md) — Orin sm_87;torch2.4.1 已编译安装验证过(~32TF bf16);wheel 可移植 JP5.1+py311;cuBLAS 首调用怪癖;onnx tarball 可用;下一步 FlashRT -e 安装
+- [pi0.5 环境准备](galbot-pi05-env-setup.md) — Orin sm_87;INT8 W8A8 判死(2026-09-30 消融:损伤弥散+浅层FFN down最毒,选择性量化无兼顾);部署定档 bf16;兼容红线 numpy==1.26.4
 - [FlashRT 环境打包迁移](galbot-flashrt-env-migration-pack.md) — 同路径 tar 解压即用零编译；软链/editable 随包走；换用户名走干净配方；JP6 不可用；v2 包含权重/norm_stats/tokenizer/scripts，部署指南 ~/holy/DEPLOY.md + verify_deploy.sh 一键验收
 - [pi0.5↔GalbotSDK 集成](galbot-pi05-sdk-integration.md) — 3.11 同进程已验证；相机压缩图 CPU 软解；arm 7-DoF 与 libero 动作空间需映射；运行时 1.8.1
 - [G1 微调数据集判读](galbot-pi05-g1-finetune-data.md) — pick_place_balence 16/23 维【右臂在前】(info.json 权威，记反会把臂甩背后)；③层 800ms 慢推理已破案(state 文本进 prompt，fixed 模式根治)；闭环 5 轮全绿，残留指令切换抖动待调
