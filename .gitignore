@@ -1,6 +1,6 @@
 # ── 环境轨：走 tar 打包，不进 git ──
 FlashRT/
-models/
+/models/
 pytorch/
 __pycache__/
 *.pyc

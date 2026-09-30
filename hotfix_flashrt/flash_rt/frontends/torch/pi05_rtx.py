@@ -71,6 +71,53 @@ MAX_PROMPT_LEN_DEFAULT = 48
 # ════════════════════════════════════════════════════════════════════
 
 
+def _parse_int8_enc_skip(spec: str, enc_layers: int) -> set:
+    """Parse ``FVK_PI05_RTX_INT8_ENC_SKIP`` into encoder weight names to keep
+    in BF16 (site-level INT8 ablation / selective quantization).
+
+    Grammar (comma-separated tokens, case-insensitive):
+      ``L<i>``            whole layer i (all units)
+      ``L<a>-<b>``        whole layers a..b inclusive
+      ``L<i>:UNIT``       one unit in layer i
+      ``L<a>-<b>:UNIT``   one unit across layers a..b
+    Units: ``qkv`` ``o`` ``attn``(=qkv+o) ``ffn1``(=gate+up) ``ffn2``(=down)
+    ``ffn``(=ffn1+ffn2). Example: ``L0-8, L12:ffn1`` keeps layers 9-11 and
+    13-17 fully INT8 while leaving the rest to BF16.
+    """
+    skipped: set = set()
+    for tok in spec.split(","):
+        tok = tok.strip().lower()
+        if not tok:
+            continue
+        if ":" in tok:
+            rng, unit = tok.split(":", 1)
+        else:
+            rng, unit = tok, "all"
+        if not rng.startswith("l"):
+            raise ValueError(f"bad FVK_PI05_RTX_INT8_ENC_SKIP token: {tok!r}")
+        if "-" in rng:
+            a, b = rng[1:].split("-", 1)
+            layers = range(int(a), int(b) + 1)
+        else:
+            layers = [int(rng[1:])]
+        if unit not in ("all", "attn", "qkv", "o", "ffn", "ffn1", "ffn2"):
+            raise ValueError(f"bad FVK_PI05_RTX_INT8_ENC_SKIP unit: {tok!r}")
+        for i in layers:
+            if not 0 <= i < enc_layers:
+                raise ValueError(
+                    f"layer {i} out of range [0, {enc_layers}) in {tok!r}")
+            if unit in ("all", "attn", "qkv"):
+                skipped.add(f"encoder_attn_qkv_w_{i}")
+            if unit in ("all", "attn", "o"):
+                skipped.add(f"encoder_attn_o_w_{i}")
+            if unit in ("all", "ffn", "ffn1"):
+                skipped.add(f"encoder_ffn_gate_w_{i}")
+                skipped.add(f"encoder_ffn_up_w_{i}")
+            if unit in ("all", "ffn", "ffn2"):
+                skipped.add(f"encoder_ffn_down_w_{i}")
+    return skipped
+
+
 def _interleave_qk(w: torch.Tensor, num_heads: int) -> torch.Tensor:
     """Interleave Q/K output dim from HF contiguous to JAX RoPE format."""
     out_dim, in_dim = w.shape
@@ -1268,6 +1315,12 @@ class Pi05TorchFrontendRtx:
         decoder path. The merged gate+up weight mirrors the FP8 path to
         enable the single fused gate_geglu_merged → INT8 CUTLASS route.
 
+        Site-level selective quantization: ``FVK_PI05_RTX_INT8_ENC_SKIP``
+        (grammar in ``_parse_int8_enc_skip``) lists encoder sites to leave
+        in BF16. Skipped names are simply absent from ``_int8_weights``;
+        the pipeline dispatches per site on presence and runs the BF16
+        GEMM for them (see ``Pi05Pipeline._encoder_layer``).
+
         Keys written into ``self._int8_weights`` (``encoder_`` prefix):
             encoder_attn_qkv_w_{0..17}, encoder_attn_o_w_{0..17},
             encoder_ffn_gate_up_w_{0..17}  (merged),
@@ -1277,7 +1330,16 @@ class Pi05TorchFrontendRtx:
         store = self._int8_store   # shared with decoder, keeps tensors alive
         int8_weights = self._int8_weights  # shared dict, encoder_ prefix avoids collision
 
+        skip_spec = os.environ.get("FVK_PI05_RTX_INT8_ENC_SKIP", "")
+        skip = _parse_int8_enc_skip(skip_spec, ENC_L)
+        if skip:
+            logger.warning(
+                "FVK_PI05_RTX_INT8_ENC_SKIP='%s': %d/%d encoder GEMM "
+                "weights left in BF16", skip_spec, len(skip), 5 * ENC_L)
+
         def quant(name: str, w: torch.Tensor):
+            if name in skip:
+                return
             # CUTLASS rowwise INT8 expects B in [N, K] ColumnMajor layout.
             w_f32 = w.float().transpose(0, 1).contiguous()
             scale_t = torch.clamp(
