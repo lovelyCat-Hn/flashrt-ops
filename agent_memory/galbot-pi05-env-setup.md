@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 688dacf4-1a8a-4f2b-b926-938022b6de08
-  modified: 2026-09-24T03:15:28.096Z
+  modified: 2026-09-30T08:30:06.933Z
 ---
 
 用户计划在 G1 机器人（**AGX Orin Developer Kit 64G**，**JetPack 5.1.4 / L4T R35.6.0**（39 个 l4t 包统一 35.6.0-20240828 已核实；用户曾标 5.1.3，NVRM 驱动串报 35.5.0 是 NVIDIA 点版本不 bump 怪癖，勿混淆），CUDA 11.4，r535 驱动（对 11.8/12.x runtime 向后兼容），Ubuntu 20.04 aarch64）上部署 pi0.5。曾误判为 Xavier sm_72（/etc/nv_tegra_release 显示 BOARD: t186ref，不可靠），**已确认是 Orin sm_87（Ampere）**。CUDA 不能升级（会破坏其他 SDK 环境），一切方案必须兼容 CUDA 11.4。
@@ -50,3 +50,7 @@ FlashRT 部署线（主路线）：
 - 相关：[[galbot-g1-digital-twin-setup]]
 
 - **方案 A 病位消融判决（2026-09-30，本机 pi05_g1_place + only_place ep0）：per-row W8A8 判死，选择性量化无兼顾解**。新补丁 `FVK_PI05_RTX_INT8_ENC_SKIP`（FlashRT 1de926ca，前端按 spec 跳位点 + pipeline 逐位点回退 bf16，env 不设零影响；热修包 6 文件版，ops f132aa7 已推）+ 工具 `scripts/eval/int8_site_ablation.py`（`--configs 名:SPEC`，spec 内多 token 用 `+` 分隔；--bench 稳态延迟）。数据（六帧，bf16 参照 tf-cos 0.949）：全 90 位点 cos_arm **0.09**（跨机跨 ckpt 复现崩档）；损伤弥散但有清晰梯度——**浅层 FFN ≫ 尾层，down 投影是最毒单元**（只留 L0-8 down INT8 也毁到 0.17），attn 相对温和（18 层全 attn INT8 = 0.75）；位点数-质量曲线极陡：≤15 位点 0.999+/tf 0.946，25 位点臂 0.98 但**夹爪 cos 先塌（0.82，夹爪永远最先坏）**，48 位点 0.81。⚠ 混布档的 bf16 回退 GEMM 没过 autotune（pipeline_rtx.py:2278 只在全 bf16 时调），延迟读数失真但质量不受影响。结论：干净档（≤15/90 位点）收益仅个位数 ms；INT8 剩余路线只剩 kernel 级 SmoothQuant 类 per-channel 激活 scale（CUTLASS 改造），已搁置。**机制理解**：FlashRT 自测 encoder cosine 0.991，经 18 层残差 + 流匹配头的混沌敏感性（同图换噪声 cos 仅 0.25 底噪）放大成端到端崩；合成输入 A/B "干净"是输出被噪声先验主导的盲区，不是 INT8 无损。部署定档维持 bf16。
+
+- **Route B′（QuaRot 旋转 W8A8）仿真判死（2026-09-30 同日）**：教科书版 Hadamard（权重离线 H·W/√K + 激活在线 x·H/√K，(xH)(WH)ᵀ=xWᵀ 精确）方向正确但幅度不够——int8_sim tf 0.146 → rot8 tf **0.264**（cos_arm 0.075→0.26、夹爪 MAE 18pp→6.9pp 全面改善，证明损伤=激活量化噪声；但离 0.90 上线门槛仍远，流匹配对 per-row int8 残余噪声零容忍，对照 t15 档留 15 位点 bf16 即 0.947）。**W8A8 全家（含旋转版）终审定档 bf16**。工具 `scripts/eval/quarot_sim_ablation.py`：monkeypatch 仿真（零 FlashRT 改动筛量化想法，以后任何量化点子先过它）。
+- **仿真过程沉淀的 FlashRT 结构知识（重要，写实验前必读）**：① `_quantize_encoder_int8` 在**前端构造函数内（load_model 里）**执行——加载后改权重必得"旋转激活×未旋转权重"结构性错值（签名：cos −0.01 量级、比 int8 还差），必须类级 wrapper 包在 load 之前；② **`PI05_NO_GRAPH` 不被 pi05_rtx 消费**——calibrate 首帧捕获 infer graph 并在推理期重放，会静默绕过 monkeypatch，实验必须 `model._pipe.use_cuda_graph = False`（方案 A 数字其实跑在 graph 重放下，eager 复现同判）；③ 编码器 int8 位点每层 4 条路径：qkv=融合 `rms_norm_int8_rowwise`、gate_up=融合 `residual_add_rms_norm_int8_rowwise`（gate/up 共享一份量化输入）、o/down=`_enc_int8_gemm` helper；每向前真实量化调用 **69**=qkv18+o/gu/down 各 17——**第 17 层 attention 后 early-return（编码器输出即 KV 缓存，末层 o/FFN 权重推理中不跑）**。
+- **W8A16 评估结论（2026-09-30）**：CUTLASS sm80/87 **无 int8×bf16 mixed-input**（一等支持仅 sm90/sm100；Ampere 的 mma_mixed_input 只有 s4×f16）；W8A16 的收益天花板=解码器权重带宽减半 ≈20-30ms/5-8%（echo 机 int8_full−int8_enc=22ms 实测背书），编码器 M=560 计算受限拿不到；质量零风险（weight-only relF 0.09% + ActQuant Q8_0 MAE 0.002 双背书）。落地需手写 mma skinny kernel（dequant→fp16 mma.sync，纯 FMA 在 M≈51/K=4096 比带宽地板慢 4×）1.5-2.5 天 + pipeline 接线；`flash_rt_kernels.so` 仅 4.1MB 本机 nvcc 11.4 可重建，近亲参考：int8 rowwise EVT 全家、fp8_gemv_m1_sm89、fp8_smallM_handtuned、fht_int4.cu（QuaRot FHT，K=4096 快路径）。**是 W8A8 判死后仅剩的无损优化候选，未开工**。

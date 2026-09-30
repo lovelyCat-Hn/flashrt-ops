@@ -19,7 +19,7 @@
 
 ## 2. 环境与推理引擎（FlashRT / pi0.5）
 
-- [pi0.5 环境准备](galbot-pi05-env-setup.md) — **环境红线大全**。Orin sm_87（非 Xavier）；JP5.1.4，CUDA 11.4 不可升；torch 2.4.1 自编 wheel（~32TF bf16，可移植 JP5.1+py3.11，仅 sm_87 SASS）；cuBLAS 三层怪癖→启动入口必挂 cuda_warmup.py 兜底；**部署定档 bf16**（INT8 per-row 判死：90 位点 cos_arm 0.09，浅层 FFN/down 投影最毒，剩余 kernel 级路线已搁置）；flash_pyrt311 装包必须钉 `numpy==1.26.4`；bashrc 环境变量泄漏三件套（旧 libcurl 毒 HTTPS 有前科）。▸ 装包/编译/量化/网络或 CUDA 怪象排查。
+- [pi0.5 环境准备](galbot-pi05-env-setup.md) — **环境红线大全**。Orin sm_87（非 Xavier）；JP5.1.4，CUDA 11.4 不可升；torch 2.4.1 自编 wheel（~32TF bf16，可移植 JP5.1+py3.11，仅 sm_87 SASS）；cuBLAS 三层怪癖→启动入口必挂 cuda_warmup.py 兜底；**部署定档 bf16 终审**（INT8 per-row 判死 + QuaRot 旋转版仿真也判死 tf 0.26，quant想法先过 quarot_sim_ablation.py 零改动仿真；W8A16-decoder 是仅剩无损候选 ~20-30ms 未开工；过程知识：量化在 load 内部执行/PI05_NO_GRAPH 不被消费/编码器每向前 69 次量化调用末层 early-return）；flash_pyrt311 装包必须钉 `numpy==1.26.4`；bashrc 环境变量泄漏三件套（旧 libcurl 毒 HTTPS 有前科）。▸ 装包/编译/量化/网络或 CUDA 怪象排查。
 - [FlashRT 环境打包迁移](galbot-flashrt-env-migration-pack.md) — 同路径 tar 解压即用、零编译；软链/editable 随包走；换用户名走干净配方；JP6 不可用；v2 包含权重/norm_stats/tokenizer/scripts。配套 `~/holy/DEPLOY.md` + `verify_deploy.sh` 一键验收。▸ 新机部署/迁移/验收。
 - [G1 CUDA graph 段错误修复](galbot-g1-cuda-graph-instantiate-fix.md) — L4T r35.6 iGPU 上旧式 cudaGraphInstantiate 对**任意图**必段错误（单节点 memset 也崩），已修走 WithFlags（FlashRT 4822d755，两机热修都在）；bench 收益仅 ~3%，勿期待翻倍；两机定档分叉：源机 PI05_NO_GRAPH=1，部署机=0。▸ graph 段错误、开/关图模式、跨机性能对比。
 
