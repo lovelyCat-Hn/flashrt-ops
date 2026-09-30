@@ -16,3 +16,6 @@
 - [安装类命令用户亲自执行](galbot-user-runs-install-commands.md) — conda/pip/apt 安装发命令清单给用户跑;我只做只读检查和判读
 - [本机 GitHub 连接](galbot-github-remote-setup.md) — SSH 账号 lovelyCat-Hn 可用；ghproxy 镜像会卡死 fetch 已移除勿加回；push 仅限 SSH；上游 flashrt-project 无写权限
 - [G1 CUDA graph 段错误修复](galbot-g1-cuda-graph-instantiate-fix.md) — L4T r35.6 iGPU 旧式 Instantiate 必崩走 WithFlags；PI05_NO_GRAPH 已默认关；bench 收益仅 ~3% 勿期待翻倍
+- [本机（第三台机）部署进度](galbot-machine3-deployment-state.md) — R35.6.4；环境/热修/tokenizer 全就绪；G1 工作点=pi05_g1_place+only_place（组装三步+对齐校验全绿）；⚠ only_place 起始夹爪 ≈33% 非 0%；warmup 位姿已外置（--pose-file > config > 零配置三级，g1_pose_extract 生成）；horizon 默认 50（9/29 定，10 切片弃用）
+- [G1 闭环执行器调参定案](galbot-g1-loop-pace-tuning.md) — 臂速律=n/(30×pace×div)；pace 焊死 0.455 只减不增；div=覆盖率/滞后滤波；工作点 20/1.55 或 25/1.8；梦游期签名+落盒即 q 停；合步不跨 chunk/抽帧在发令瞬间/spc>n 被钳位
+- [本机相机 transport 不匹配根因](galbot-machine3-camera-transport-unmatch.md) — 时好时坏，重启采集栈即愈（9/29 16:19 重启后 SDK 6/6 恢复）；失败窗口期相机话题对所有外部进程隐身，embosa 绑定旁路也不通；工具=read_camera_bypass.py/sdk_camera_smoke.py/embosa_topic_tool
