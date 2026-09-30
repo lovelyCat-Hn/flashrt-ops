@@ -46,10 +46,10 @@ ap.add_argument("--hold", type=int, default=None, help="冻结帧纯推理次数
 ap.add_argument("--tier", default=None, choices=("bf16", "int8_enc", "int8_full"),
                 help="量化档（config [inference].tier）")
 ap.add_argument("--ctrl-hz", type=float, default=None,
-                help="控制频率（数据集 fps=30，10 步 chunk 窗口=333ms；config [inference].ctrl_hz）")
-ap.add_argument("--horizon", type=int, default=10,
-                help="chunk 长度（训练=50，2026-09-28 实锤；10=部署切片。"
-                     "50 块延迟几乎不变，质量甜点区≈前 15-20 步；env 自动设）")
+                help="控制频率（数据集 fps=30，chunk 窗口=horizon÷30Hz；config [inference].ctrl_hz）")
+ap.add_argument("--horizon", type=int, default=50,
+                help="chunk 长度，默认 50=训练原生长度（2026-09-28 实锤：延迟几乎"
+                     "不变，质量甜点区≈前 15-20 步；env 自动设）。10=旧切片，已弃用")
 ap.add_argument("--grip-wmin", type=float, help="夹爪零开度 SDK 宽度(米)，覆盖 manifest（不进配置）")
 ap.add_argument("--grip-wmax", type=float, help="夹爪满开度 SDK 宽度(米)，覆盖 manifest（不进配置）")
 ap.add_argument("--force-state-dim", action="store_true",

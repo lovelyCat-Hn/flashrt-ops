@@ -27,7 +27,7 @@
       [--episode 0] [--start-frame 0] [--rounds 10] \
       [--steps-per-round 3] [--steps-per-cmd 3] [--delta-max 0.05] \
       [--speed 0.15] [--max-excursion 3.0] [--switch-dist 0.06] \
-      [--tier bf16] [--horizon 10] [--exec]
+      [--tier bf16] [--horizon 50] [--exec]
 horizon：--horizon 50 用训练原生长度整块推理（env 自动设，延迟几乎不变），
 配合 --steps-per-round 15~20 消费甜点区（2026-09-28 回放实验：pos20+ 衰减，
 pos40-49 不可用）。
@@ -81,10 +81,10 @@ ap.add_argument("--seed", type=int, default=0,
                      "同图换噪声两两 cos≈0.25，会抽出抬臂等野策略）")
 ap.add_argument("--tier", default="bf16", choices=("bf16", "int8_enc", "int8_full"),
                 help="量化档（默认 bf16；int8 数值已 A/B 验证等价，快 ~100ms）")
-ap.add_argument("--horizon", type=int, default=10,
-                help="chunk 长度（训练=50，2026-09-28 实锤；10=原部署切片。"
-                     "50 块延迟几乎不变，质量甜点区≈前 15-20 步，配合 "
-                     "--steps-per-round 消费）")
+ap.add_argument("--horizon", type=int, default=50,
+                help="chunk 长度，默认 50=训练原生长度（2026-09-28 实锤：延迟几乎"
+                     "不变，质量甜点区≈前 15-20 步，配合 --steps-per-round 消费）。"
+                     "10=旧部署切片，已弃用")
 ap.add_argument("--grip", action="store_true",
                 help="（未实现）夹爪增量语义换算完成前一律拒绝")
 args = ap.parse_args()

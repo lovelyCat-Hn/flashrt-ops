@@ -38,9 +38,9 @@ ap.add_argument("--exec", dest="do_exec", action="store_true",
                 help="真实下发关节命令（默认干跑只打印；不进配置，仅 CLI）")
 ap.add_argument("--steps", type=int, default=None,
                 help="执行 chunk 前 K 步，≤ --horizon（config [execute].steps）")
-ap.add_argument("--horizon", type=int, default=10,
-                help="chunk 长度（训练=50，2026-09-28 实锤；10=部署切片。"
-                     "50 块延迟几乎不变，质量甜点区≈前 15-20 步；env 自动设）")
+ap.add_argument("--horizon", type=int, default=50,
+                help="chunk 长度，默认 50=训练原生长度（2026-09-28 实锤：延迟几乎"
+                     "不变，质量甜点区≈前 15-20 步；env 自动设）。10=旧切片，已弃用")
 ap.add_argument("--delta-max", type=float, default=None,
                 help="每步相对当前读数的限幅 rad（config [execute].delta_max）")
 ap.add_argument("--speed", type=float, default=None, help="关节速度上限 rad/s（config [execute].speed）")

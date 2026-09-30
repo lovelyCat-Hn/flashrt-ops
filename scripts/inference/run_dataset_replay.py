@@ -5,7 +5,7 @@
   npz(extract_dataset_frames.py 产出) → cv2 解码三相机 mp4 帧 →
   state 归一化（数据集夹爪已是 0~100% 训练单位，不做 SDK 宽度换算）→
   model.infer(显式固定噪声——predict 的随机噪声会让单帧对比撞上
-  "两两 cos≈0.25"的混沌底，见 ab_real_camera 教训) → (10,16) chunk。
+  "两两 cos≈0.25"的混沌底，见 ab_real_camera 教训) → (H,16) chunk（H=--horizon，默认 50）。
 【动作语义 = 分通道】臂 14 维是增量 Δ rad（action−state，真值 Δ 同式）；
 夹爪 2 维是【绝对指令 %】（训练处理器 exclude_joints=["gripper"]，不做
 delta 化——持物时 state 被撑 33% 而指令仍是 0%，对 Δ 比会差出 state 基线）。
@@ -14,12 +14,11 @@ delta 化——持物时 state 被撑 33% 而指令仍是 0%，对 Δ 比会差�
 用法:
   ~/holy/run.sh ~/holy/scripts/inference/run_dataset_replay.py \
       [--ckpt .../pretrained_model] [--npz ~/holy/datasets/replay_input.npz] \
-      [--stride 30] [--max 20] [--horizon 10] [--seed 0] [--tier bf16] \
+      [--stride 30] [--max 20] [--horizon 50] [--seed 0] [--tier bf16] \
       [--check-graph] [--dump]
-horizon 实验（2026-09-28）：训练 chunk=50（config.json n_action_steps），部署
-切片 10。整块 50 步推理需同时设 FLASH_RT_PI05_ACTION_CHUNK_SIZE=50 和
---horizon 50（pi05_rtx 两前端 CHUNK_SIZE 已可 env 覆盖），分位置表看后 40
-个位置是否仍贴真值。
+horizon（2026-09-28 实验定案，2026-09-29 起默认即 50）：训练 chunk=50
+（config.json n_action_steps）为默认，脚本自动设 FLASH_RT_PI05_ACTION_CHUNK_SIZE，
+分位置表看后 40 个位置是否仍贴真值。10=旧部署切片，已弃用。
 判读提示：cosΔ 在运动帧高、保持帧标 (保持帧) 即链路健康；模型对陌生场景
 （图/摆位不符）会输出贴 0 的"不动"增量，别误读成精度高。
 """
@@ -38,9 +37,9 @@ ap.add_argument("--ckpt", default=None, help="部署目录（默认 config [run]
 ap.add_argument("--npz", default="~/holy/datasets/replay_input.npz")
 ap.add_argument("--episode", type=int, default=None, help="只回放该 episode（默认 npz 全部）")
 ap.add_argument("--stride", type=int, default=30, help="抽帧步长（30=每秒 1 帧）")
-ap.add_argument("--horizon", type=int, default=10,
-                help="chunk 长度，须与 FLASH_RT_PI05_ACTION_CHUNK_SIZE 一致"
-                     "（训练 config.json chunk_size=50，10=部署切片默认）")
+ap.add_argument("--horizon", type=int, default=50,
+                help="chunk 长度，默认 50=训练 config.json chunk_size；脚本自动设"
+                     "同名 env（10=旧部署切片，已弃用）")
 ap.add_argument("--max", type=int, default=20,
                 help="每条 episode 最多回放多少帧（不给 --episode 时全部 episode 各取这么多）")
 ap.add_argument("--seed", type=int, default=0, help="固定噪声种子（每帧 seed+序号）")
@@ -78,6 +77,8 @@ import torch  # noqa: E402
 os.environ.setdefault("PI05_NO_GRAPH", "1")
 # state 文本进 prompt：fixed=定长 pipeline 只换 embeds，避免换长重建（~800ms）
 os.environ.setdefault("FLASHRT_PI05_STATE_PROMPT_MODE", "fixed")
+# chunk 长度：pi05_rtx 前端模块导入时读此 env，必须在 import flash_rt 前定死
+os.environ["FLASH_RT_PI05_ACTION_CHUNK_SIZE"] = str(args.horizon)
 
 if args.check_graph:
     from flash_rt.core import cuda_graph as _cg
