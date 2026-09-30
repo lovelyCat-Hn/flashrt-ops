@@ -106,7 +106,38 @@ ap.add_argument("--grip-chg", type=float, default=None,
                 help="夹爪下发变化阈值 %%（config [gripper].chg）")
 ap.add_argument("--config", default=g1_config.DEFAULT_PATH,
                 help="配置文件路径（优先级 CLI > config > 内置默认）")
+ap.add_argument("--log-file", default=None,
+                help="日志文件路径（默认 <仓库>/logs/loop_<时间戳>.log；终端照常显示，"
+                     "全文同步写文件，判读免复制）")
 args = ap.parse_args()
+
+# ── 全文日志落盘：q 退出走 os._exit 不刷缓冲（09-23 坑），故逐行强制 flush ──
+_log_path = args.log_file or str(
+    pathlib.Path(__file__).resolve().parents[2] / "logs" /
+    time.strftime("loop_%Y%m%d_%H%M%S.log"))
+pathlib.Path(_log_path).parent.mkdir(parents=True, exist_ok=True)
+
+
+class _Tee:
+    """stdout/stderr 双写：硬拷贝到日志文件（crash traceback 也收）。"""
+
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, s):
+        for st in self.streams:
+            st.write(s)
+            st.flush()
+
+    def flush(self):
+        for st in self.streams:
+            st.flush()
+
+
+_log_fh = open(_log_path, "a", buffering=1, encoding="utf-8")
+sys.stdout = _Tee(sys.stdout, _log_fh)
+sys.stderr = _Tee(sys.stderr, _log_fh)
+print(f"[log] 全文日志 → {_log_path}")
 g1_config.apply(args, {
     "ckpt": ("run", "ckpt"),
     "prompt": ("run", "prompt"),
@@ -502,6 +533,7 @@ pace_hist = []                       # 配速 rad/s（追踪式，速度=导程�
 cmd_hist = None
 aborted = False
 sustain_cmds = 0                     # 配额外"续航"指令条数（掩盖慢推理）
+sust_last = 0                        # 上一轮续航条数（打进下轮表头，破水位一眼可见）
 
 
 class _PredictJob:
@@ -570,8 +602,11 @@ for r in range(args.rounds):
     chunk = job.result()             # 上轮执行期间启动的推理——此刻早已就绪
     BASE_ARM = job.state_arm         # 新块 delta 基准 = 该块预测时刻臂位
     infer_ms.append(job.dur_ms)
+    _sus = ("零续航" if sust_last == 0
+            else f"续航 {sust_last} 条 ⚠ 破推理水位（pace 须 ≥ 推理+取图，续航喂"
+                 f" chunk 深尾步=计划垃圾，臂会往复）")
     print(f"\n── 轮 {r} | t+{time.perf_counter() - t_loop0:6.1f}s | "
-          f"推理 {job.dur_ms:.0f} ms（与上轮执行重叠，零等待）──")
+          f"推理 {job.dur_ms:.0f} ms，与上轮执行重叠，{_sus} ──")
     if args.chunk_mode == "traj":
         cur0 = read_joints(robot, ARM_NAMES)
         traj, n_pts, final_p = build_traj(chunk, cur0)
@@ -613,6 +648,7 @@ for r in range(args.rounds):
     # 消费配额 n_steps 步后若新块未就绪 → 用旧 chunk 剩余步"续航"追踪，
     # 轮间零站桩（推理 825ms 实测 > 滑行 539ms 的对策）；chunk 耗尽才需等待。
     # 每条指令仍受 ±BUDGET 限幅 + 漂移护栏，续航不放大行程风险
+    sust_before = sustain_cmds
     k = 0
     while k < len(chunk):
         k_end = min(k + spc, len(chunk))   # 本条指令消费 chunk 步 [k, k_end)
@@ -678,6 +714,7 @@ for r in range(args.rounds):
     round_ms.append((time.perf_counter() - t_r) * 1000)
     if round_ms[-1] > 1:
         print(f"  轮耗时 {round_ms[-1]:.0f} ms（重规划频率 {1000 / round_ms[-1]:.1f} Hz）")
+    sust_last = sustain_cmds - sust_before
 
 # ── ④ 汇总 ──
 if GRIP:

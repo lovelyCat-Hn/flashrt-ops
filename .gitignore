@@ -16,3 +16,6 @@ __pycache__/
 datasets/
 g1_joint_test_src/lesson_*
 g1_joint_test_src/__pycache__/
+
+# 闭环运行日志（loop_*.log）
+logs/

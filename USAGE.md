@@ -125,9 +125,9 @@ flashpy ~/holy/scripts/inference/run_g1_inference.py --ckpt ~/holy/models/pi05_g
 LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
 flashpy ~/holy/scripts/inference/run_g1_loop.py --exec --horizon 50 --rounds 60
 
-# 工作点已写进 config/g1.toml [loop]（spc=20 / 合步 20 / pace 0.45 / div 1.47 /
+# 工作点已写进 config/g1.toml [loop]（spc=20 / 合步 20 / pace 0.43 / div 1.65 /
 # near-div 2 / near_gap 0.06 / speed 1.0 / delta_max 0.3），无需 CLI 传参。
-# 速度律: 臂速÷数据集原速 = n/(30×pace×div)，当前组合 ≈1.0× 原速。
+# 速度律: 臂速÷数据集原速 = n/(30×pace×div)，当前组合 ≈0.94× 原速。
 # 图模式默认开（WithFlags 热修）；异常回退: 前缀 PI05_NO_GRAPH=1
 ```
 
@@ -139,6 +139,7 @@ R 回闭 51，全程 35.9s → **双臂预算 52-60 轮**（≈数据集时间�
 - ⚠️ **q 停纪律：右爪落盒才停**——左爪落盒时右臂还没开始（严格串行）
 - ⚠️ **轮数给足**：30 轮只够左臂半程（9/30 实证：恰在 R 启动窗边缘截断，无判别力）
 - 落盒前是"梦游期"，日志零判别力，勿据前几轮判成败
+- **全文日志自动落盘** `logs/loop_<时间戳>.log`（--log-file 可改路径），判读直接发文件免复制
 - 异常：Ctrl-C / 急停；graph 异常加前缀 `PI05_NO_GRAPH=1` 回退 eager
 
 ## 4. 与 GalbotSDK 联用（同进程，已验证）
