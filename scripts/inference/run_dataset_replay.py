@@ -73,8 +73,9 @@ import numpy as np  # noqa: E402
 import cv2  # noqa: E402
 import torch  # noqa: E402
 
-# graph 在另一设备已修复（其 FlashRT 走 WithFlags）；本机 FlashRT 未打补丁前必须 eager
-os.environ.setdefault("PI05_NO_GRAPH", "1")
+# 本脚本不挂封图 patch，前端默认开图（WithFlags 热修 2026-09-29 已打、bench 验证）；
+# 此 env 无消费者，仅为与其他脚本一致。回退 eager：前缀 PI05_NO_GRAPH=1 需配合挂 patch 的脚本
+os.environ.setdefault("PI05_NO_GRAPH", "0")
 # state 文本进 prompt：fixed=定长 pipeline 只换 embeds，避免换长重建（~800ms）
 os.environ.setdefault("FLASHRT_PI05_STATE_PROMPT_MODE", "fixed")
 # chunk 长度：pi05_rtx 前端模块导入时读此 env，必须在 import flash_rt 前定死

@@ -89,8 +89,9 @@ import numpy as np  # noqa: E402
 import cv2  # noqa: E402
 import torch  # noqa: E402
 
-# graph 抓图在 r35.5 驱动上段错误，默认绕过（DEPLOY.md 处置表 #6）
-os.environ.setdefault("PI05_NO_GRAPH", "1")  # 本机 FlashRT 未打 hotfix_flashrt WithFlags 补丁（cuda_graph.py 仍旧式 Instantiate，r35.6 必段错误），必须 eager；打上热修后可翻回 0
+# 图开关：0=开图（默认，2026-09-29 WithFlags 热修已打、9/30 bench 验证；DEPLOY.md
+# 处置表 #6 已翻案）；回退 eager：前缀 PI05_NO_GRAPH=1
+os.environ.setdefault("PI05_NO_GRAPH", "0")
 # state 文本进 prompt，值漂→token 数变；exact 模式换长即整条 pipeline 重建
 # +重 autotune（~800ms）。fixed=定长 pipeline 只换 embeds，恒定 ~250ms
 os.environ.setdefault("FLASHRT_PI05_STATE_PROMPT_MODE", "fixed")
@@ -98,16 +99,17 @@ os.environ.setdefault("FLASHRT_PI05_STATE_PROMPT_MODE", "fixed")
 os.environ["FLASH_RT_PI05_ACTION_CHUNK_SIZE"] = str(args.horizon)
 import flash_rt.frontends.torch.pi05_rtx as _fe  # noqa: E402
 
-_orig_init = _fe.Pi05TorchFrontendRtx.__init__
+# 回退 eager 时才封图（PI05_NO_GRAPH=1）；默认开图（scripts/test/bench_pi05.py 同款）
+if os.environ.get("PI05_NO_GRAPH", "0") == "1":
+    _orig_init = _fe.Pi05TorchFrontendRtx.__init__
 
+    @functools.wraps(_orig_init)
+    def _no_graph_init(self, *a, **kw):
+        kw["use_cuda_graph"] = False
+        _orig_init(self, *a, **kw)
 
-@functools.wraps(_orig_init)
-def _no_graph_init(self, *a, **kw):
-    kw["use_cuda_graph"] = False
-    _orig_init(self, *a, **kw)
-
-
-_fe.Pi05TorchFrontendRtx.__init__ = _no_graph_init
+    _fe.Pi05TorchFrontendRtx.__init__ = _no_graph_init
+    print("[inference] CUDA graph 已禁用（PI05_NO_GRAPH=1），eager 模式")
 
 import flash_rt  # noqa: E402
 from flash_rt.core.utils.actions import normalize_state  # noqa: E402

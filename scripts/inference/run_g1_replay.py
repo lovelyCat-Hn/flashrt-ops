@@ -93,22 +93,25 @@ if args.no_grip:
 
 # bf16 定档（2026-09-23 tf_matrix 实证：INT8 毁动作质量）——必须在 import 前
 os.environ["FVK_PI05_RTX_FORCE_BF16"] = "1"
-os.environ.setdefault("PI05_NO_GRAPH", "1")
+# 图开关：0=开图（默认，2026-09-29 WithFlags 热修已打、9/30 bench 验证）；
+# 回退 eager：前缀 PI05_NO_GRAPH=1
+os.environ.setdefault("PI05_NO_GRAPH", "0")
 os.environ.setdefault("FLASHRT_PI05_STATE_PROMPT_MODE", "fixed")
 
 import cv2  # noqa: E402
 import flash_rt.frontends.torch.pi05_rtx as _fe  # noqa: E402
 
-_orig_init = _fe.Pi05TorchFrontendRtx.__init__
+# 回退 eager 时才封图（PI05_NO_GRAPH=1）；默认开图（scripts/test/bench_pi05.py 同款）
+if os.environ.get("PI05_NO_GRAPH", "0") == "1":
+    _orig_init = _fe.Pi05TorchFrontendRtx.__init__
 
+    @functools.wraps(_orig_init)
+    def _no_graph_init(self, *a, **kw):
+        kw["use_cuda_graph"] = False
+        _orig_init(self, *a, **kw)
 
-@functools.wraps(_orig_init)
-def _no_graph_init(self, *a, **kw):
-    kw["use_cuda_graph"] = False
-    _orig_init(self, *a, **kw)
-
-
-_fe.Pi05TorchFrontendRtx.__init__ = _no_graph_init
+    _fe.Pi05TorchFrontendRtx.__init__ = _no_graph_init
+    print("[replay] CUDA graph 已禁用（PI05_NO_GRAPH=1），eager 模式")
 
 import flash_rt  # noqa: E402
 from flash_rt.core.utils.actions import normalize_state  # noqa: E402

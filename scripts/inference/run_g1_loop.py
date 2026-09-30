@@ -78,6 +78,10 @@ ap.add_argument("--near-div", type=float, default=None,
                      "0=关闭（默认）；config [loop].near_div")
 ap.add_argument("--near-gap", type=float, default=None,
                 help="近距阻尼触发导程 rad（默认 0.06=60 mrad）；config [loop].near_gap")
+ap.add_argument("--cache-frames", type=int, default=None,
+                help="K/V 时序复用周期：1=每帧全量（默认，无损）；2=全量/仅解码交替"
+                     "（中间帧视觉前缀复用上一帧 K/V，推理提速但隔帧陈旧——本机节拍下"
+                     "陈旧≈一个执行窗，接触相位慎用）；config [loop].cache_frames")
 ap.add_argument("--max-excursion", type=float, default=None,
                 help="偏离起始位护栏 rad（任一关节超限即停；config [loop].max_excursion）")
 ap.add_argument("--settle", action="store_true", default=None,
@@ -115,6 +119,7 @@ g1_config.apply(args, {
     "pace_div": ("loop", "pace_div"),
     "near_div": ("loop", "near_div"),
     "near_gap": ("loop", "near_gap"),
+    "cache_frames": ("loop", "cache_frames"),
     "max_excursion": ("loop", "max_excursion"),
     "settle": ("loop", "settle"),
     "settle_frac": ("loop", "settle_frac"),
@@ -240,8 +245,9 @@ if args.grip:
 # 2026-09-23 tf_matrix 实证：INT8 两档（全 INT8 / 仅编码器）均毁动作质量
 # （块均 cos 0.15/0.27 vs bf16 0.98）——定档 bf16，显式锁定（详见 BENCHMARKS 附录）
 os.environ.setdefault("FVK_PI05_RTX_FORCE_BF16", "1")
-os.environ.setdefault("PI05_NO_GRAPH", "1")   # r35.6 Instantiate 段错误：本机 FlashRT
-                                              # 未打 WithFlags 热修(hotfix_flashrt/)前必须 eager
+# 图开关：0=开图（默认，2026-09-29 WithFlags 热修已打、9/30 bench 图模式稳定，
+# 收益 ~3%）；回退 eager：前缀 PI05_NO_GRAPH=1
+os.environ.setdefault("PI05_NO_GRAPH", "0")
 # state 以十进制文本拼进 prompt（format_pi05_prompt）：关节值一漂、bin 数位
 # 变化 → token 数变；默认 exact 模式每种长度一条 pipeline，换长=整条重建+
 # 重 autotune（~800ms，2026-09-23 合成实验实锤）。fixed=定长 200 一条
@@ -254,16 +260,17 @@ import numpy as np  # noqa: E402
 import cv2  # noqa: E402
 import flash_rt.frontends.torch.pi05_rtx as _fe  # noqa: E402
 
-_orig_init = _fe.Pi05TorchFrontendRtx.__init__
+# 回退 eager 时才封图（PI05_NO_GRAPH=1）；默认开图（scripts/test/bench_pi05.py 同款）
+if os.environ.get("PI05_NO_GRAPH", "0") == "1":
+    _orig_init = _fe.Pi05TorchFrontendRtx.__init__
 
+    @functools.wraps(_orig_init)
+    def _no_graph_init(self, *a, **kw):
+        kw["use_cuda_graph"] = False
+        _orig_init(self, *a, **kw)
 
-@functools.wraps(_orig_init)
-def _no_graph_init(self, *a, **kw):
-    kw["use_cuda_graph"] = False
-    _orig_init(self, *a, **kw)
-
-
-_fe.Pi05TorchFrontendRtx.__init__ = _no_graph_init
+    _fe.Pi05TorchFrontendRtx.__init__ = _no_graph_init
+    print("[loop] CUDA graph 已禁用（PI05_NO_GRAPH=1），eager 模式")
 
 import flash_rt  # noqa: E402
 from flash_rt.core.utils.actions import normalize_state  # noqa: E402
@@ -387,7 +394,7 @@ print("⚠ 若当前不是预热工作位，先跑 g1_pose_warmup.py 再来")
 
 t0 = time.time()
 model = flash_rt.load_model(str(CKPT), config="pi05", num_views=VIEWS,
-                            cache_frames=1, action_dim=ACTION_DIM)
+                            cache_frames=args.cache_frames, action_dim=ACTION_DIM)
 ns = model._pipe.norm_stats
 print(f"tier=int8_full views={VIEWS} | load {time.time() - t0:.1f}s")
 

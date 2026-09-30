@@ -111,10 +111,35 @@ flashpy ~/holy/scripts/inference/run_g1_inference.py --ckpt ~/holy/models/pi05_g
 - **state 归一化是调用方责任**：FlashRT 不归一化 state，直接把原始关节值喂进去
   会被 256-bin 离散化打满。必须 `normalize_state(raw, norm_stats)` 后再传 `state=`
   （`run_g1_inference.py` 已内置）
-- **state 23 维布局**（与 pick_place_balence 逐维对齐，2026-09-22 真机逐维核验）：
-  `[l_arm×7, l_grip, r_arm×7, r_grip, leg_joint1-5, head_joint1-2]`；
-  夹爪数据集是 0~100%，SDK 读数是开口宽度（米），标定后经 manifest 换算
+- **state 23 维布局**（**右臂在前**——2026-09-30 only_place 运动时间线探针 +
+  代码 docstring/消费端双重确认；旧版此处误写 l_arm 在前，记反会把臂甩背后。
+  两数据集同构）：
+  `[r_arm×7, r_grip, l_arm×7, l_grip, leg_joint1-5, head_joint1-2]`；
+  夹爪数据集是 0~100（33=持物起步），SDK 读数是开口宽度（米），标定后经 manifest 换算
 - 夹爪标定：`--grip-wmin/--grip-wmax`（满/零开度 SDK 宽度），写入 manifest
+
+### 3.6 G1 闭环执行（run_g1_loop，2026-09-30 工作点定案）
+
+```bash
+# 前提: 3.5 三步全绿 + warmup 已跑；急停在手边
+LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
+flashpy ~/holy/scripts/inference/run_g1_loop.py --exec --horizon 50 --rounds 60
+
+# 工作点已写进 config/g1.toml [loop]（spc=20 / 合步 20 / pace 0.45 / div 1.47 /
+# near-div 2 / near_gap 0.06 / speed 1.0 / delta_max 0.3），无需 CLI 传参。
+# 速度律: 臂速÷数据集原速 = n/(30×pace×div)，当前组合 ≈1.0× 原速。
+# 图模式默认开（WithFlags 热修）；异常回退: 前缀 PI05_NO_GRAPH=1
+```
+
+任务时间线（only_place 101 轨中位，**双臂严格串行**，0/101 并行）：
+左臂启动 0.9s → 左爪释放 3.7s → 右臂启动 7.2s（L 释放后 +3.4s）→ 全程 13.5s。
+实测（2026-09-30 60 轮判别跑）：L 释放 12-15 轮、L 回闭 19、R 释放 37-39、
+R 回闭 51，全程 35.9s → **双臂预算 52-60 轮**（≈数据集时间线 2.76×）。
+
+- ⚠️ **q 停纪律：右爪落盒才停**——左爪落盒时右臂还没开始（严格串行）
+- ⚠️ **轮数给足**：30 轮只够左臂半程（9/30 实证：恰在 R 启动窗边缘截断，无判别力）
+- 落盒前是"梦游期"，日志零判别力，勿据前几轮判成败
+- 异常：Ctrl-C / 急停；graph 异常加前缀 `PI05_NO_GRAPH=1` 回退 eager
 
 ## 4. 与 GalbotSDK 联用（同进程，已验证）
 
