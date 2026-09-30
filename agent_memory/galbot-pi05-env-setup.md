@@ -48,4 +48,5 @@ FlashRT 部署线（主路线）：
 - openpi（训练侧）在 CUDA 11.4 上仍需 JetPack 5 专用 jax/torch wheel
 - Docker 有 nvidia-docker2 但 daemon.json 未注册 nvidia runtime，`--gpus all` 不可用
 - 相关：[[galbot-g1-digital-twin-setup]]
+
 - **方案 A 病位消融判决（2026-09-30，本机 pi05_g1_place + only_place ep0）：per-row W8A8 判死，选择性量化无兼顾解**。新补丁 `FVK_PI05_RTX_INT8_ENC_SKIP`（FlashRT 1de926ca，前端按 spec 跳位点 + pipeline 逐位点回退 bf16，env 不设零影响；热修包 6 文件版，ops f132aa7 已推）+ 工具 `scripts/eval/int8_site_ablation.py`（`--configs 名:SPEC`，spec 内多 token 用 `+` 分隔；--bench 稳态延迟）。数据（六帧，bf16 参照 tf-cos 0.949）：全 90 位点 cos_arm **0.09**（跨机跨 ckpt 复现崩档）；损伤弥散但有清晰梯度——**浅层 FFN ≫ 尾层，down 投影是最毒单元**（只留 L0-8 down INT8 也毁到 0.17），attn 相对温和（18 层全 attn INT8 = 0.75）；位点数-质量曲线极陡：≤15 位点 0.999+/tf 0.946，25 位点臂 0.98 但**夹爪 cos 先塌（0.82，夹爪永远最先坏）**，48 位点 0.81。⚠ 混布档的 bf16 回退 GEMM 没过 autotune（pipeline_rtx.py:2278 只在全 bf16 时调），延迟读数失真但质量不受影响。结论：干净档（≤15/90 位点）收益仅个位数 ms；INT8 剩余路线只剩 kernel 级 SmoothQuant 类 per-channel 激活 scale（CUTLASS 改造），已搁置。**机制理解**：FlashRT 自测 encoder cosine 0.991，经 18 层残差 + 流匹配头的混沌敏感性（同图换噪声 cos 仅 0.25 底噪）放大成端到端崩；合成输入 A/B "干净"是输出被噪声先验主导的盲区，不是 INT8 无损。部署定档维持 bf16。

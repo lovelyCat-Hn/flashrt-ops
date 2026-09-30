@@ -1,5 +1,8 @@
 # Memory Index
 
+> **读法规约**：先读 [OVERVIEW.md](OVERVIEW.md)（全部记忆的分话题摘要 + 「何时读」指引），按需选读细节文件，**勿全量通读记忆目录**。修改任何细节文件后，同步刷新 OVERVIEW 对应摘要段。
+
+- [记忆概要 OVERVIEW](OVERVIEW.md) — 18 条记忆的分话题摘要与阅读时机；需要记忆时从这里入手
 - [Galbot SDK group 模式读取顺序错位](galbot-sdk-group-mode-ordering-pitfall.md) — 读关节必须按名字显式读取，group 模式与 names 配对会全错
 - [G1 数字孪生架构](galbot-g1-digital-twin-setup.md) — Jetson 推流 + Windows MuJoCo 渲染；只 mj_forward 不 mj_step；新 clone XML 需修 inertia
 - [GalbotMotion 帧命名空间坑](galbot-motion-frame-namespace-pitfall.md) — set_end_effector_pose 传链名+显式 Parameter()；IK/GET/SET 三套帧名互不通用；桩文件不可信
