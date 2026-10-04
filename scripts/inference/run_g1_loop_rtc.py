@@ -35,6 +35,9 @@ src/lerobot/policies/rtc/modeling_rtc.py（Apache-2.0）。只搬执行侧调度
 SDK 调用全留主线程）。配额步消费完而推理未就绪时——B 默认 RTC hold：
 hold 最后目标单调收敛等推理（轮询早退、夹爪不重发、永不喂深尾步）；
 --no-rtc-hold 退回 A 行为（旧 chunk 剩余步"续航"，深尾=计划垃圾风险）。
+可选坡升（--rtc-ramp N，执行侧 crossfade）：hold 连续 ≥2 窗（臂真减速过）
+后的 N 轮臂速限幅 0.5→1.0 线性恢复，柔化再起步；1 窗轮询早退的 hold 不触发
+（臂未减速，坡升纯属慢性拖慢）。零推理成本，对应 lerobot 执行侧 blend。
 
 用法:
   LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
@@ -126,6 +129,10 @@ ap.add_argument("--no-rtc-hold", action="store_true",
                 help="关闭 RTC hold，退回 A 脚本行为（推理迟到=旧 chunk 深尾续航）")
 ap.add_argument("--rtc-hold-max", type=int, default=6,
                 help="RTC hold 连续窗数上限：超过判定推理挂死，中止循环（默认 6 窗）")
+ap.add_argument("--rtc-ramp", type=int, default=0,
+                help="坡升轮数 N：hold 连续 ≥2 窗（臂真减速过）后的 N 轮臂速限幅 "
+                     "0.5→1.0 线性恢复，柔化再起步（执行侧 crossfade，零推理成本）。"
+                     "1 窗早退的 hold 不触发——臂没减速，坡升纯属慢性拖慢。0=关闭（默认）")
 args = ap.parse_args()
 
 # ── 全文日志落盘：q 退出走 os._exit 不刷缓冲（09-23 坑），故逐行强制 flush ──
@@ -183,7 +190,9 @@ if args.no_grip:
     args.grip = False
 print(f"[loop-rtc] B 变体 | 迟到兜底: "
       f"{'A 深尾续航（--no-rtc-hold）' if args.no_rtc_hold else 'RTC hold（默认）'}"
-      f" | hold 上限 {args.rtc_hold_max} 窗")
+      f" | hold 上限 {args.rtc_hold_max} 窗"
+      + (f" | 坡升 {args.rtc_ramp} 轮（hold≥2 窗后限速 0.5→1.0）"
+         if args.rtc_ramp > 0 else ""))
 
 
 class QuitWatcher:
@@ -558,6 +567,8 @@ sustain_cmds = 0                     # --no-rtc-hold 路径的深尾"续航"条�
 sust_last = 0                        # 上一轮续航条数（打进下轮表头，破水位一眼可见）
 hold_windows = 0                     # RTC hold 等待窗总数（B 变体核心遥测）
 hold_last = 0                        # 上一轮 hold 窗数（打进下轮表头）
+ramp_left = 0                        # 坡升剩余轮数（>0 时臂速按 0.5→1.0 线性限幅）
+ramp_fired = 0                       # 坡升激活次数（多窗 hold 次数，汇总遥测）
 
 
 class _PredictJob:
@@ -691,6 +702,7 @@ for r in range(args.rounds):
                   f"{args.max_excursion * 1000:.0f}，停止循环（机械臂留在原地）")
             aborted = True
             break
+        ramp_f = 1.0                       # 本窗坡升系数（1.0=不限速）
         cmd_delta = (tgt - cmd_hist) if cmd_hist is not None else np.zeros_like(tgt)
         cmd_hist = tgt.copy()
         gp = send_grip(robot, chunk[k_end - 1])   # 夹爪伴随后臂目标，发在计时区外
@@ -714,6 +726,11 @@ for r in range(args.rounds):
             if args.near_div >= 1.0 and gap0 < args.near_gap:
                 div_eff = args.near_div   # 近距阻尼：单调收敛+滤计划摆幅
             pace_v = max(V_MIN, min(gap0 / (div_eff * args.pace), args.speed))
+            if ramp_left > 0:
+                # 坡升：多窗 hold（臂真减速过）后的再起步柔化，0.5→1.0 线性恢复
+                ramp_f = 0.5 + 0.5 * (args.rtc_ramp - ramp_left) / args.rtc_ramp
+                pace_v *= ramp_f
+                ramp_left -= 1
             robot.set_joint_positions(tgt.tolist(), joint_names=ARM_NAMES,
                                       is_blocking=False, speed_rad_s=pace_v)
             pace_hist.append(pace_v)
@@ -728,7 +745,8 @@ for r in range(args.rounds):
         err = float(np.max(np.abs(ach - tgt))) * 1000
         track_err.append(err)
         tag = f"指令[步{k}-{k_end - 1}]" + ("·续航" if k >= n_steps else "") \
-            + ("·近阻尼" if div_eff != args.pace_div else "")
+            + ("·近阻尼" if div_eff != args.pace_div else "") \
+            + (f"·坡升{ramp_f:.2f}" if ramp_f < 1.0 else "")
         if k >= n_steps:
             sustain_cmds += 1
         print(f"  {tag}: |Δcmd| "
@@ -794,6 +812,10 @@ for r in range(args.rounds):
                       f"ControlStatus.SUCCESS(tracked)")
             if aborted:
                 break
+            if args.rtc_ramp > 0 and hold_n >= 2:
+                # 臂在 hold 中真减速过（≥1 个完整额外窗收敛）→ 后 N 轮限速再起步
+                ramp_left = args.rtc_ramp
+                ramp_fired += 1
             break                          # 推理就绪 → 正常换块（零深尾）
     round_ms.append((time.perf_counter() - t_r) * 1000)
     if round_ms[-1] > 1:
@@ -838,6 +860,9 @@ if hold_windows:
           f"A 脚本同场景为深尾续航=计划垃圾；上限 {args.rtc_hold_max} 窗未触发挂死判定）")
 if sustain_cmds:
     print(f"深尾续航: {sustain_cmds} 条（--no-rtc-hold 路径：配额外消费旧 chunk 步）")
+if args.rtc_ramp > 0:
+    print(f"坡升触发: {ramp_fired} 次（hold≥2 窗后 {args.rtc_ramp} 轮限速 0.5→1.0 再起步；"
+          f"1 窗早退的 hold 不触发，臂未减速无需柔化）")
 print(f"最终偏离起始位: {exc:.0f} mrad（护栏 {args.max_excursion * 1000:.0f} mrad）"
       + (" ⛔ 护栏触发过" if aborted else ""))
 
