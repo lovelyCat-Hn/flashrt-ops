@@ -13,7 +13,7 @@ E 单组、F 单点 → FAULT。
 用法（封存，仅留档）:
   LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
   ~/miniforge3/envs/flash_pyrt311/bin/python \
-      ~/holy/scripts/inference/g1_traj_probe.py
+      ~/holy/scripts/probes/g1_traj_probe.py
 """
 import os
 import sys

@@ -11,7 +11,7 @@ numpy==1.26.4 钉版红线，勿往推理环境装 pandas/pyarrow）。
 曾记反把机械臂甩背后）。夹爪是 0~100% 训练原单位，npz 原样保存零换算。
 
 用法:
-  python3 ~/holy/scripts/inference/extract_dataset_frames.py \
+  python3 ~/holy/scripts/dataset/extract_dataset_frames.py \
       [--dataset ~/holy/datasets/pick_place_balence] \
       [--episodes 0,1,2] [--out ~/holy/datasets/replay_input.npz]
 """

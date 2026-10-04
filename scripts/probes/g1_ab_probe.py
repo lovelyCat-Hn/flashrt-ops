@@ -15,7 +15,7 @@ os.environ.setdefault("FLASHRT_PI05_STATE_PROMPT_MODE", "fixed")
 import cv2
 import numpy as np
 
-sys.path.insert(0, "/home/galbot/holy/scripts/inference")
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "inference"))
 
 CKPT = pathlib.Path("/home/galbot/holy/models/pi05_g1_ft")
 mf = json.loads((CKPT / "flashrt_deploy.json").read_text())

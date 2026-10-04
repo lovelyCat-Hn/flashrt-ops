@@ -25,7 +25,7 @@ per-row scale 就能活。数学精确：(xH)(WH)ᵀ = xWᵀ（H 对合正交）
 FHT+int8 融合 kernel；仍崩 → Route B′ 出局，编码器维持 bf16。
 
 用法:
-  ~/holy/run.sh ~/holy/scripts/eval/quarot_sim_ablation.py \
+  ~/holy/run.sh ~/holy/scripts/probes/quarot_sim_ablation.py \
       [--configs bf16,int8,int8_sim,rot8] [--ep 0] [--frames 0,60,120,180,240,300]
 """
 import argparse
@@ -61,7 +61,7 @@ NPZ = pathlib.Path(args.npz)
 if not NPZ.exists():
     print(f"npz 缺失，自举 {DS.name} ep{args.ep} → {NPZ} ...", flush=True)
     subprocess.run(["/usr/bin/python3",
-                    "/home/galbot/holy/scripts/inference/extract_dataset_frames.py",
+                    "/home/galbot/holy/scripts/dataset/extract_dataset_frames.py",
                     "--dataset", str(DS), "--episodes", str(args.ep),
                     "--out", str(NPZ)], check=True)
 

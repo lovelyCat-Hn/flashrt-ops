@@ -3,7 +3,7 @@
 
 用法:
   ~/miniforge3/envs/flash_pyrt311/bin/python \
-      ~/holy/scripts/inference/compare_norm_stats.py \
+      ~/holy/scripts/dataset/compare_norm_stats.py \
       [--dataset ~/holy/datasets/pick_place_balence] \
       [--ckpt ~/holy/models/pi05_g1_pretrain/pi05_g1_040000/pretrained_model] \
       [--npz ~/holy/datasets/replay_input.npz]

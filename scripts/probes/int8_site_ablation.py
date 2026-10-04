@@ -13,7 +13,7 @@ bf16 0.98），但那是「全有或全无」的结论。FlashRT 已打 per-site
 对数据集 delta 的 cos（9-23 教训：只看直接 A/B 会漏判）。
 
 用法（npz 缺失时自动用系统 python3 跑 extract_dataset_frames.py 自举）:
-  ~/holy/run.sh ~/holy/scripts/eval/int8_site_ablation.py \
+  ~/holy/run.sh ~/holy/scripts/probes/int8_site_ablation.py \
       [--ep 0] [--frames 0,60,120,180,240,300] \
       [--configs bf16,enc8,no_l0-8,no_l9-17] \
       [--ckpt ~/holy/models/pi05_g1_place_deploy] \
@@ -60,7 +60,7 @@ NPZ = pathlib.Path(args.npz) if args.npz else pathlib.Path(
 if not NPZ.exists():
     print(f"npz 缺失，自举 {DS.name} ep{args.ep} → {NPZ} ...", flush=True)
     subprocess.run(["/usr/bin/python3",
-                    "/home/galbot/holy/scripts/inference/extract_dataset_frames.py",
+                    "/home/galbot/holy/scripts/dataset/extract_dataset_frames.py",
                     "--dataset", str(DS), "--episodes", str(args.ep),
                     "--out", str(NPZ)], check=True)
 

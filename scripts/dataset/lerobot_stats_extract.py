@@ -10,7 +10,7 @@ normalization_mapping：pi0.5 G1 微调实测 QUANTILES（对应 --mode q01_q99�
 
 用法:
   ~/miniforge3/envs/flash_pyrt311/bin/python \
-      ~/holy/scripts/inference/lerobot_stats_extract.py \
+      ~/holy/scripts/dataset/lerobot_stats_extract.py \
       --ckpt <pretrained_model 目录> [--out <json 路径>]
 输出 json 形状（prep 的 openpi schema）:
   {"actions": {mean,std,q01,q99: [...]}, "state": {...}}

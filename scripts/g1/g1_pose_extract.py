@@ -10,7 +10,7 @@
 spread_max_dev），另附 task、source 便于人读。
 
 用法（系统 python3，读 parquet 要 pandas+pyarrow；flash_pyrt311 无 pandas）:
-  python3 ~/holy/scripts/inference/g1_pose_extract.py \
+  python3 ~/holy/scripts/g1/g1_pose_extract.py \
       --dataset ~/holy/datasets/only_place [--task 0] \
       [--out ~/holy/models/pi05_g1_place_deploy/episode_start_task0.json]
 

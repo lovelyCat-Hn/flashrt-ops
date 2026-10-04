@@ -51,4 +51,4 @@
 - `~/holy/DEPLOY.md` — 新机部署指南（纯环境包配方 v3，7.5G 不含 models）
 - `~/holy/USAGE.md` — 操作手册（装机 + 日常使用）
 - `~/holy/BENCHMARKS.md` — 基准报告（对外汇报用，2026-09-21 echo 机全部实测数据）
-- `~/holy/scripts/inference/` — 闭环/回放/推理工具集（run_g1_loop / run_g1_inference 等，共享 config/g1.toml）
+- `~/holy/scripts/` — 2026-10-04 分层：`inference/` 直接入口（run_g1_loop / run_g1_inference / g1_config.py 等，共享 config/g1.toml）、`g1/` 整备标定、`dataset/` 数据集工具、`eval/` 精度评估、`test/` 性能诊断、`probes/` 探针封存（g1_traj_probe 等）

@@ -6,10 +6,10 @@
 本工具补这个空档：先 --close 夹上物品，再跑 run_g1_loop。
 
 用法（现场安全确认后，走 run.sh 同一套环境）:
-  ~/holy/run.sh ~/holy/scripts/inference/g1_grip.py --close              # 双臂夹紧（力矩限位兜底，夹住即停）
-  ~/holy/run.sh ~/holy/scripts/inference/g1_grip.py --pct 33             # 回 33% 持物开度（松开换物/摆放）
-  ~/holy/run.sh ~/holy/scripts/inference/g1_grip.py --side left --pct 10 # 单臂微调
-  ~/holy/run.sh ~/holy/scripts/inference/g1_grip.py                      # 不给目标=只读，打印当前开度
+  ~/holy/run.sh ~/holy/scripts/g1/g1_grip.py --close              # 双臂夹紧（力矩限位兜底，夹住即停）
+  ~/holy/run.sh ~/holy/scripts/g1/g1_grip.py --pct 33             # 回 33% 持物开度（松开换物/摆放）
+  ~/holy/run.sh ~/holy/scripts/g1/g1_grip.py --side left --pct 10 # 单臂微调
+  ~/holy/run.sh ~/holy/scripts/g1/g1_grip.py                      # 不给目标=只读，打印当前开度
 
 标定宽度从部署目录 flashrt_deploy.json 读（与闭环 send_grip 同源，
 缺 manifest 回退 2026-09-23 实测 0.0005/0.1200 m）。
@@ -25,7 +25,7 @@ import statistics
 import sys
 import time
 
-sys.path.insert(0, "/home/galbot/holy/scripts/inference")
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "inference"))
 import g1_config  # noqa: E402  同目录共享配置
 
 ap = argparse.ArgumentParser(description=__doc__,

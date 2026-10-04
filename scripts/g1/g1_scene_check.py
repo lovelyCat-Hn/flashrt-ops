@@ -14,7 +14,7 @@
 参考帧在 docs/scene_reference/（episode0 起点±，随库入库）。
 
 用法:
-  ~/holy/run.sh ~/holy/scripts/inference/g1_scene_check.py
+  ~/holy/run.sh ~/holy/scripts/g1/g1_scene_check.py
 """
 import os
 import pathlib

@@ -11,7 +11,7 @@ get_active_controller 仍显示 right_arm_pvt_ctrl——RT 层无告警，典型
 ⚠ 全程急停就绪；③ 的直控无碰撞检查，臂前空间清空。
 
 用法:
-  ~/holy/run.sh ~/holy/scripts/inference/right_arm_recover.py
+  ~/holy/run.sh ~/holy/scripts/g1/right_arm_recover.py
 """
 import json
 import os

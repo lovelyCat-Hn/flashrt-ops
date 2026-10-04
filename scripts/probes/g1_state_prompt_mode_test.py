@@ -12,7 +12,7 @@
 用法:
   LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
   ~/miniforge3/envs/flash_pyrt311/bin/python \
-      scripts/inference/g1_state_prompt_mode_test.py {exact|fixed}
+      scripts/probes/g1_state_prompt_mode_test.py {exact|fixed}
 """
 import functools
 import os

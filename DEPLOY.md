@@ -90,6 +90,11 @@ bash ~/holy/scripts/verify_deploy.sh
 （tar 里解出的 scripts 是打包时的冻结快照，第②步用 git 版覆盖；今后改动只进 git，
 重打 bundle 时不要再把 scripts 打进去。echo 机已把 ~/holy 建成仓库，老机直接 `git pull` 即可。）
 
+> ⚠ 跨机注意（2026-10-04）：scripts 已分层重构——`inference/` 只留直接入口，
+> 新增 `g1/`（整备标定）、`dataset/`（数据集工具）、`probes/`（探针封存）。
+> git pull 自动按新布局搬移；曾用旧 bundle 解压+cp 覆盖过 scripts 的机器，
+> pull 后跑一遍 `bash ~/holy/scripts/verify_deploy.sh` 验收，命令路径以 COMMANDS.md 为准。
+
 不需要 conda init、不需要 pip、不需要联网——env 自包含（含 numpy 1.26.4 + opencv 4.10 钉版），所有编译产物随包。
 如果目标机已有 miniconda/anaconda：**不要跑 miniforge 的 conda init**（双 init 打架），用绝对路径即可。
 
@@ -111,7 +116,7 @@ bash ~/holy/hotfix_flashrt/apply_hotfix.sh    # 幂等；已应用则直接跳�
 ```bash
 # FlashRT/pi0.5 一律绝对路径调 python（本系交互 shell 无 conda 命令）
 unset PYTHONPATH LD_LIBRARY_PATH LD_PRELOAD     # 清 bashrc 的 /data/galbot/lib 泄漏（跑纯 FlashRT 时）
-~/miniforge3/envs/flash_pyrt311/bin/python ~/holy/scripts/load_pi05_int8.py
+~/miniforge3/envs/flash_pyrt311/bin/python ~/holy/scripts/inference/load_pi05_int8.py
 ```
 
 **要同时用 GalbotSDK 时（同进程已验证可行）**：不要 unset，改带上 SDK 路径

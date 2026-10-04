@@ -10,7 +10,7 @@ in the norm-stats dict:
 
 The marker travels inside norm_stats.json so a checkpoint is
 self-describing (G1 fine-tuned deployment writes it via
-scripts/inference/g1_ckpt_prep.py). Without the key, behavior is
+scripts/g1/g1_ckpt_prep.py). Without the key, behavior is
 identical to the original quantile-only implementation.
 """
 

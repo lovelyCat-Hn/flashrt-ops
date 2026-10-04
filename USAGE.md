@@ -13,7 +13,7 @@
 | `~/holy/FlashRT/` | FlashRT 源码树（editable 安装指向这里；含已编译 fa2/kernels .so） |
 | `~/holy/models/pi05_lerobot_base/` | pi0.5 权重 14.5G + `assets/.../norm_stats.json`（openpi 官方 q01/q99 统计，勿删） |
 | `~/.cache/flash_rt/paligemma_tokenizer.model` | PaliGemma 分词器（4.26MB，勿删） |
-| `~/holy/scripts/` | 脚本（`inference/` 推理冒烟、`test/` 性能与诊断、`eval/` 精度评估，根上 `verify_deploy.sh` 为装机验收入口） |
+| `~/holy/scripts/` | 脚本（`inference/` 直接可跑入口 + `g1_config.py` 共享配置、`g1/` 整备与标定、`dataset/` 数据集工具、`eval/` 精度评估、`test/` 性能与诊断、`probes/` 一次性探针与封存件，根上 `verify_deploy.sh` 为装机验收入口） |
 | `~/holy/cuda_warmup.py` | cuBLAS 暖场兜底（生产启动入口必加） |
 | `~/holy/{DEPLOY,USAGE,BENCHMARKS}.md` | 三份文档 |
 
@@ -92,7 +92,7 @@ bash ~/holy/scripts/verify_deploy.sh    # 第 ⑤ 项自动探；或 flashpy ~/h
 
 ```bash
 # ① 装配 + 预检（微调输出目录 → FlashRT 部署目录，软链不复制 14G）
-flashpy ~/holy/scripts/inference/g1_ckpt_prep.py \
+flashpy ~/holy/scripts/g1/g1_ckpt_prep.py \
     --src <微调输出目录> --out ~/holy/models/pi05_g1_ft \
     --stats <训练用的 stats.json> --mode mean_std   # 语义务必与训练配置一致！
 # ② 对齐校验（数学往返 + 引擎语义分发实证 + 落域）

@@ -18,8 +18,8 @@
            （predict 同种子对不齐，见 ab_real_camera.py 教训）。
 
 用法:
-  ~/holy/run.sh ~/holy/scripts/eval/int8_quant_probe.py audit
-  ~/holy/run.sh ~/holy/scripts/eval/int8_quant_probe.py ab [--ep 0] [--enc8] [--base]
+  ~/holy/run.sh ~/holy/scripts/probes/int8_quant_probe.py audit
+  ~/holy/run.sh ~/holy/scripts/probes/int8_quant_probe.py ab [--ep 0] [--enc8] [--base]
 """
 import argparse
 import functools

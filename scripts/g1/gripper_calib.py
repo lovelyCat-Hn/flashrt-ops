@@ -11,7 +11,7 @@
 用法（现场安全确认后）:
   LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
   ~/miniforge3/envs/flash_pyrt311/bin/python \
-  ~/holy/scripts/inference/gripper_calib.py [--side both|left|right] [--read-only]
+  ~/holy/scripts/g1/gripper_calib.py [--side both|left|right] [--read-only]
 """
 import argparse
 import os

@@ -27,7 +27,7 @@ dim0-11 入域即达标；leg/head 窄维（宽 <1e-3）可能仍亮，属传感
 用法:
   LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
   ~/miniforge3/envs/flash_pyrt311/bin/python \
-      ~/holy/scripts/inference/g1_pose_warmup.py \
+      ~/holy/scripts/g1/g1_pose_warmup.py \
       [--ckpt ~/holy/models/pi05_g1_deploy] [--skip-zero] [--speed 0.15] [--grip]
 
 中断：随时按 q 即退（含 SDK 阻塞运动中——Ctrl-C 会被阻塞 C++ 调用推迟，
@@ -46,6 +46,7 @@ import threading
 import time
 import tty
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "inference"))  # noqa: E402  g1_config 在 inference/（同仓共享配置）
 import g1_config   # noqa: E402  同目录共享配置（CLI > config/g1.toml > 内置默认）
 
 ap = argparse.ArgumentParser(description=__doc__,

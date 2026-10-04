@@ -17,7 +17,7 @@
 ### ① 预热 → 数据集工作姿态（零位 → 臂+头 → 躯干/腿 → 夹爪闭合并行）
 
 ```bash
-~/holy/run.sh ~/holy/scripts/inference/g1_pose_warmup.py
+~/holy/run.sh ~/holy/scripts/g1/g1_pose_warmup.py
 ```
 
 - 2026-09-23 真机全绿：腿 5 关节 set_joint_positions 直接收（SUCCESS 逐关节到位）；
@@ -85,7 +85,7 @@ execute/loop 脚本已自动加回预测时刻臂位再执行，无需手工换�
 
 ```bash
 # 前置：预热到 task0 起始位（脚本启动会打印与 ep0 帧起始的偏差，>300 mrad 必须先预热）
-~/holy/run.sh ~/holy/scripts/inference/g1_pose_warmup.py
+~/holy/run.sh ~/holy/scripts/g1/g1_pose_warmup.py
 
 # 干跑（只读关节 + GPU 推理，打印前 2 控制步计划，不动机器人）
 ~/holy/run.sh ~/holy/scripts/inference/run_g1_replay.py
@@ -123,10 +123,10 @@ execute/loop 脚本已自动加回预测时刻臂位再执行，无需手工换�
 
 ```bash
 # 只读探针（判断反馈活着没：width/velocity/effort/is_moving）
-~/holy/run.sh ~/holy/scripts/inference/gripper_calib.py --read-only
+~/holy/run.sh ~/holy/scripts/g1/gripper_calib.py --read-only
 
 # 全行程标定（先左后右，结束停在张开位）→ 抄下打印的 --grip-wmin/--grip-wmax
-~/holy/run.sh ~/holy/scripts/inference/gripper_calib.py
+~/holy/run.sh ~/holy/scripts/g1/gripper_calib.py
 ```
 
 拿到新标定后重跑 §3 的 prep 步带上 `--grip-wmin <值> --grip-wmax <值>`，
@@ -140,10 +140,10 @@ execute/loop 脚本已自动加回预测时刻臂位再执行，无需手工换�
 
 ```bash
 # ① stats 提取（微调输出目录 → norm_stats.json）
-~/holy/run.sh ~/holy/scripts/inference/lerobot_stats_extract.py --ckpt <微调输出>/pretrained_model
+~/holy/run.sh ~/holy/scripts/dataset/lerobot_stats_extract.py --ckpt <微调输出>/pretrained_model
 
 # ② 组装部署目录（软链 14G 权重 + config + manifest；norm_mode 必须显式）
-~/holy/run.sh ~/holy/scripts/inference/g1_ckpt_prep.py \
+~/holy/run.sh ~/holy/scripts/g1/g1_ckpt_prep.py \
     --src <微调输出>/pretrained_model --out ~/holy/models/<新目录> \
     --mode q01_q99 --grip-wmin 0.0005 --grip-wmax 0.1200
 
@@ -172,7 +172,7 @@ Left arm places A in the top-left corner. Right arm places A in the top-left cor
 **摆位对位工具**（十几秒/轮，不加载模型）：
 
 ```bash
-~/holy/run.sh ~/holy/scripts/inference/g1_scene_check.py
+~/holy/run.sh ~/holy/scripts/g1/g1_scene_check.py
 # 输出 /tmp/scene_check/compare_*.png（左=当前 / 右=训练并排）
 ```
 
@@ -191,10 +191,10 @@ Left arm places A in the top-left corner. Right arm places A in the top-left cor
 bash ~/holy/scripts/verify_deploy.sh            # 一键验收（只读+GPU 推理，9 项）
 
 # state prompt 模式 A/B（exact vs fixed 的 800ms 差距复现实验）
-~/holy/run.sh ~/holy/scripts/inference/g1_state_prompt_mode_test.py
+~/holy/run.sh ~/holy/scripts/probes/g1_state_prompt_mode_test.py
 
 # 显存/分配探针
-~/holy/run.sh ~/holy/scripts/inference/g1_alloc_probe.py
+~/holy/run.sh ~/holy/scripts/probes/g1_alloc_probe.py
 ```
 
 ---
