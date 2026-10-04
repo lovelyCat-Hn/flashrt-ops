@@ -64,8 +64,12 @@ execute/loop 脚本已自动加回预测时刻臂位再执行，无需手工换�
 ### ④ 闭环 receding-horizon（连续任务）
 
 ```bash
-~/holy/run.sh ~/holy/scripts/inference/run_g1_loop.py --exec
+~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_rtc.py --exec
 ```
+
+- 工作点（2026-10-04 定案）已写进 config/g1.toml [loop]：spc=25 / pace 0.38 /
+  div 1.65（≈1.33× 原速，R 落盒 14-14.5s）；pace 低于水位由 RTC hold 兜底。
+  下面一行是 09-23/09-24 时代的旧内置组合描述，仅存档。
 
 - config 内置 2026-09-23 真机 5/5 全绿组合 + 2026-09-24 v4 半程配速（与回放
   同款对齐）：`--speed 0.25 --pace 0.6 --steps-per-cmd 3 --chunk-mode track`

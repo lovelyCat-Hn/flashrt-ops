@@ -118,16 +118,18 @@ flashpy ~/holy/scripts/inference/run_g1_inference.py --ckpt ~/holy/models/pi05_g
   夹爪数据集是 0~100（33=持物起步），SDK 读数是开口宽度（米），标定后经 manifest 换算
 - 夹爪标定：`--grip-wmin/--grip-wmax`（满/零开度 SDK 宽度），写入 manifest
 
-### 3.6 G1 闭环执行（run_g1_loop，2026-09-30 工作点定案）
+### 3.6 G1 闭环执行（run_g1_loop_rtc，2026-10-04 工作点 v2 定案）
 
 ```bash
 # 前提: 3.5 三步全绿 + warmup 已跑；急停在手边
-LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
-flashpy ~/holy/scripts/inference/run_g1_loop.py --exec --horizon 50 --rounds 60
+~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_rtc.py --exec --rounds 60
 
-# 工作点已写进 config/g1.toml [loop]（spc=20 / 合步 20 / pace 0.43 / div 1.65 /
+# 工作点已写进 config/g1.toml [loop]（spc=25 / 合步 25 / pace 0.38 / div 1.65 /
 # near-div 2 / near_gap 0.06 / speed 1.0 / delta_max 0.3），无需 CLI 传参。
-# 速度律: 臂速÷数据集原速 = n/(30×pace×div)，当前组合 ≈0.94× 原速。
+# 速度律: 臂速÷数据集原速 = n/(30×pace×div)，当前组合 ≈1.33× 原速；
+# R 落盒实测 14.0-14.5s（数据集 13s）。
+# pace 0.38 低于推理水位由 RTC hold 兜底（推理迟到=hold 最后目标单调收敛，
+# 零深尾垃圾）；A 脚本 run_g1_loop.py 无兜底，勿用它跑破水位档。
 # 图模式默认开（WithFlags 热修）；异常回退: 前缀 PI05_NO_GRAPH=1
 ```
 
