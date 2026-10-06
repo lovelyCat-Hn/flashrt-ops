@@ -133,6 +133,12 @@ ap.add_argument("--rtc-ramp", type=int, default=0,
                 help="坡升轮数 N：hold 连续 ≥2 窗（臂真减速过）后的 N 轮臂速限幅 "
                      "0.5→1.0 线性恢复，柔化再起步（执行侧 crossfade，零推理成本）。"
                      "1 窗早退的 hold 不触发——臂没减速，坡升纯属慢性拖慢。0=关闭（默认）")
+ap.add_argument("--grip-state-cmd", action="store_true",
+                help="state 夹爪维(dim7/15)改喂【指令值】而非 SDK 回读：回读滞后 "
+                     "~6.3-8s 而 pick 关键窗口 ~7s——喂回读=模型全程看到冻结在起始值"
+                     "的夹爪状态（数据集 state 跟随指令仅 ~0.3-1s，10-05 判读）。"
+                     "10-05 pick 四跑 R 爪全程 0%% 即此病。需 --grip；默认关=喂回读"
+                     "（place 线一直这么跑的）")
 args = ap.parse_args()
 
 # ── 全文日志落盘：q 退出走 os._exit 不刷缓冲（09-23 坑），故逐行强制 flush ──
@@ -301,6 +307,9 @@ if args.grip:
             "chg": args.grip_chg, "sent": {}}
     print(f"夹爪下发开启: 0%→{wmin} m | 100%→{wmax} m | 速度 {args.grip_speed} m/s | "
           f"力矩 {args.grip_effort} N | 变化阈值 {args.grip_chg}%")
+    if args.grip_state_cmd:
+        print("⚠ state 夹爪维(7/15)喂【指令值】（--grip-state-cmd）：SDK 回读滞后 "
+              "~6.3-8s > pick 窗口 ~7s，回读=冻结起始值（10-05 四跑实证）")
 
 # 2026-09-23 tf_matrix 实证：INT8 两档（全 INT8 / 仅编码器）均毁动作质量
 # （块均 cos 0.15/0.27 vs bf16 0.98）——定档 bf16，显式锁定（详见 BENCHMARKS 附录）
@@ -368,6 +377,25 @@ def state_from_joints(vals) -> np.ndarray:
         st[i] = float(np.clip((st[i] - GRIP_WMIN)
                               / (GRIP_WMAX - GRIP_WMIN + 1e-9) * 100.0,
                               0.0, 100.0))
+    return st
+
+
+def grip_state_cmd_override(st_raw):
+    """--grip-state-cmd：state 夹爪维(7/15)改喂最后指令值（默认=SDK 回读）。
+
+    SDK 夹爪反馈滞后 ~6.3-8s（2026-09-23 实测），pick 的关键窗口只有 ~7s——
+    喂回读=模型全程看到冻结在起始值的夹爪状态；数据集 state 跟随指令仅
+    ~0.3-1s（10-05 判读 ep0：开爪 1s 内跟上、闭到物体稳读 33.5%）。指令值
+    即数据集语义的快跟随，把 train/serve 的夹爪 state 拉回一致。
+    未发过指令的爪（GRIP["sent"] 空）保留回读值——起步时两者本就一致。
+    """
+    if GRIP is None or not args.grip_state_cmd:
+        return st_raw
+    st = np.array(st_raw, dtype=np.float32)
+    for name, dim in GRIP["names"]:
+        sent = GRIP["sent"].get(name)
+        if sent is not None:
+            st[dim] = sent
     return st
 
 
@@ -619,7 +647,8 @@ def fresh_obs():
     """
     t_g = time.perf_counter()
     obs = grab_views(robot)
-    st_raw = state_from_joints(read_joints(robot, STATE_NAMES))
+    st_raw = grip_state_cmd_override(
+        state_from_joints(read_joints(robot, STATE_NAMES)))
     st_n = normalize_state(st_raw, ns)
     grab_ms.append((time.perf_counter() - t_g) * 1000)
     return obs, st_n, st_raw[ARM_SLICE]
