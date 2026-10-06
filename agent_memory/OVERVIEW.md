@@ -14,14 +14,15 @@
 
 **机器识别**：三台机 hostname 全叫 galbot-echo，**勿用 hostname 区分**；沟通中称"本机（第三台）"。
 
-- [本机（第三台）部署进度](galbot-machine3-deployment-state.md) — **本机状态权威文件**。L4T R35.6.4，~/holy 即仓库根；闭环工作点 ckpt=pi05_g1_place + 数据集 only_place（101 轨；**起始夹爪 ≈33% 开度是 places 任务语义，非毛刺**），组装三步 + norm_align_check 全绿；闭环 `--horizon` 默认 50；60s+ rollout 瓶颈已定案=执行器配速（"腕部相机全盲"旧判已被用户否决并被实证推翻）；launcher 中途 restart 只起半套栈，必须整机重启。▸ 问"装到哪了/下一步"、改 ckpt/数据集配置前。
+- [本机（第三台）部署进度](galbot-machine3-deployment-state.md) — **本机状态权威文件**。L4T R35.6.4，~/holy 即仓库根；**10-05 切回 pick 任务**：ckpt=pi05_g1_pick_deploy（040000 装配+对齐校验全绿，句 "Left arm pick up A..."，起始位姿 0% 闭爪；place 线 pi05_g1_place_deploy 三键在 config 注释存档可切回，33% 起始夹爪是 places 语义非毛刺）；闭环 `--horizon` 默认 50；launcher 中途 restart 只起半套栈，必须整机重启；**10-04 RTC 实验完结**：B 脚本 hold 兜底 14 跑全绿，**工作点 v2=25/0.38/1.65 已定案入 config（R 落盒 14.0-14.5s 纪录）**；⚠ 全天空爪，持物物理 place 复验挂着。▸ 问"装到哪了/下一步"、改 ckpt/数据集/工作点配置前。
 - [本机相机 transport 不匹配](galbot-machine3-camera-transport-unmatch.md) — 相机时好时坏，**重启采集栈即愈**（勿直接 kill 采集守护，launcher 会组杀兄弟进程）；失败窗口期相机话题对所有外部进程隐身，embosa 绑定旁路也不通。工具：read_camera_bypass.py / sdk_camera_smoke.py / embosa_topic_tool。▸ 相机话题消失、SDK 取图失败、"刚才还好好的"。
 
 ## 2. 环境与推理引擎（FlashRT / pi0.5）
 
-- [pi0.5 环境准备](galbot-pi05-env-setup.md) — **环境红线大全**。Orin sm_87（非 Xavier）；JP5.1.4，CUDA 11.4 不可升；torch 2.4.1 自编 wheel（~32TF bf16，可移植 JP5.1+py3.11，仅 sm_87 SASS）；cuBLAS 三层怪癖→启动入口必挂 cuda_warmup.py 兜底；**部署定档 bf16 终审**（INT8 per-row 判死 + QuaRot 旋转版仿真也判死 tf 0.26，quant想法先过 quarot_sim_ablation.py 零改动仿真；W8A16-decoder 是仅剩无损候选 ~20-30ms 未开工；过程知识：量化在 load 内部执行/PI05_NO_GRAPH 不被消费/编码器每向前 69 次量化调用末层 early-return）；flash_pyrt311 装包必须钉 `numpy==1.26.4`；bashrc 环境变量泄漏三件套（旧 libcurl 毒 HTTPS 有前科）。▸ 装包/编译/量化/网络或 CUDA 怪象排查。
+- [pi0.5 环境准备](galbot-pi05-env-setup.md) — **环境红线大全**。Orin sm_87（非 Xavier）；JP5.1.4，CUDA 11.4 不可升；torch 2.4.1 自编 wheel（~32TF bf16，可移植 JP5.1+py3.11，仅 sm_87 SASS）；cuBLAS 三层怪癖→启动入口必挂 cuda_warmup.py 兜底；**部署定档 bf16 终审**（INT8 per-row 判死 + QuaRot 旋转版仿真也判死 tf 0.26；10-06 复核闭环：旋转实现无 bug、病位=层0→1、通道静态 fold 端到端更差——崩的入口恰好是不能静态化的位点，quant 想法先过 rot_equivalence_probe.py/quarot_sim_ablation.py 零改动仿真；W8A16-decoder 是仅剩无损候选 ~20-30ms 未开工；过程知识：量化在 load 内部执行/PI05_NO_GRAPH 不被消费/管线 weights 存设备指针惰性建/编码器每向前 69 次量化调用末层 early-return）；flash_pyrt311 装包必须钉 `numpy==1.26.4`；bashrc 环境变量泄漏三件套（旧 libcurl 毒 HTTPS 有前科）。▸ 装包/编译/量化/网络或 CUDA 怪象排查。
 - [FlashRT 环境打包迁移](galbot-flashrt-env-migration-pack.md) — 同路径 tar 解压即用、零编译；软链/editable 随包走；换用户名走干净配方；JP6 不可用；v2 包含权重/norm_stats/tokenizer/scripts。配套 `~/holy/DEPLOY.md` + `verify_deploy.sh` 一键验收。▸ 新机部署/迁移/验收。
-- [G1 CUDA graph 段错误修复](galbot-g1-cuda-graph-instantiate-fix.md) — L4T r35.6 iGPU 上旧式 cudaGraphInstantiate 对**任意图**必段错误（单节点 memset 也崩），已修走 WithFlags（FlashRT 4822d755，两机热修都在）；bench 收益仅 ~3%，勿期待翻倍；两机定档分叉：源机 PI05_NO_GRAPH=1，部署机=0。▸ graph 段错误、开/关图模式、跨机性能对比。
+- [G1 CUDA graph 段错误修复](galbot-g1-cuda-graph-instantiate-fix.md) — L4T r35.6 iGPU 上旧式 cudaGraphInstantiate 对**任意图**必段错误（单节点 memset 也崩），已修走 WithFlags（FlashRT 4822d755，两机热修都在）；bench 收益仅 ~3%，勿期待翻倍；两机定档分叉：源机 PI05_NO_GRAPH=1，部署机=0；本机（第三台）9/30 解封——run_* 四脚本 env 门控默认开图（PI05_NO_GRAPH 在 FlashRT 零消费者，封图全靠脚本 monkeypatch），**闭环 60 轮已验**（p50 380ms）。▸ graph 段错误、开/关图模式、跨机性能对比。
+- [cache_frames=2 判死](galbot-pi05-cache-frames-dead.md) — 时序 K/V 复用对 G1 闭环结构性无效：state 进 prompt → 每轮 set_prompt 重置前缀计数 → 永远全量（重置是正确性所需，绕过=拿陈旧本体状态规划）；bench 3.8× 只属于 prompt 恒定的 droid 基准。knob 默认 1 保留，勿再试。▸ 又想拿 K/V 复用提速时。
 
 ## 3. GalbotSDK 与 G1 真机操作
 
@@ -30,6 +31,7 @@
 - [GalbotMotion 帧命名空间坑](galbot-motion-frame-namespace-pitfall.md) — IK/GET/SET 三套 API 帧名互不通用；set_end_effector_pose 要传链名+显式 `Parameter()`；桩文件不可信。▸ 任务空间运动、IK 结果莫名偏。
 - [jetson_ik_move 工具](galbot-jetson-ik-move-tool.md) — IK 交互执行器用法；leg 只能前后/升降（y 是假解坑，配 FK 残差自检）；四元数顺序 [qx,qy,qz,qw]。▸ 手动挪机器人到某位姿/写腿动作。
 - [G1 PVT 轨迹接口危险实录](galbot-g1-pvt-trajectory-hazard.md) — 零运动探针也致剧烈抖动，**traj/PVT 路线已封存**；提速加剧抖动（每点全停，冲击∝速度）；平滑走 track+合步。▸ 想走轨迹点路线时（答案：别）。
+- [G1 臂控制模式与安全护栏](galbot-arm-control-mode-safety.md) — **臂=刚性位置伺服**（set_joint_positions 硬路由 id1 非柔顺，SDK 无切换入口）；**臂端 fault/堵转不回传恒 SUCCESS**；残差急停不可行（特征重叠）；压桌防护=关节包络护栏（d26f9ce，数据集构型盒截断）；Motion.init 脱机挂死>120s FK 死路。▸ 臂安全、撞桌/fault、控制模式切换问题。
 - [G1 数字孪生](galbot-g1-digital-twin-setup.md) — Jetson 推流 + Windows MuJoCo 渲染（jetson_sender.py TCP:9999 @30Hz）；只 mj_forward 不 mj_step；新 clone 的 XML 要 sed 修 `inertia="shell"`；LD_PRELOAD libgomp。▸ 数字孪生/MuJoCo 可视化。
 
 ## 4. 建图与导航
@@ -40,15 +42,15 @@
 
 ## 5. 数据集与模型判读
 
-- [G1 微调数据集判读](galbot-pi05-g1-finetune-data.md) — pick_place_balence 16/23 维**右臂在前**（以 info.json 为权威，记反会把臂甩背后）；800ms 慢推理已破案=state 文本进了 prompt，`FLASHRT_PI05_STATE_PROMPT_MODE=fixed` 根治；闭环 5 轮全绿，残留指令切换抖动待调。▸ 数据集维度判读、推理忽慢、抖动排查。
+- [G1 微调数据集判读](galbot-pi05-g1-finetune-data.md) — pick_place_balence 16/23 维**右臂在前**（以 info.json 为权威，记反会把臂甩背后；9/30 时间线探针再证，USAGE.md 旧文档写反已纠）；800ms 慢推理已破案=state 文本进了 prompt，`FLASHRT_PI05_STATE_PROMPT_MODE=fixed` 根治；only_place 101 轨时间线：L 释放 3.7s → R 启动 +3.4s，**双臂严格串行**。▸ 数据集维度判读、推理忽慢、抖动排查。
 
 ## 6. 闭环执行器（run_g1_loop 调参）
 
-- [G1 闭环速度调参定案](galbot-g1-loop-pace-tuning.md) — **统一速度律：臂速÷数据集原速 = n÷(30×pace×div)**，n=steps-per-round；pace 焊死 0.455（下限=推理水位，**只花不赚**，0.56 实测更差）；div 双语义（到达时刻 div×pace、覆盖率 1/div、残差≈导程×(1−1/div)，兼滞后滤波）；工作点候选 20/1.55（0.95× 原速）或 25/1.8（1.02×）；梦游期铁律（任务 ≈390 chunk 步、**落盒立刻 q 停**、梦游期日志零判别力）；chunk 边界语义速查（合步不跨 chunk、抽帧在发令瞬间、spc>n 静默钳制、spc=n 单指令=无复位解）。▸ 调闭环速度、判读轮日志、归因复位/停走/摆动。
+- [G1 闭环速度调参定案](galbot-g1-loop-pace-tuning.md) — **统一速度律：臂速÷数据集原速 = n÷(30×pace×div)**，n=steps-per-round；**工作点 v2（10-04，14 跑定案）= spc25/pace 0.38/div 1.65（1.33×，RTC B 脚本 hold 兜底，R 落盒 14-14.5s 纪录）**；pace 低于推理水位=死 knob（0.35-0.43 墙钟相同，节奏钉在水上）、div 饱和（三档零差，取臂最慢）、spc=唯一结构杠杆（−2.3s 且速度律命中；30+ 勿试）；9/30 的 0.40 破位/0.38 判死只属于 A 脚本深尾路径；div 双语义（覆盖率 1/div、滞后滤波）；夹爪 0.15 m/s；**q 停=R 落盒才停（严格串行）**；梦游期签名+肥尾（spc20 出过 32.8s 大发作）；坡升保险丝 --rtc-ramp（≥2 窗 hold 才触发）；chunk 边界语义速查。▸ 调闭环速度、判读轮日志、归因复位/停走/摆动。
 
 ## 7. 仓库配套文档（不在记忆目录，在 ~/holy）
 
 - `~/holy/DEPLOY.md` — 新机部署指南（纯环境包配方 v3，7.5G 不含 models）
 - `~/holy/USAGE.md` — 操作手册（装机 + 日常使用）
 - `~/holy/BENCHMARKS.md` — 基准报告（对外汇报用，2026-09-21 echo 机全部实测数据）
-- `~/holy/scripts/` — 2026-10-04 分层：`inference/` 直接入口（run_g1_loop / run_g1_inference / g1_config.py 等，共享 config/g1.toml）、`g1/` 整备标定、`dataset/` 数据集工具、`eval/` 精度评估、`test/` 性能诊断、`probes/` 探针封存（g1_traj_probe 等）
+- `~/holy/scripts/` — 2026-10-04 分层：`inference/` 直接入口（run_g1_loop_rtc=闭环定案入口 / run_g1_loop / run_g1_inference / g1_config.py 等，共享 config/g1.toml）、`g1/` 整备标定、`dataset/` 数据集工具、`eval/` 精度评估、`test/` 性能诊断、`probes/` 探针封存（g1_traj_probe / int8 三件套）；`config/README.md` = g1.toml 导读
