@@ -139,6 +139,15 @@ ap.add_argument("--grip-state-cmd", action="store_true",
                      "的夹爪状态（数据集 state 跟随指令仅 ~0.3-1s，10-05 判读）。"
                      "10-05 pick 四跑 R 爪全程 0%% 即此病。需 --grip；默认关=喂回读"
                      "（place 线一直这么跑的）")
+ap.add_argument("--env-margin", type=float, default=0.15,
+                help="关节包络护栏余量，rad（默认 0.15）。包络=<ckpt>/joint_envelope.json"
+                     "（任务数据集臂关节逐维 [min,max]）：指令越界=模型在幻想训练分布"
+                     "里不存在的构型——往桌下伸/顶桌即此类（刚性模式压桌→fault）")
+ap.add_argument("--env-abort-n", type=int, default=5,
+                help="连续 N 轮指令被包络截断即停循环（默认 5）：持续越界=感知漂移，"
+                     "继续跑只会反复撞桌")
+ap.add_argument("--no-env-guard", action="store_true",
+                help="关闭关节包络护栏（排障对照用）")
 args = ap.parse_args()
 
 # ── 全文日志落盘：q 退出走 os._exit 不刷缓冲（09-23 坑），故逐行强制 flush ──
@@ -292,6 +301,30 @@ CAM_MAP = mf.get("camera_map", {"image": "HEAD_RIGHT_CAMERA",
                                 "wrist_image": "LEFT_ARM_CAMERA",
                                 "wrist_image_right": "RIGHT_ARM_CAMERA"})
 
+# ── 关节包络护栏（压桌防护，2026-10-06）：任务数据集臂关节合法构型盒。SDK 侧
+# 臂端 fault/堵钻不回传（指令恒 SUCCESS，10-06 实录），刚性伺服撞桌只会硬压到
+# 进 fault——唯一的软防线是在指令侧拦住"训练分布外的构型"。Motion.init 脱机
+# 挂死（实测 >120s），FK 路线不可用，故用数据集包络做几何代理 ──
+ENV_LO = ENV_HI = None
+_env_file = CKPT / "joint_envelope.json"
+if args.no_env_guard:
+    print("[护栏] 关节包络护栏已 --no-env-guard 关闭")
+elif _env_file.exists():
+    _env = json.loads(_env_file.read_text())
+    ENV_LO = np.array([(-np.inf if v is None else float(v))
+                       for v in _env["action_lo"]], dtype=np.float32)
+    ENV_HI = np.array([(np.inf if v is None else float(v))
+                       for v in _env["action_hi"]], dtype=np.float32)
+    ENV_LO[:7] -= args.env_margin
+    ENV_HI[:7] += args.env_margin
+    ENV_LO[8:15] -= args.env_margin
+    ENV_HI[8:15] += args.env_margin
+    print(f"[护栏] 关节包络开：{_env_file.name}（来源 {_env.get('source', '?')}；"
+          f"余量 ±{args.env_margin} rad；越界=截断 chunk，连续 {args.env_abort_n} "
+          f"轮→停）")
+else:
+    print(f"[护栏] 未找到 {_env_file}——关节包络护栏关闭（当前 ckpt 无任务包络）")
+
 # ── 夹爪下发配置（--grip；宽度来自 manifest 标定，无标定拒绝开启）──
 GRIP = None
 if args.grip:
@@ -438,6 +471,22 @@ def pstats(ms):
     a = np.array(ms)
     return (f"p50 {np.percentile(a, 50):.1f} | p95 {np.percentile(a, 95):.1f} | "
             f"max {a.max():.1f} ms")
+
+
+def env_first_violation(ch):
+    """关节包络检查：返回首个越界行 (行号, 维, 值, 界)；全干净返回 None。
+
+    ch: (n,16) 数据集维序动作块。臂维 0-6=右臂、8-15=左臂（ENV 已含余量），
+    夹爪维界=±inf 恒过。逐行向量化，n≤horizon(50)，微秒级。
+    """
+    bad = (ch > ENV_HI[None, :]) | (ch < ENV_LO[None, :])
+    rows = np.flatnonzero(bad.any(axis=1))
+    if rows.size == 0:
+        return None
+    r = int(rows[0])
+    j = int(np.flatnonzero(bad[r])[0])
+    upper = bool(ch[r, j] > ENV_HI[j])
+    return r, j, float(ch[r, j]), float(ENV_HI[j] if upper else ENV_LO[j])
 
 
 def send_grip(robot, chunk_row):
@@ -596,6 +645,10 @@ sust_last = 0                        # 上一轮续航条数（打进下轮表�
 hold_windows = 0                     # RTC hold 等待窗总数（B 变体核心遥测）
 hold_last = 0                        # 上一轮 hold 窗数（打进下轮表头）
 ramp_left = 0                        # 坡升剩余轮数（>0 时臂速按 0.5→1.0 线性限幅）
+env_hits = 0                         # 包络护栏：连续越界轮数（干净轮清零）
+env_trunc = 0                        # 包络护栏：累计截断轮数（汇总用）
+res_bad = 0                          # 导程残差 ≥100 mrad 连续段数（告警用）
+res_warned = False                   # 残差告警每跑只打一次
 ramp_fired = 0                       # 坡升激活次数（多窗 hold 次数，汇总遥测）
 
 
@@ -675,6 +728,28 @@ for r in range(args.rounds):
         _sus = "零等待"
     print(f"\n── 轮 {r} | t+{time.perf_counter() - t_loop0:6.1f}s | "
           f"推理 {job.dur_ms:.0f} ms，与上轮执行重叠，{_sus} ──")
+    if ENV_LO is not None:
+        _v = env_first_violation(chunk)
+        if _v is None:
+            env_hits = 0
+        else:
+            _r, _j, _val, _bnd = _v
+            env_hits += 1
+            env_trunc += 1
+            _side = "上" if _val > _bnd else "下"
+            print(f"⛔ 包络护栏：指令行{_r} 维{_j}={_val:.3f} 越{_side}界 "
+                  f"{_bnd:.3f}——截到行{_r}前缀（连续 {env_hits}/"
+                  f"{args.env_abort_n} 轮）")
+            if _r == 0:
+                print("⛔ 行 0 即越界，无处可截——停止循环（机械臂留在原地）")
+                aborted = True
+                continue
+            if env_hits >= args.env_abort_n:
+                print("⛔ 连续越界=感知漂移（场景认错了），继续跑只会反复撞桌"
+                      "——停止循环（机械臂留在原地）")
+                aborted = True
+                continue
+            chunk = chunk[:_r]
     if args.chunk_mode == "traj":
         cur0 = read_joints(robot, ARM_NAMES)
         traj, n_pts, final_p = build_traj(chunk, cur0)
@@ -773,6 +848,11 @@ for r in range(args.rounds):
         ach = read_joints(robot, ARM_NAMES)
         err = float(np.max(np.abs(ach - tgt))) * 1000
         track_err.append(err)
+        res_bad = res_bad + 1 if err >= 100.0 else 0
+        if res_bad >= 3 and not res_warned:
+            res_warned = True
+            print("⚠ 导程残差 ≥100 mrad 持续 3 段——疑似爪尖受阻（顶桌/卡物），"
+                  "注意观察，必要时按 q 停")
         tag = f"指令[步{k}-{k_end - 1}]" + ("·续航" if k >= n_steps else "") \
             + ("·近阻尼" if div_eff != args.pace_div else "") \
             + (f"·坡升{ramp_f:.2f}" if ramp_f < 1.0 else "")
@@ -816,7 +896,7 @@ for r in range(args.rounds):
                 cmd_delta = ((tgt_h - cmd_hist) if cmd_hist is not None
                              else np.zeros_like(tgt_h))
                 cmd_hist = tgt_h.copy()
-                gp = send_grip(robot, chunk[n_steps - 1])
+                gp = send_grip(robot, chunk[min(n_steps, len(chunk)) - 1])
                 if gp:
                     print(f"  夹爪: {gp}")
                 t_s = time.perf_counter()
@@ -835,6 +915,11 @@ for r in range(args.rounds):
                 ach = read_joints(robot, ARM_NAMES)
                 err = float(np.max(np.abs(ach - tgt_h))) * 1000
                 track_err.append(err)
+                res_bad = res_bad + 1 if err >= 100.0 else 0
+                if res_bad >= 3 and not res_warned:
+                    res_warned = True
+                    print("⚠ 导程残差 ≥100 mrad 持续 3 段——疑似爪尖受阻"
+                          "（顶桌/卡物），注意观察，必要时按 q 停")
                 print(f"  指令[hold {hold_n}]: |Δcmd| "
                       f"{float(np.max(np.abs(cmd_delta))) * 1000:5.1f} mrad | "
                       f"执行 {step_ms[-1]:5.0f} ms | 导程残差 {err:4.1f} mrad | "
@@ -877,6 +962,7 @@ if track_err:
           f"（配速系数 {args.pace_div:g}"
           + (f"，近距 {args.near_gap*1000:.0f} mrad 内阻尼 {args.near_div:g}"
              if args.near_div >= 1.0 else "")
+          + (f"；包络护栏截断 {env_trunc} 轮" if ENV_LO is not None else "")
           + "：残差≈导程×(1-1/div) 属预期；"
           "≈1 到点，残差≈0 且臂停=到点干等推理）")
 if pace_hist:
