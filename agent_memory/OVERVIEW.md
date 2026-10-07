@@ -14,7 +14,7 @@
 
 **机器识别**：三台机 hostname 全叫 galbot-echo，**勿用 hostname 区分**；沟通中称"本机（第三台）"。
 
-- [本机（第三台）部署进度](galbot-machine3-deployment-state.md) — **本机状态权威文件**。L4T R35.6.4，~/holy 即仓库根；**10-07 晚切回 place 任务**（ckpt=pi05_g1_place_deploy，33% 持物起始位姿，包络护栏已从 only_place 派生；pick 三键注释存档可切回）；首跑被护栏拦停已修（护栏曾拿 delta 比绝对盒，6891103）；B 脚本已接入 `--nav-suspend` 导航搁置杠杆（默认关，真机首轮推理 p50 333ms vs bf16 基线 375，见第 6 节）；闭环 `--horizon` 默认 50；launcher 中途 restart 只起半套栈，必须整机重启；**10-04 RTC 实验完结**：B 脚本 hold 兜底 14 跑全绿，**工作点 v2=25/0.38/1.65 已定案入 config（R 落盒 14.0-14.5s 纪录）**；⚠ 全天空爪，持物物理 place 复验挂着。▸ 问"装到哪了/下一步"、改 ckpt/数据集/工作点配置前。
+- [本机（第三台）部署进度](galbot-machine3-deployment-state.md) — **本机状态权威文件**。L4T R35.6.4，~/holy 即仓库根；**10-07 晚切回 place 任务**（ckpt=pi05_g1_place_deploy，33% 持物起始位姿，包络护栏已从 only_place 派生；pick 三键注释存档可切回）；首跑被护栏拦停已修（护栏曾拿 delta 比绝对盒，6891103）；**工作点 v3=25/0.35/1.5 已入 config（1.59×，前置 --nav-suspend，R 落盒 10.0s 纪录，见第 6 节）**；闭环 `--horizon` 默认 50；launcher 中途 restart 只起半套栈，必须整机重启；⚠ 全天空爪，持物物理 place 复验挂着。▸ 问"装到哪了/下一步"、改 ckpt/数据集/工作点配置前。
 - [本机相机 transport 不匹配](galbot-machine3-camera-transport-unmatch.md) — 相机时好时坏，**完整重启采集栈即愈**（10-07 第三次应验；勿直接 kill 采集守护，launcher 会组杀兄弟进程）；失败窗口期相机话题对所有外部进程隐身，embosa 旁路也通不了（健康代旁路能配对但**载荷 0 字节**——相机图像不走裸 reader 通路，旁路只配判"隐身 vs 仅 SDK"）；`transport no support` 行六代守护恒 4 行=启动噪声，非判别信号。工具：read_camera_bypass.py / sdk_camera_smoke.py / embosa_topic_tool。▸ 相机话题消失、SDK 取图失败、"刚才还好好的"。
 
 ## 2. 环境与推理引擎（FlashRT / pi0.5）
@@ -46,7 +46,7 @@
 
 ## 6. 闭环执行器（run_g1_loop 调参）
 
-- [G1 闭环速度调参定案](galbot-g1-loop-pace-tuning.md) — **统一速度律：臂速÷数据集原速 = n÷(30×pace×div)**，n=steps-per-round；**工作点 v2（10-04，14 跑定案）= spc25/pace 0.38/div 1.65（1.33×，RTC B 脚本 hold 兜底，R 落盒 14-14.5s 纪录）**；pace 低于推理水位=死 knob（0.35-0.43 墙钟相同，节奏钉在水上）、div 饱和（三档零差，取臂最慢）、spc=唯一结构杠杆（−2.3s 且速度律命中；30+ 勿试）；9/30 的 0.40 破位/0.38 判死只属于 A 脚本深尾路径；div 双语义（覆盖率 1/div、滞后滤波）；夹爪 0.15 m/s；**q 停=R 落盒才停（严格串行）**；梦游期签名+肥尾（spc20 出过 32.8s 大发作）；坡升保险丝 --rtc-ramp（≥2 窗 hold 才触发）；chunk 边界语义速查；**导航栈 SIGSTOP 搁置杠杆（10-07）= −55ms 且 GR3D 50→7%，水位击穿 pace 380 有望清零 hold 窗（真机闭环未验）**。▸ 调闭环速度、判读轮日志、归因复位/停走/摆动。
+- [G1 闭环速度调参定案](galbot-g1-loop-pace-tuning.md) — **统一速度律：臂速÷数据集原速 = n÷(30×pace×div)**，n=steps-per-round；**工作点 v3（10-07 晚定案）= spc25/pace 0.35/div 1.5（1.59×，前置 --nav-suspend，R 落盒 10.0s 纪录；代价=残差 p50 79/8 段≥100，持物复验前保留观察）**；v2 25/0.38/1.65 史档（1.33×，hold 兜底时代）；pace/div 的"死 knob/饱和"结论是水位函数（**水位≈0.34-0.35 崖边勿再压**）；spc=唯一结构杠杆（15 反例 0.95× 78 轮未落盒；30+ 勿试）；div 双语义（覆盖率 1/div、滞后滤波）；夹爪 0.15 m/s；**q 停=R 落盒才停（严格串行）**；梦游期签名+肥尾（spc20 出过 32.8s 大发作）；坡升保险丝 --rtc-ramp（≥2 窗 hold 才触发）；chunk 边界语义速查；**导航栈 SIGSTOP 搁置杠杆（10-07 定案）= −55ms 且 GR3D 50→7%，真机 hold 窗清零已验、催生 v3**。▸ 调闭环速度、判读轮日志、归因复位/停走/摆动。
 
 ## 7. 仓库配套文档（不在记忆目录，在 ~/holy）
 
