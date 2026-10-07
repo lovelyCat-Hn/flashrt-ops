@@ -341,3 +341,39 @@ reader（transport 6）unmatch 0 帧（与 9/29「发布侧对所有外部进程
 **证伪一个候选签名**：`transport no support. Use default transport...` 行六代
 守护（好/坏代都有）恒 4 行=启动噪声，与配对成败无关（9/29 反汇编判决维持，
 勿再当主因）。
+
+## 附录：导航栈 SIGSTOP 搁置 A/B——138ms 拿回 55ms（2026-10-07，本机）
+
+**方法**：`kill -STOP`/`CONT`（进程原地冻结/复活，无 exit 事件→launcher 拉起逻辑
+不触发）。先单服务探针：vtn 冻结 8s → launcher 日志零增量、兄弟全活、CONT 原地
+复活（CPU 立回 41%）→ launcher 只盯 exit，冻结态安全。
+
+**冻结集**（纯导航侧 7 进程，PID 随重启变、按进程名找）：localization_server /
+galbot_fusion_main / service_navigation_plan / galbot_vtn / surround_cameras_
+capture / swallows / service_lidar_capture。**不碰**：service_motion_plan（臂路
+嫌疑）、三路+头部相机 capture（自己的图）、robot_state_publish、service_hpu_comm、
+Perception_Algorithm_Service（角色不明）。
+
+**资源画像**：冻结后 CPU 从 9 核 42-66% 掉到 8 核 7-22%；**GR3D 50-54% → 7-8%**
+——空闲栈那 50% GPU 是 fusion/感知的 CUDA，GPU 争用假设坐实（与编码器抢算力）。
+
+**推理 A/B**（run_g1_inference 冻结帧 n=20，bf16 tier / graph-on / h50）：
+
+| 配置 | ① 纯推理 | ③ 端到端 |
+|---|---|---|
+| 全栈 bf16（前节基线） | 375.3 | 388.9 |
+| **导航搁置 bf16** | **320.5（−54.8，138 的 40%）** | 332.3 |
+| **导航搁置 + W8A16** | **303.0** | 322.3 |
+
+W8A16 在瘦身后仍 −17.5ms，杠杆可叠加。动作 sanity 全程保持。恢复后 7 进程全部
+Sl、CPU 回落正常、相机 6/6。
+
+**判读与工程含义**：
+- 拿回的 55ms = 导航栈份额；剩余 ~83ms = 三路相机 capture 自己（~82% CPU+DMA，
+  我们需要的）+ motion_plan/Perception（未冻结）+ 带宽地板。
+- loop 期外推：推理 388−55−18 ≈ 315ms，轮水位 ~330ms **< pace 380ms → 水位击穿**，
+  hold 窗有望清零，轮耗时改由 pace 支配；重规划 415→~330ms（2.4→3.0Hz），
+  R 落盒 14.2s → ~11s 量级。pace/spc 值得重新上探（pace 出水位后恢复灵敏度）。
+- **约束**：搁置只用于「臂上任务+底盘不动」窗口（localization 冻结期位姿不更新，
+  底盘要先 CONT）；闭环验证跑需实做确认（冻结态下 SDK 关节路径从未出过问题，
+  但真机闭环未验）。
