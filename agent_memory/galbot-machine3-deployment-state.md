@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 72f683b3-e256-4dd8-9f16-3a497879a902
-  modified: 2026-10-07T10:16:39.789Z
+  modified: 2026-10-07T10:37:56.322Z
 ---
 
 **本机 = 第三台机器**（前两台：源机/部署机，hostname 都叫 galbot-echo，本机也叫 galbot-echo——[[galbot-flashrt-env-migration-pack]] 的教训：沟通中勿用 hostname 区分，用"本机（第三台）"）。2026-09-23 状态：
@@ -30,6 +30,8 @@ metadata:
 
 **2026-10-07 相机恢复 + SDK 在场遥测补全**：相机 transport 失败窗口经完整重启解除（16:45 那代失败窗口、16:56 重启后 6/6 真载荷，见 [[galbot-machine3-camera-transport-unmatch]]）。`run_g1_inference.py`（只读）三层遥测 n=20：①冻结帧纯推理 bf16 375.3 / W8A16 **356.5（−18.8ms 现场兑现）**，②取图+关节 8.3ms，③端到端 388.9/368.5；冻结帧动作 sanity 全对。loop 388 归因闭合：+138=SDK/相机栈常驻、+13=并行取图（详见 BENCHMARKS 附录）。graph-on W8A16 闭环质量验证仍挂。
 
-**2026-10-07 晚：切回 place + 导航搁置杠杆入 B 脚本（49ea7bf）**：config 三键切回 pi05_g1_place_deploy（pick 三键注释存档），工作点 25/0.38/1.65 不变。B 脚本新增 `--nav-suspend`（默认关）：闭环期 SIGSTOP 冻结导航栈 7 进程，退出自动 CONT（5 退出点显式 resume + 独立守护进程兜底 kill -9，CONT 幂等）；干跑验证冻结/恢复、守护网自退、服务全回 S 态。**修包络护栏 np 前置引用 bug**——解析点在 import numpy 之前，envelope 文件存在即 NameError（10-06 合入后无真机全跑未暴露）；`pi05_g1_place_deploy/joint_envelope.json` 已从 only_place 直提生成（101 eps/41579 帧，models/ 不入库）。⚠ 首跑注意：① place ckpt 无 pick 时代的压桌历史，包络护栏首战；② 持物物理 place 复验仍挂着（此前判别跑疑空爪）。用户自行跑真机 place 测试（首跑只开 --nav-suspend，W8A16 留作隔离变量）。
+**2026-10-07 晚：切回 place + 导航搁置杠杆入 B 脚本（49ea7bf）**：config 三键切回 pi05_g1_place_deploy（pick 三键注释存档），工作点 25/0.38/1.65 不变。B 脚本新增 `--nav-suspend`（默认关）：闭环期 SIGSTOP 冻结导航栈 7 进程，退出自动 CONT（5 退出点显式 resume + 独立守护进程兜底 kill -9，CONT 幂等）；干跑验证冻结/恢复、守护网自退、服务全回 S 态。**修包络护栏 np 前置引用 bug**——解析点在 import numpy 之前，envelope 文件存在即 NameError（10-06 合入后无真机全跑未暴露）；`pi05_g1_place_deploy/joint_envelope.json` 已从 only_place 直提生成（101 eps/41579 帧，models/ 不入库）。
+
+**2026-10-07 晚二：place 首跑被护栏拦停→修范畴错误（6891103）**：首跑轮 0 即停（指令行0 维0=-0.001 越上界 -0.762）。排查闭环：ckpt/stats 与 10-04 绿跑逐字节同源（用户疑 stats 需重生成——排除，各 deploy 目录 stats 独立且 9/29 未动）；只读遥测复现首步 ≈0；pick ckpt 同位姿同样 ≈0→非 place 特有。真相=**包络护栏拿 delta 比绝对构型盒**（模型输出是 delta，≈0 是正常首块 hold；详见 [[galbot-arm-control-mode-safety]]）。修后干跑：place 位首块全块通过、首指令峰值 192 mrad。**推理侧战果**：nav-suspend 下真机首轮 p50 332.9ms（bf16 基线 375→−42ms），待持物复验全套兑现。⚠ 持物物理 place 复验仍挂着。
 
 **2026-09-29 同步**：`git pull` 到 **9f60c16**（master 落后 ~60 提交后追平；远程无 main 分支，主干就叫 master；echo-unified 已完全并入且落后 14 提交，是死支）。热修升 5 文件版并已应用（新增 cuda_graph.py WithFlags 修复 + pi05_rtx/_fp16 CHUNK_SIZE env——**graph 段错误已修复**，旧"R35.x 必崩/NO_GRAPH=1"结论作废，但 bench 收益仅 ~3%，源机定档仍 eager）；agent_memory 快照重导入（15 页，新增 cuda-graph-fix / github-remote-setup）。**本周重大翻案（详见新快照）**：① INT8 定档作废→**部署定档 bf16**（INT8 毁动作质量）；② 动作语义=**增量 delta**（非绝对角）；③ dataset replay/`--horizon 50` 整块推理新管线（依赖 chunk env 补丁）；④ DEPLOY.md v3 纯环境包配方（7.5G，不含 models）。tokenizer 仍缺；`model/` 目录现在是未跟踪状态（不影响 pull）。

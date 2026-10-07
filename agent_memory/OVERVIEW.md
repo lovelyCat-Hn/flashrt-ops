@@ -14,7 +14,7 @@
 
 **机器识别**：三台机 hostname 全叫 galbot-echo，**勿用 hostname 区分**；沟通中称"本机（第三台）"。
 
-- [本机（第三台）部署进度](galbot-machine3-deployment-state.md) — **本机状态权威文件**。L4T R35.6.4，~/holy 即仓库根；**10-07 晚切回 place 任务**（ckpt=pi05_g1_place_deploy，33% 持物起始位姿，包络护栏已从 only_place 派生；pick 三键注释存档可切回）；B 脚本已接入 `--nav-suspend` 导航搁置杠杆（默认关，−55ms/GR3D 50→7%，见第 6 节）；闭环 `--horizon` 默认 50；launcher 中途 restart 只起半套栈，必须整机重启；**10-04 RTC 实验完结**：B 脚本 hold 兜底 14 跑全绿，**工作点 v2=25/0.38/1.65 已定案入 config（R 落盒 14.0-14.5s 纪录）**；⚠ 全天空爪，持物物理 place 复验挂着。▸ 问"装到哪了/下一步"、改 ckpt/数据集/工作点配置前。
+- [本机（第三台）部署进度](galbot-machine3-deployment-state.md) — **本机状态权威文件**。L4T R35.6.4，~/holy 即仓库根；**10-07 晚切回 place 任务**（ckpt=pi05_g1_place_deploy，33% 持物起始位姿，包络护栏已从 only_place 派生；pick 三键注释存档可切回）；首跑被护栏拦停已修（护栏曾拿 delta 比绝对盒，6891103）；B 脚本已接入 `--nav-suspend` 导航搁置杠杆（默认关，真机首轮推理 p50 333ms vs bf16 基线 375，见第 6 节）；闭环 `--horizon` 默认 50；launcher 中途 restart 只起半套栈，必须整机重启；**10-04 RTC 实验完结**：B 脚本 hold 兜底 14 跑全绿，**工作点 v2=25/0.38/1.65 已定案入 config（R 落盒 14.0-14.5s 纪录）**；⚠ 全天空爪，持物物理 place 复验挂着。▸ 问"装到哪了/下一步"、改 ckpt/数据集/工作点配置前。
 - [本机相机 transport 不匹配](galbot-machine3-camera-transport-unmatch.md) — 相机时好时坏，**完整重启采集栈即愈**（10-07 第三次应验；勿直接 kill 采集守护，launcher 会组杀兄弟进程）；失败窗口期相机话题对所有外部进程隐身，embosa 旁路也通不了（健康代旁路能配对但**载荷 0 字节**——相机图像不走裸 reader 通路，旁路只配判"隐身 vs 仅 SDK"）；`transport no support` 行六代守护恒 4 行=启动噪声，非判别信号。工具：read_camera_bypass.py / sdk_camera_smoke.py / embosa_topic_tool。▸ 相机话题消失、SDK 取图失败、"刚才还好好的"。
 
 ## 2. 环境与推理引擎（FlashRT / pi0.5）
@@ -31,7 +31,7 @@
 - [GalbotMotion 帧命名空间坑](galbot-motion-frame-namespace-pitfall.md) — IK/GET/SET 三套 API 帧名互不通用；set_end_effector_pose 要传链名+显式 `Parameter()`；桩文件不可信。▸ 任务空间运动、IK 结果莫名偏。
 - [jetson_ik_move 工具](galbot-jetson-ik-move-tool.md) — IK 交互执行器用法；leg 只能前后/升降（y 是假解坑，配 FK 残差自检）；四元数顺序 [qx,qy,qz,qw]。▸ 手动挪机器人到某位姿/写腿动作。
 - [G1 PVT 轨迹接口危险实录](galbot-g1-pvt-trajectory-hazard.md) — 零运动探针也致剧烈抖动，**traj/PVT 路线已封存**；提速加剧抖动（每点全停，冲击∝速度）；平滑走 track+合步。▸ 想走轨迹点路线时（答案：别）。
-- [G1 臂控制模式与安全护栏](galbot-arm-control-mode-safety.md) — **臂=刚性位置伺服**（set_joint_positions 硬路由 id1 非柔顺，SDK 无切换入口）；**臂端 fault/堵转不回传恒 SUCCESS**；残差急停不可行（特征重叠）；压桌防护=关节包络护栏（d26f9ce，数据集构型盒截断）；Motion.init 脱机挂死>120s FK 死路。▸ 臂安全、撞桌/fault、控制模式切换问题。
+- [G1 臂控制模式与安全护栏](galbot-arm-control-mode-safety.md) — **臂=刚性位置伺服**（set_joint_positions 硬路由 id1 非柔顺，SDK 无切换入口）；**臂端 fault/堵转不回传恒 SUCCESS**；残差急停不可行（特征重叠）；压桌防护=关节包络护栏（d26f9ce，数据集构型盒截断；⚠ 10-07 修范畴错误——比对对象必须=BASE_ARM+delta 绝对构型，直接比 delta 必拦停，冒烟"0 误报"是绝对自比无效）；Motion.init 脱机挂死>120s FK 死路。▸ 臂安全、撞桌/fault、控制模式切换问题。
 - [G1 数字孪生](galbot-g1-digital-twin-setup.md) — Jetson 推流 + Windows MuJoCo 渲染（jetson_sender.py TCP:9999 @30Hz）；只 mj_forward 不 mj_step；新 clone 的 XML 要 sed 修 `inertia="shell"`；LD_PRELOAD libgomp。▸ 数字孪生/MuJoCo 可视化。
 
 ## 4. 建图与导航
