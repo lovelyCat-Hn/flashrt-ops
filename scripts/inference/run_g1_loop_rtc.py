@@ -420,7 +420,10 @@ CAM_MAP = mf.get("camera_map", {"image": "HEAD_RIGHT_CAMERA",
 # ── 关节包络护栏（压桌防护，2026-10-06）：任务数据集臂关节合法构型盒。SDK 侧
 # 臂端 fault/堵钻不回传（指令恒 SUCCESS，10-06 实录），刚性伺服撞桌只会硬压到
 # 进 fault——唯一的软防线是在指令侧拦住"训练分布外的构型"。Motion.init 脱机
-# 挂死（实测 >120s），FK 路线不可用，故用数据集包络做几何代理 ──
+# 挂死（实测 >120s），FK 路线不可用，故用数据集包络做几何代理。
+# ⚠ 2026-10-07 修范畴错误：模型输出=delta（relative_actions_processor，见
+# plan_step），护栏比对对象必须是 BASE_ARM+delta 绝对构型（chunk_abs_block），
+# 不能直接比 delta——否则首块 delta≈0 必"越界"拦停（10-07 首跑实录）──
 ENV_LO = ENV_HI = None
 _env_file = CKPT / "joint_envelope.json"
 if args.no_env_guard:
@@ -597,6 +600,22 @@ def pstats(ms):
             f"max {a.max():.1f} ms")
 
 
+def chunk_abs_block(chunk):
+    """chunk delta 块 → 绝对构型块（包络护栏的比对对象，2026-10-07 修范畴错误）。
+
+    训练管线 relative_actions_processor：臂维=delta（相对本块预测时刻臂位
+    BASE_ARM）、夹爪维=绝对 0-100（plan_step/build_traj 同款换算）。
+    包络盒来自数据集 action 列逐维 [min,max]=绝对构型——必须用 BASE_ARM+delta
+    比对；直接拿 delta 比对=必拦停（delta≈0 恒不在盒内，10-07 首跑实录）。
+    """
+    a = np.empty_like(chunk)
+    a[:, :7] = chunk[:, :7] + BASE_ARM[None, :7]
+    a[:, 7] = chunk[:, 7]            # 夹爪界=±inf，原值恒过
+    a[:, 8:15] = chunk[:, 8:15] + BASE_ARM[None, 7:14]
+    a[:, 15] = chunk[:, 15]
+    return a
+
+
 def env_first_violation(ch):
     """关节包络检查：返回首个越界行 (行号, 维, 值, 界)；全干净返回 None。
 
@@ -743,6 +762,11 @@ if not args.do_exec:
         print(f"  指令[步{k}-{k_end - 1}]: 限幅后 {np.round(tgt, 3).tolist()}"
               f"\n        离起始位峰值 {drift * 1000:.0f} mrad"
               f"（护栏 {args.max_excursion * 1000:.0f}）")
+        if ENV_LO is not None:
+            _v = env_first_violation(chunk_abs_block(chunk))
+            _m = ("全块通过" if _v is None else
+                  f"⛔ 行{_v[0]} 维{_v[1]}={_v[2]:.3f} 越界 {_v[3]:.3f}")
+            print(f"        包络预检: {_m}")
         if GRIP:
             desc = []
             for name, dim in GRIP["names"]:
@@ -859,7 +883,7 @@ for r in range(args.rounds):
     print(f"\n── 轮 {r} | t+{time.perf_counter() - t_loop0:6.1f}s | "
           f"推理 {job.dur_ms:.0f} ms，与上轮执行重叠，{_sus} ──")
     if ENV_LO is not None:
-        _v = env_first_violation(chunk)
+        _v = env_first_violation(chunk_abs_block(chunk))
         if _v is None:
             env_hits = 0
         else:
