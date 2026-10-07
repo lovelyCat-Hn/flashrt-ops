@@ -240,3 +240,29 @@ GEMM 上限）：解码器相位还有 ~26ms attention/norm/流积分不受 W8A1
 - 模块拆解：`run.sh /tmp/module_timing_probe.py`（pipeline 相位打点）
 - GEMM 微基准：`benchmarks/w8a16_skinny_sm87/w8a16_bench`（正确性 fp64 对拍 + 5 shape 扫描）；bf16 侧 `GemmRunner().bf16_nn` 同 shape 计时
 - 启用：`FVK_PI05_RTX_W8A16_DECODER=1`（默认关）；需 flash_pyrt311 环境 nvcc 11.8 重编 `flash_rt_kernels.so`（patch + 配方见 `hotfix_flashrt/flashrt_kernel_patch/README.md`）
+
+### 补充 ｜ 语言编码器 133.5ms 的构成：算力地板，非 kernel 低效（2026-10-07）
+
+序列构成（实测）：encoder_seq_len = **855** = 768 图像 token（3 视角 ×256，
+池化因子 1 即未池化）+ 87 prompt token。Gemma-2B 宽度（D=2048/FFN=16384），
+每 token 每层 110M MAC（解码器仅 16.3M）。
+
+| 量 | 数值 | 推论 |
+|---|---|---|
+| 编码器 FLOPs/次 | 855×110M×2×18 = **3.39 TFLOP** | 全管线唯一算力受限模块 |
+| 纯 GEMM 地板 @~32TF | 106ms | 实测 133.5ms = 峰值 **79%**（含 attn/norm） |
+| 解码器 FLOPs/次 | 0.29 TFLOP（地板 9.2ms） | 解码器瓶颈在权重流 5.87GB/次（124GB/s） |
+
+KV/复用类杠杆判决：
+- **推理内复用已存在**：编码器每推理只跑 1 次，KV 供 10 步 ODE × 18 层交叉
+  注意力共用（否则 +1.2s）
+- **跨轮 KV 复用已判死**（cache_frames，见前文）：KV 的 90% 是图像 token，
+  图像每轮必变；prompt 部分恒定但仅占 10%，理论上限 14ms——为它引入分段
+  prefix 缓存不值
+- **编码器量化两条路都堵**：A8W8 在 G1 模型崩档（cos 0.09）；W8A16 省的是
+  权重带宽不是 FLOPs，对算力受限的编码器无效
+- **有效杠杆**（按预期收益排序，均需质量 A/B）：
+  ① 2×2 视觉池化（pipeline 已有 `vision_pool_factor` 旋钮，现值 1）：
+     768→192 token，编码器 ≈44ms（**−90ms**）；训练分布外，风险最大
+  ② 砍第 3 视角：编码器 ≈94ms（−40ms）；代价右臂视野
+  ③ graph-on 已兑现（部署形态总 229.9ms，编码器占比仍 ~53%）
