@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 55e42dec-9ad0-4468-b717-690667d2e886
-  modified: 2026-09-29T08:26:06.742Z
+  modified: 2026-10-07T09:06:49.140Z
 ---
 
 本机（第三台，GBS_1.16.0.2.rc88）SDK 1.8.1 相机数据问题（2026-09-29 持续追查，关联 [[galbot-machine3-deployment-state]]）：
@@ -23,3 +23,8 @@ metadata:
 - **旁路实验判决（重要）**：失败窗口期内，用机器自带 embosa Python 绑定（V9.1.2 与 rc88 同版，`/userdata/update/manual_update/lib/python3.8.10`，系统 py3.8 可用；必须 `PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python`，系统 protobuf 4.25.9 拒旧式 _pb2）建与 fusion 同款 LARGE_DATA_TRANSPORT=6 reader 也 **0 帧**；`embosa_topic_tool list` 看不到任何相机话题、echo 无输出（对照 /odom/base_link echo 正常）。→ 失败时 capture 侧发布/发现对**所有外部进程**隐身，不是 SDK 单方面问题；**旁路救不了失败窗口，重启采集栈才是解**。
 - 用法沉淀：`QosConf.CreateIntraCoreQos(...)` 返回的就是完整 Qos（core_comm 默认 0=INTRA_CORE）→ `node.CreateSerializationReader(image_pb2.Image, topic, cb, qos)`；相机消息=galbot.sensor_proto.Image(header/height/width/encoding/data/depth_scale)；proto 包在 /data/galbot/lib/python3/site-packages/galbot。relocalization_server 内嵌 py3.8 同款绑定读 lidar 正常，旁路通路本身有效。厂家调试工具 `/data/galbot/bin/embosa_topic_tool`（list/type/info/qos/hz/echo）。旁路脚本 `~/holy/scripts/test/read_camera_bypass.py`（SDK 再坏时先跑它 + topic_tool 判断是"整体隐身"还是"仅 SDK 隐身"，仅后者旁路才有戏）。
 - 旧"transport_type=0 反汇编定案"降级为背景：rc88 确实拒绝非零 participant transport（`transport no support` 日志），但 fusion 同样回退 DEFAULT_UDP_SHM 仍配对相机 → 该日志行与配对成败无关，勿再当主因。
+
+**2026-10-07 16:45-16:56 又一轮（「重启即愈」第三次应验）+ 旁路载荷新知识**：
+- 16:45 启动的那代采集栈处于失败窗口：SDK 客户端 init True 但 0/6 无数据、旁路 reader（transport 6）unmatch 0 帧——「对所有外部进程隐身」签名不变。16:54:47 全栈协同关闭、16:56 完整重启后立即 6/6 真载荷（头 ~71KB/臂 ~30KB JPEG 640×480 + 双路深度）。
+- **旁路载荷新知识**：健康代旁路 reader 能配对收 211 帧@30fps 但**载荷全 0 字节**（元数据到、图像不到）——相机图像不走裸 reader 通路（lidar 可以，相机不行）。旁路定位仍是「判隐身 vs 仅 SDK」，救不了取图。
+- **再证伪一个候选签名**：`transport no support. Use default transport...` 行六代 capture 守护（好/坏代都在）恒 4 行=启动噪声，grep 它判断好坏**无效**（10-07 曾误判为判别信号，六代日志对比后撤回）。

@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 72f683b3-e256-4dd8-9f16-3a497879a902
-  modified: 2026-09-30T06:23:42.362Z
+  modified: 2026-10-07T09:07:48.995Z
 ---
 
 **本机 = 第三台机器**（前两台：源机/部署机，hostname 都叫 galbot-echo，本机也叫 galbot-echo——[[galbot-flashrt-env-migration-pack]] 的教训：沟通中勿用 hostname 区分，用"本机（第三台）"）。2026-09-23 状态：
@@ -21,5 +21,13 @@ metadata:
 - **warmup 位姿已外置（a0eb0cc）**：三级来源 `--pose-file > config[warmup].pose_file > 部署目录 episode_start_task0.json`（新工具 `g1_pose_extract.py` 从数据集生成，系统 py3.8 跑）。手调位姿：改 json 的 start_pose 或生成变体换 config 指向。
 - 待办（DEPLOY.md §6）：真机只读推理（run_g1_inference）→ 相机视角映射/动作空间开环/SDK 运行时版本核对。**2026-09-29 冒烟进度**：模型加载 6.6s/norm q01_q99/23 维状态（33% 持物夹爪）/SDK 1.8.1 核对全绿；相机阻塞已解除（16:19 采集栈重启后 SDK 6/6 路恢复，`sdk_camera_smoke.py` 自检；史与工具见 [[galbot-machine3-camera-transport-unmatch]]），可继续真机只读推理。**闭环 horizon 工作点更新（2026-09-29 用户拍板）**：五脚本 `--horizon` 默认 10→50（训练原生长度，chunk env 自动设；10 切片弃用），run_dataset_replay 补自设 env（原要手动 export），本机 FlashRT df682a76 含 chunk 补丁可直接跑；10 步冒烟基线 e2e 388.5ms，50 步延迟 echo 实锤几乎不变。
 **闭环速度瓶颈定案（2026-09-30，三次修正）**：工位=训练工位（首判"场景域差距"是误用别处 replay 旧样张，已纠正）。视角比对曾判"双腕相机仰视 30-40°=手眼伺服全盲→模型 hedge"——**此判已被用户否决（"腕部相机没有任何问题"）且被实证推翻**：执行器调参后模型持续输出任务级计划（105-496 mrad）并多次完整走通释放序列。rollout 60s+ 的真实根因是执行器配速，已定案：臂速律 = n/(30×pace×div)、pace 焊死 0.455、工作点 20/1.55 或 25/1.8，全套推导与签名见 [[galbot-g1-loop-pace-tuning]]。槽位映射 camera_map 全对；evidence/20260930_viewmap/ 比对流程可复用。重规划 2.2Hz=推理极限镜像。launcher 中途 restart 会起半套栈（只 tcp_server+lidar），必须整机重启。
+
+**2026-09-30 下午定案包落地**：① [loop] 工作点 20/20/0.45/1.47/near-div2/speed1.0/delta_max0.3 写入 config+BUILTIN（L 半程真机验证：释放序列干净无振荡）；② 双臂串行时间线定案——**60 轮判别跑已结案**：L 释放 12-15 轮、R 释放 37-39 轮、R 回闭 51、全程 35.9s，**双臂完整序列首次走通**，预算实测 52-60 轮、**q 停=R 落盒才停**（30 轮截断定案，见 [[galbot-g1-loop-pace-tuning]]）；③ cache_frames=2 判死（[[galbot-pi05-cache-frames-dead]]）；④ graph 解封+闭环首验通过（[[galbot-g1-cuda-graph-instantiate-fix]]，p50 379.9ms）；⑤ USAGE.md 新增 §3.6 闭环操作节 + state 布局纠错（右臂在前，探针实证）。**⚠ 判别跑双爪起点 ≈1mm 疑似空爪**——运动/时序全验证成立，物理 place（物体真落盒）待持物复验。
+
+**2026-10-04 RTC A/B 实验【已完结 + 工作点 v2 定案】**：用户目标=压全程时间（当天持物跑 22s vs 数据集 13s；L→R 串行窗口 ~7s 其中 ~5s 是数据固有串行 0/101——**串行结构数据里来的，不动**）。B 脚本 `scripts/inference/run_g1_loop_rtc.py`（2b2c22e，坡升保险丝 273b7a2）与 A 逐行同源，唯一差异=推理迟到改 **RTC hold**（重发最后绝对目标单调收敛+10ms 轮询早退；`--no-rtc-hold` 退回 A 行为）。**当日 14 跑全绿**：hold 200+ 窗全 |Δcmd|=0 零垃圾、9/30 A@0.40 破位灾难绝迹、R 落盒 19.7→**14.0-14.5s 纪录**（数据集 13s）。**工作点定案 v2（0b93786 已入 config+BUILTIN）：25/0.38/1.65（1.33×），入口 B 脚本**——pace 破水位后是死 knob（0.35-0.43 墙钟相同）、div 饱和（三档零差取 1.65=臂最慢）、spc=25 是唯一结构杠杆（−2.3s 且速度律命中）。denoise_step 前缀引导维持未搬（eager 可行但 VJP≈2-3× 推理杀节奏，且本链路每轮新鲜重抽帧无陈旧观测病；候补=W8A16 推理 <200ms 后）。lerobot 源码在 /home/galbot/lerobot。⚠ 全天空爪排练，**持物物理 place 复验仍挂着**。
+
+**2026-10-05 切回 pick 任务**：only_place/place 测试线暂停（持物复验仍未做），回 pick 线。`pi05_g1_040000`（pick_place_balence 微调，训练归一化 QUANTILES）装配为 `models/pi05_g1_pick_deploy`：stats 从 ckpt normalizer 直提、grip 标定 0.0005/0.12 沿用、norm_align_check 全绿；起始位姿从数据集重生成（0% 闭爪），与 `pi05_g1_ft/episode_start_task0.json` 旧件逐维一致。config 三键已切（ckpt/prompt="Left arm pick up A. Right arm pick up A."/pose_file），place 三键在 [run] 注释存档可随时切回；闭环工作点 25/0.38/1.65 不变（速度律与任务无关，pick 时线不同轮数预算需重看）。
+
+**2026-10-07 相机恢复 + SDK 在场遥测补全**：相机 transport 失败窗口经完整重启解除（16:45 那代失败窗口、16:56 重启后 6/6 真载荷，见 [[galbot-machine3-camera-transport-unmatch]]）。`run_g1_inference.py`（只读）三层遥测 n=20：①冻结帧纯推理 bf16 375.3 / W8A16 **356.5（−18.8ms 现场兑现）**，②取图+关节 8.3ms，③端到端 388.9/368.5；冻结帧动作 sanity 全对。loop 388 归因闭合：+138=SDK/相机栈常驻、+13=并行取图（详见 BENCHMARKS 附录）。graph-on W8A16 闭环质量验证仍挂。
 
 **2026-09-29 同步**：`git pull` 到 **9f60c16**（master 落后 ~60 提交后追平；远程无 main 分支，主干就叫 master；echo-unified 已完全并入且落后 14 提交，是死支）。热修升 5 文件版并已应用（新增 cuda_graph.py WithFlags 修复 + pi05_rtx/_fp16 CHUNK_SIZE env——**graph 段错误已修复**，旧"R35.x 必崩/NO_GRAPH=1"结论作废，但 bench 收益仅 ~3%，源机定档仍 eager）；agent_memory 快照重导入（15 页，新增 cuda-graph-fix / github-remote-setup）。**本周重大翻案（详见新快照）**：① INT8 定档作废→**部署定档 bf16**（INT8 毁动作质量）；② 动作语义=**增量 delta**（非绝对角）；③ dataset replay/`--horizon 50` 整块推理新管线（依赖 chunk env 补丁）；④ DEPLOY.md v3 纯环境包配方（7.5G，不含 models）。tokenizer 仍缺；`model/` 目录现在是未跟踪状态（不影响 pull）。
