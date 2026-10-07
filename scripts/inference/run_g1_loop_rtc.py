@@ -56,6 +56,7 @@ import os
 import pathlib
 import select
 import signal
+import subprocess
 import sys
 import termios
 import threading
@@ -148,6 +149,13 @@ ap.add_argument("--env-abort-n", type=int, default=5,
                      "继续跑只会反复撞桌")
 ap.add_argument("--no-env-guard", action="store_true",
                 help="关闭关节包络护栏（排障对照用）")
+ap.add_argument("--nav-suspend", action="store_true",
+                help="闭环期间 SIGSTOP 搁置导航栈 7 进程（localization/fusion/"
+                     "navigation_plan/vtn/surround/swallows/lidar_capture）："
+                     "2026-10-07 实测推理 375.3→320.5ms（−54.8ms）、GR3D 50→7。"
+                     "退出自动 CONT（含 kill -9，守护网兜底）。"
+                     "⚠ 只用于臂上任务+底盘不动窗口：冻结期 localization 位姿停更，"
+                     "底盘先恢复导航。默认关")
 args = ap.parse_args()
 
 # ── 全文日志落盘：q 退出走 os._exit 不刷缓冲（09-23 坑），故逐行强制 flush ──
@@ -210,6 +218,106 @@ print(f"[loop-rtc] B 变体 | 迟到兜底: "
          if args.rtc_ramp > 0 else ""))
 
 
+# ── 导航栈 SIGSTOP 搁置（--nav-suspend 开启，默认关）──
+# 机制：kill -STOP 进程原地冻结——无 exit 事件，launcher 的退出拉起逻辑不触发
+# （2026-10-07 vtn 8s 探针实证：冻结期 launcher 日志零增量、兄弟全活），
+# CONT 原地复活，不重初始化不重载图。约束：只用于「臂上任务+底盘不动」窗口。
+# 恢复多重保险：① 各退出路径显式 resume（q/Ctrl-C/异常/正常完成）；
+# ② 独立守护进程盯父进程，父进程任何死法（含 kill -9/段错误）即 CONT 全部。
+NAV_SUSPEND_NAMES = (
+    "localization_server", "galbot_fusion_main", "service_navigation_plan",
+    "galbot_vtn", "surround_cameras_capture", "swallows", "service_lidar_capture",
+)
+_NAV_GUARD_SRC = """
+import os, sys, time, signal
+signal.signal(signal.SIGINT, signal.SIG_IGN)
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+ppid = os.getppid()
+pids = [int(x) for x in sys.argv[1].split(',') if x]
+while True:                      # 父进程（本脚本）消失才往下走
+    time.sleep(0.3)
+    try:
+        os.kill(ppid, 0)
+    except OSError:
+        break
+for p in pids:
+    try:
+        os.kill(p, signal.SIGCONT)   # 最后一道网：主进程任何死法都恢复导航栈
+    except OSError:
+        pass
+"""
+
+
+class NavSuspend:
+    """导航栈搁置器：只停 NAV_SUSPEND_NAMES 内、且当前不在冻结态的进程。
+
+    只认领自己 STOP 的 pid（resume 时只 CONT 这些），对别人冻结的进程不碰。
+    """
+
+    def __init__(self):
+        self.stopped = {}                     # pid -> name
+        self._guard = None
+
+    def _find_pids(self):
+        found = {}
+        for pid in os.listdir("/proc"):
+            if not pid.isdigit():
+                continue
+            try:
+                with open(f"/proc/{pid}/cmdline", "rb") as f:
+                    arg0 = f.read().split(b"\x00")[0].decode("utf-8", "replace")
+            except OSError:
+                continue
+            base = os.path.basename(arg0)
+            if base in NAV_SUSPEND_NAMES:
+                found[int(pid)] = base
+        return found
+
+    def suspend(self):
+        cands = self._find_pids()
+        missing = [n for n in NAV_SUSPEND_NAMES if n not in cands.values()]
+        if missing:
+            print(f"[nav-suspend] ⚠ 未找到（跳过）: {missing}")
+        # 守护网先起（继承 pid 表），再下发 STOP——任何死法都有人收尾
+        self._guard = subprocess.Popen(
+            [sys.executable, "-c", _NAV_GUARD_SRC,
+             ",".join(str(p) for p in sorted(cands))],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for pid, name in sorted(cands.items()):
+            try:
+                with open(f"/proc/{pid}/stat") as f:
+                    if f.read().split()[2] == "T":   # 已冻结（非我们所停）：不碰
+                        continue
+            except (OSError, IndexError):
+                continue
+            try:
+                os.kill(pid, signal.SIGSTOP)
+                self.stopped[pid] = name
+            except OSError as e:
+                print(f"[nav-suspend] ⚠ STOP {name}({pid}) 失败: {e}")
+        print(f"[nav-suspend] 已冻结 {len(self.stopped)} 进程: "
+              + ", ".join(f"{n}({p})" for p, n in sorted(self.stopped.items()))
+              + f" | 守护网 pid={self._guard.pid}")
+        print("[nav-suspend] ⚠ 冻结期底盘勿动（localization 位姿停更）；"
+              "相机 capture 不在冻结集，取图不受影响")
+
+    def resume(self):
+        if not self.stopped:
+            return
+        for pid in sorted(self.stopped):
+            try:
+                os.kill(pid, signal.SIGCONT)
+            except OSError:
+                pass
+        print(f"[nav-suspend] 已恢复 {len(self.stopped)} 进程"
+              "（CONT 幂等；守护网发现主进程退出后自退）")
+        self.stopped.clear()
+
+
+NAV = None   # suspend 后指向 NavSuspend 实例；各退出路径 None 守卫调用 resume
+
+
 class QuitWatcher:
     """后台线程监听键盘 q：任何阶段即时退出（SDK 阻塞 C++ 调用吞 Ctrl-C）。"""
 
@@ -260,13 +368,19 @@ class QuitWatcher:
                     print("\n⛔ 收到中断信号 —— 立即退出"
                           "（已下发目标可能仍在限速执行）")
                     self.restore()
+                    if NAV is not None:
+                        NAV.resume()
                     os._exit(130)
                 if sys.stdin.read(1) in ("q", "Q"):
                     print("\n⛔ 按下 q —— 立即退出（已下发目标可能仍在限速执行）")
                     self.restore()
+                    if NAV is not None:
+                        NAV.resume()
                     os._exit(2)
             except Exception:
                 self.restore()
+                if NAV is not None:
+                    NAV.resume()
                 os._exit(3)   # 监听线程死了比静默更危险：宁可误退不可失控
 
 
@@ -286,6 +400,8 @@ def _fatal_hook(t, v, tb):
         except Exception:
             pass
     WATCH.restore()
+    if NAV is not None:
+        NAV.resume()
     os._exit(1)
 
 
@@ -311,14 +427,12 @@ if args.no_env_guard:
     print("[护栏] 关节包络护栏已 --no-env-guard 关闭")
 elif _env_file.exists():
     _env = json.loads(_env_file.read_text())
-    ENV_LO = np.array([(-np.inf if v is None else float(v))
-                       for v in _env["action_lo"]], dtype=np.float32)
-    ENV_HI = np.array([(np.inf if v is None else float(v))
-                       for v in _env["action_hi"]], dtype=np.float32)
-    ENV_LO[:7] -= args.env_margin
-    ENV_HI[:7] += args.env_margin
-    ENV_LO[8:15] -= args.env_margin
-    ENV_HI[8:15] += args.env_margin
+    # 此处在 import numpy 之前，只做纯 python 解析；数组化+余量在下方
+    # import numpy 之后统一做（10-07 修 np 前置引用 bug——pick 时代同炸，
+    # 只是护栏合入后没有真机全跑过所以没暴露）
+    _inf = float("inf")
+    ENV_LO = [(-_inf if v is None else float(v)) for v in _env["action_lo"]]
+    ENV_HI = [(_inf if v is None else float(v)) for v in _env["action_hi"]]
     print(f"[护栏] 关节包络开：{_env_file.name}（来源 {_env.get('source', '?')}；"
           f"余量 ±{args.env_margin} rad；越界=截断 chunk，连续 {args.env_abort_n} "
           f"轮→停）")
@@ -360,6 +474,16 @@ os.environ["FLASH_RT_PI05_ACTION_CHUNK_SIZE"] = str(args.horizon)
 
 import numpy as np  # noqa: E402
 import cv2  # noqa: E402
+
+# 包络护栏数组化+余量（解析在上方 import 之前完成；margin 语义同 10-06 原版）
+if ENV_LO is not None:
+    _m = args.env_margin
+    ENV_LO = np.array(ENV_LO, dtype=np.float32)
+    ENV_HI = np.array(ENV_HI, dtype=np.float32)
+    ENV_LO[:7] -= _m
+    ENV_LO[8:15] -= _m
+    ENV_HI[:7] += _m
+    ENV_HI[8:15] += _m
 import flash_rt.frontends.torch.pi05_rtx as _fe  # noqa: E402
 
 # 回退 eager 时才封图（PI05_NO_GRAPH=1）；默认开图（scripts/test/bench_pi05.py 同款）
@@ -525,6 +649,10 @@ print(f"start_controller('all') → {st}")
 if not str(st).startswith("ControlStatus.SUCCESS"):
     raise SystemExit("控制器未 SUCCESS，终止（先跑 run_g1_execute.py 排查）")
 
+if args.nav_suspend:
+    NAV = NavSuspend()
+    NAV.suspend()
+
 HOME = read_joints(robot, ARM_NAMES)   # 起始位 = 漂移护栏基准（应在预热工作位）
 print(f"起始位（漂移护栏基准）: {np.round(HOME, 3).tolist()}")
 print("⚠ 若当前不是预热工作位，先跑 g1_pose_warmup.py 再来")
@@ -624,6 +752,8 @@ if not args.do_exec:
             print(f"        夹爪目标: {'  '.join(desc)}")
     print("\n[干跑] 未下发任何命令。加 --exec 真实执行。")
     WATCH.restore()
+    if NAV is not None:
+        NAV.resume()
     robot.request_shutdown(); robot.wait_for_shutdown(); robot.destroy()
     os._exit(0)
 
@@ -982,6 +1112,8 @@ print(f"最终偏离起始位: {exc:.0f} mrad（护栏 {args.max_excursion * 100
       + (" ⛔ 护栏触发过" if aborted else ""))
 
 WATCH.restore()
+if NAV is not None:
+    NAV.resume()
 print("SDK 关闭中...")
 robot.request_shutdown(); robot.wait_for_shutdown(); robot.destroy()
 os._exit(0)   # SDK 残留线程，干净退出
