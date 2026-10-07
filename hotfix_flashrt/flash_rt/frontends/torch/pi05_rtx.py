@@ -796,6 +796,11 @@ class Pi05TorchFrontendRtx:
         # decoder INT8 so all large GEMMs benefit from tensor-core acceleration.
         self._use_int8_encoder = self._force_int8_decoder or _enc_only
         self._int8_encoder_only = _enc_only
+        # FVK_PI05_RTX_W8A16_DECODER=1: weight-only INT8 解码器 GEMM
+        # （激活全程 bf16 — 无 A8W8 激活量化偏置；sm_87 skinny kernel，
+        # 权重复用 _quantize_decoder_int8 工件）。与 encoder/vision 精度正交。
+        self._w8a16_decoder = os.environ.get(
+            "FVK_PI05_RTX_W8A16_DECODER", "0") == "1"
         # Vision GEMMs (VIS_D=1152, seq=512): static per-tensor INT8 was
         # measured to break encoder cosine (0.991 → 0.282) — disabled
         # permanently. Dynamic per-row INT8 is opt-in via
@@ -854,7 +859,7 @@ class Pi05TorchFrontendRtx:
             if not (self.use_fp8 and not self._force_bf16 and not self._force_int8_decoder):
                 raise ValueError("prefix_precision='nvfp4' needs the FP8 frontend (use_fp8=True)")
             self._quantize_prefix_nvfp4()
-        if self._force_int8_decoder:
+        if self._force_int8_decoder or self._w8a16_decoder:
             self._quantize_decoder_int8()
         if self._use_int8_encoder:
             self._quantize_encoder_int8()
@@ -923,6 +928,25 @@ class Pi05TorchFrontendRtx:
         kwargs = self._pipeline_precision_kwargs_base()
         kwargs["decoder_kernel"] = self._decoder_kernel
         kwargs["prefix_precision"] = self._prefix_precision
+        if self._w8a16_decoder:
+            if self._force_int8_decoder:
+                raise ValueError(
+                    "FVK_PI05_RTX_W8A16_DECODER conflicts with "
+                    "FVK_PI05_RTX_FORCE_INT8 (A8W8 decoder)")
+            if self.chunk_size > 64:
+                raise ValueError(
+                    f"W8A16 decoder GEMM supports chunk_size<=64, "
+                    f"got {self.chunk_size}")
+            if kwargs.get("use_fp8_decoder"):
+                logger.warning(
+                    "FVK_PI05_RTX_W8A16_DECODER=1: decoder FP8 disabled, "
+                    "running the W8A16 weight-only kernel instead "
+                    "(encoder/vision precision unchanged)")
+                kwargs["use_fp8_decoder"] = False
+            kwargs["use_w8a16_decoder"] = True
+            logger.warning(
+                "FVK_PI05_RTX_W8A16_DECODER=1: weight-only INT8 decoder "
+                "GEMMs (bf16 activations, sm_87 skinny kernel)")
         return kwargs
 
     def _pipeline_precision_kwargs_base(self) -> dict:

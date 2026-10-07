@@ -52,6 +52,7 @@ os.environ["PI05_NO_GRAPH"] = "1"
 os.environ.setdefault("FLASHRT_PI05_STATE_PROMPT_MODE", "fixed")
 for k in ("FVK_PI05_RTX_FORCE_INT8", "FVK_PI05_RTX_INT8_ENCODER_ONLY",
           "FVK_PI05_RTX_FORCE_BF16", "FVK_PI05_RTX_INT8_ENC_SKIP",
+          "FVK_PI05_RTX_W8A16_DECODER",
           "FVK_PI05_RTX_INT8_VISION"):
     os.environ.pop(k, None)
 
@@ -456,9 +457,9 @@ def _probe_fe_init(self, *a, **kw):
     if HORIZON > 0:
         kw["chunk_size"] = HORIZON   # 走原生 ctor 路径，styles/buffers 全按新 chunk 建
     _ORIG_FE_INIT(self, *a, **kw)
+    _DEC8_FE[0] = self   # 常驻：记录最新构造的前端（各档 load 后验证用）
     if _DEC8_ACTIVE[0]:
         self._use_int8_encoder = False   # decoder A8W8 照常（_quantize_decoder_int8 在 load 里跑），encoder 退回 bf16
-        _DEC8_FE[0] = self
 
 
 _FE.__init__ = _probe_fe_init
@@ -470,7 +471,7 @@ store, lat, kv_all = {}, {}, {}
 for name in args.configs.split(","):
     name = name.strip()
     for k in ("FVK_PI05_RTX_FORCE_INT8", "FVK_PI05_RTX_INT8_ENCODER_ONLY",
-              "FVK_PI05_RTX_FORCE_BF16"):
+              "FVK_PI05_RTX_FORCE_BF16", "FVK_PI05_RTX_W8A16_DECODER"):
         os.environ.pop(k, None)
     is_sim = name in ("int8_sim", "rot8")
     is_rot_bf16 = name == "rot_bf16"
@@ -478,11 +479,16 @@ for name in args.configs.split(","):
     is_calib = name == "calib"
     is_chan = name in ("chan8", "chan8all")
     is_dec8 = name == "dec8"
+    is_w8a16 = name == "w8a16"
     if name == "bf16" or is_rot_bf16:
         os.environ["FVK_PI05_RTX_FORCE_BF16"] = "1"
     elif is_dec8:
         os.environ["FVK_PI05_RTX_FORCE_INT8"] = "1"
         _DEC8_ACTIVE[0] = True
+    elif is_w8a16:
+        # encoder/vision 走本机默认（Orin 无 fp8 → 内部退 bf16），
+        # 仅 decoder 换 W8A16 weight-only kernel（激活全程 bf16）
+        os.environ["FVK_PI05_RTX_W8A16_DECODER"] = "1"
     else:
         os.environ["FVK_PI05_RTX_INT8_ENCODER_ONLY"] = "1"
     print(f"───── [{name}] ─────", flush=True)
@@ -511,6 +517,10 @@ for name in args.configs.split(","):
         _fe = _DEC8_FE[0]
         print(f"[dec8] 验证 action_dim={_fe._out_action_dim} "
               f"chunk={_fe.chunk_size} enc_int8={_fe._use_int8_encoder}", flush=True)
+    if is_w8a16:
+        _fe = _DEC8_FE[0]
+        print(f"[w8a16] 验证 fe_flag={getattr(_fe, '_w8a16_decoder', None)} "
+              f"chunk={_fe.chunk_size}", flush=True)
     print(f"load {time.time() - t0:.0f}s", flush=True)
     model._pipe.use_cuda_graph = False
     ns = model._pipe.norm_stats

@@ -146,3 +146,37 @@
   （±6ms）= 稳定劣化非抖动；嫌疑抓图期 autotune 选型对 iGPU 不优（未深究）
 - **定档：源机所有脚本 `PI05_NO_GRAPH=1`（echo-unified 分支已是此默认）**；
   热修保留不回滚（段错误隐患消除，FlashRT/驱动升级后可复测）
+
+## 附录：W8A16-decoder 落地——weight-only INT8 手写 kernel（2026-10-07，本机）
+
+**结论先行**：`FVK_PI05_RTX_W8A16_DECODER=1`（默认关）启用解码器 weight-only
+INT8 GEMM——**权重 int8、激活全程 bf16**，从根上避开 A8W8 激活量化损伤
+（dec8 夹爪 bias ±10pp 的来源被消除）。sm_87 手写 skinny kernel
+（mma m16n8k16 bf16 + cp.async 双缓冲 + 寄存器内反量化 + K-split 确定性
+reduce），FlashRT 8f08ca85，7 文件。
+
+微基准（env nvcc 11.8，对照 cuBLASLt bf16_nn，5 个解码器 GEMM shape）：
+
+| M（chunk） | bf16 µs/层 | W8A16 µs/层 | Δ | 有效带宽 |
+|---:|---:|---:|---:|---|
+| 10 | 261 | **133** | **−49%** | 137-162 GB/s（近带宽顶） |
+| 50 | 266 | **214** | −20% | — |
+
+精度：最差 relF = 1 bf16 ULP（3 种子复核，>2ULP 计数 0-1/204800 = 输出舍入
+边界噪声，非系统错误）；管线级确定性 max_diff=0（固定序 reduce）。
+
+闭环（rot 探针真机管线，NO_GRAPH，teacher-forced rot 等价）：
+
+| 配置 | p50 | cos_arm | 夹爪 |
+|---|---|---:|---|
+| bf16 chunk=50 基线 | 283 ms | — | — |
+| **W8A16 chunk=50** | **277/278 ms（−5-6ms）** | **1.0000** | bias 0.05pp（dec8: 9.57pp） |
+| bf16 chunk=10 基线 | 283 ms | — | — |
+| **W8A16 chunk=10** | **273 ms（−10ms）** | 0.9997 | cos_grip 0.9978 |
+
+- NO_GRAPH 模式下 e2e 只兑现约一半 GEMM 增量（sk>1 档 reduce 多发射
+  ≈+1ms/推理 + DRAM 争用）；graph-on 部署预期更接近满额
+- ⚠ 部署前提：`flash_rt_kernels.so` 须以 flash_pyrt311 环境 **nvcc 11.8**
+  重编（系统 11.4 死路）；老 .so 上 flag 默认关、行为不变（安全）
+- kernel patch + 重建配方：`hotfix_flashrt/flashrt_kernel_patch/`（ops 仓已推）
+- 残留可再榨：o/down 档 sk=1 省 reduce 发射；SiLU-gate epilogue 融合（后备）

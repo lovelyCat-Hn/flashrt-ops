@@ -1,0 +1,857 @@
+From 8f08ca85615f672226dac421be4275cdc250154e Mon Sep 17 00:00:00 2001
+From: lovelyCat-Hn <lovelyCat-Hn@users.noreply.github.com>
+Date: Wed, 7 Oct 2026 15:27:19 +0800
+Subject: [PATCH] =?UTF-8?q?pi05=20decoder=20W8A16=20weight-only=20INT8=20G?=
+ =?UTF-8?q?EMM=EF=BC=88sm=5F87=20=E6=89=8B=E5=86=99=20skinny=20kernel?=
+ =?UTF-8?q?=EF=BC=8Cenv=20=E9=97=A8=E6=8E=A7=E9=BB=98=E8=AE=A4=E5=85=B3?=
+ =?UTF-8?q?=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+背景：A8W8 解码器路线被 10-06/10-07 消融判死（激活量化偏置甩飞夹爪通道，
+grip bias ±10pp），weight-only 是唯一无损候选。本提交落地 W8A16：
+激活全程 bf16，仅权重 int8（复用 _quantize_decoder_int8 的 [N,K]+per-channel
+scale 工件），无任何激活量化。
+
+kernel（csrc/gemm/w8a16_skinny_sm87.cuh/.cu，benchmarks/w8a16_skinny_sm87 同源引用）：
+- mma.m16n8k16.bf16 + cp.async 双缓冲 + ldmatrix.x4 取 A fragment；
+- int8→bf16 寄存器内精确反量化内联进 B fragment 构造（v2 关键：dequant
+  出关键路径，M=10 提速 1.7-2×）；split_k=1 直写 D 免 reduce launch；
+- K-split fp32 partials + 固定顺序 reduce（确定性，逐位可复现）；
+- 微基线：5 decoder 形状合计 M=10 133µs/层（cuBLASLt bf16_nn 261µs），
+  M=50 214µs/层（266µs）；对 fp64 参照 worst relF=1 bf16 ULP（204800 元素
+  中 >2ULP 计数 0-1，三种子复核=输出舍入边界噪声，非系统性）。
+
+集成（env FVK_PI05_RTX_W8A16_DECODER=1，默认关，与 encoder/vision 精度正交）：
+- pipeline_rtx: use_w8a16_decoder + _w8a16_gemm/_w8a16_cfg 选型表 +
+  4 个 GEMM 站点分支（qkv/o/gate/up/down）；partials 在 buffer 阶段分配
+  （图捕获前）；M>64/chunk>64 显式报错；
+- pi05_rtx 前端：env 门 + 冲突守卫（FORCE_INT8 互斥、fp8 decoder 自动
+  退位）+ 权重量化触发复用；
+- bindings: w8a16_skinny_gemm(variant 0-4)；CMake 加 .cu 源。
+- 头文件结构：host 原型无条件可见（bindings.cpp 是 g++ TU），设备代码
+  全部 __CUDACC__ 门内，reduce kernel static（多 TU 安全）。
+
+验证（本机 Orin sm_87，探针 only_place ep0，NO_GRAPH）：
+- chunk=50: p50 283→277-278ms（−5~6ms），cos_arm 1.0000，grip bias 0.05pp
+  （dec8 对照：0.9885 / 9.57pp），tf-cos 0.683 与 bf16 全同；
+- chunk=10: p50 283→273ms（−10ms），cos_arm 0.9997，cos_grip 0.9978；
+- 两档确定性 max_diff=0；encoder KV cos 1.0000 全层（在码锚点过）；
+- 部署默认开图，launch 开销摊薄后 GEMM 差额（−10ms@M50 / −23ms@M10 理论）
+  兑现率应高于 NO_GRAPH 探针口径。
+
+构建注意：本机须用 env 内 nvcc 11.8
+（~/miniforge3/envs/flash_pyrt311/bin/nvcc）——系统 nvcc 11.4 缺 cuda_fp8.h
+与 11.8+ cublasLt 枚举，且其 targets include 路径前插无法用 -isystem 压过。
+cmake -B build -S . -DGPU_ARCH=87 -DPython3_EXECUTABLE=<env python>
+-DCMAKE_CUDA_COMPILER=<env nvcc>
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ CMakeLists.txt                       |   1 +
+ benchmarks/w8a16_skinny_sm87/main.cu | 193 ++++++++++++++++++
+ csrc/bindings.cpp                    |  25 +++
+ csrc/gemm/w8a16_skinny_sm87.cu       |  45 ++++
+ csrc/gemm/w8a16_skinny_sm87.cuh      | 294 +++++++++++++++++++++++++++
+ flash_rt/frontends/torch/pi05_rtx.py |  26 ++-
+ flash_rt/models/pi05/pipeline_rtx.py |  75 +++++++
+ 7 files changed, 658 insertions(+), 1 deletion(-)
+ create mode 100644 benchmarks/w8a16_skinny_sm87/main.cu
+ create mode 100644 csrc/gemm/w8a16_skinny_sm87.cu
+ create mode 100644 csrc/gemm/w8a16_skinny_sm87.cuh
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index f2df42e5..b3dee9ce 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1564,6 +1564,7 @@ endif()
+ # and tests/test_build_inventory.py for the measured per-target surface.
+ pybind11_add_module(flash_rt_kernels
+   csrc/gemm/gemm_runner.cu
++  csrc/gemm/w8a16_skinny_sm87.cu
+   csrc/kernels/norm.cu
+   csrc/kernels/activation.cu
+   csrc/kernels/rope.cu
+diff --git a/benchmarks/w8a16_skinny_sm87/main.cu b/benchmarks/w8a16_skinny_sm87/main.cu
+new file mode 100644
+index 00000000..a1253710
+--- /dev/null
++++ b/benchmarks/w8a16_skinny_sm87/main.cu
+@@ -0,0 +1,193 @@
++// Standalone micro-bench for w8a16_skinny (sm_87). Correctness vs fp64 CPU on
++// the same int8 weights; perf over the 5 decoder GEMM shapes × M ∈ {10, 50},
++// sweeping BN/BK variant × split_k.
++// Build:  nvcc -O3 -std=c++17 -arch=sm_87 -I../../csrc -Xcompiler "-O2 -fopenmp" \
++//             main.cu ../../csrc/gemm/w8a16_skinny_sm87.cu -o w8a16_bench
++// kernel 与 csrc/gemm/w8a16_skinny_sm87.cuh 同源（bench 只读引用，防漂移）
++#include "../../csrc/gemm/w8a16_skinny_sm87.cuh"
++
++#include <cuda_runtime.h>
++#include <cstdio>
++#include <cstdlib>
++#include <cmath>
++#include <random>
++#include <vector>
++
++struct Shape { const char* name; int N, K; };
++
++using GemmFn = int (*)(const void*, const void*, const float*, void*, float*,
++                       int, int, int, int, cudaStream_t);
++
++// gate M=50 sk=1 在 v1 出现 2 ULP worst relF（7.7e-3 vs 3.9e-3 基线）：
++// 多种子复核它是系统性错误还是 bf16 输出舍入的边界噪声。
++static void seed_check() {
++    const int M = 50, N = 4096, K = 1024;
++    const double ULP1 = 3.906e-3;   // 1 bf16 ULP 相对量
++    printf("== gate M=%d N=%d K=%d BN64/BK64 sk=1 多种子复核 ==\n", M, N, K);
++    std::mt19937 rng(42);
++    std::uniform_int_distribution<int> di(-127, 127);
++    std::uniform_real_distribution<float> df(-3.f, 3.f);
++    std::uniform_real_distribution<float> ds(0.0005f, 0.02f);
++    for (int seed : {42, 7, 2026}) {
++        rng.seed(seed);
++        std::vector<__nv_bfloat16> A((size_t)M * K);
++        for (auto& v : A) v = __float2bfloat16(df(rng));
++        std::vector<int8_t> Wq((size_t)N * K);
++        for (auto& v : Wq) v = (int8_t)di(rng);
++        std::vector<float> sc(N);
++        for (auto& v : sc) v = ds(rng);
++        std::vector<double> ref((size_t)M * N, 0.0);
++        #pragma omp parallel for collapse(2)
++        for (int n = 0; n < N; ++n)
++            for (int m = 0; m < M; ++m) {
++                double acc = 0.0;
++                for (int k = 0; k < K; ++k)
++                    acc += (double)__bfloat162float(A[(size_t)m * K + k]) *
++                           (double)Wq[(size_t)n * K + k];
++                ref[(size_t)m * N + n] = acc * (double)sc[n];
++            }
++        __nv_bfloat16 *dA; int8_t *dW; float *dsc, *dpart; __nv_bfloat16 *dD;
++        cudaMalloc(&dA, A.size() * 2);
++        cudaMalloc(&dW, Wq.size());
++        cudaMalloc(&dsc, N * 4);
++        cudaMalloc(&dpart, (size_t)M * N * 4);
++        cudaMalloc(&dD, (size_t)M * N * 2);
++        cudaMemcpy(dA, A.data(), A.size() * 2, cudaMemcpyHostToDevice);
++        cudaMemcpy(dW, Wq.data(), Wq.size(), cudaMemcpyHostToDevice);
++        cudaMemcpy(dsc, sc.data(), N * 4, cudaMemcpyHostToDevice);
++        flash_rt::w8a16_skinny::w8a16_skinny_gemm(dA, dW, dsc, dD, dpart,
++                                                  M, N, K, 1, 0);
++        std::vector<__nv_bfloat16> out((size_t)M * N);
++        cudaMemcpy(out.data(), dD, out.size() * 2, cudaMemcpyDeviceToHost);
++        double max_rel = 0, max_abs = 0;
++        long n1 = 0, n2 = 0;
++        size_t worst = 0;
++        for (size_t i = 0; i < out.size(); ++i) {
++            double got = (double)__bfloat162float(out[i]);
++            double e = fabs(got - ref[i]);
++            double rel = e / (fabs(ref[i]) + 1e-3);
++            if (rel > max_rel) { max_rel = rel; worst = i; }
++            if (e > max_abs) max_abs = e;
++            if (rel > ULP1) ++n1;
++            if (rel > 2 * ULP1) ++n2;
++        }
++        printf("  seed %-5d max_rel=%.2e max_abs=%.2e | >1ULP %ld  >2ULP %ld"
++               " / %zu | worst ref=%.4f got=%.4f\n",
++               seed, max_rel, max_abs, n1, n2, out.size(),
++               ref[worst], (double)__bfloat162float(out[worst]));
++        cudaFree(dA); cudaFree(dW); cudaFree(dsc); cudaFree(dpart); cudaFree(dD);
++    }
++}
++
++int main() {
++    cudaFree(0);
++    seed_check();
++
++    // decoder branch (pipeline_rtx.py): DEC_D=1024, DEC_NH=8, DEC_NKV=1,
++    // DEC_HD=256, DEC_H=4096
++    const Shape shapes[] = {
++        {"qkv ", 2560, 1024},
++        {"o   ", 1024, 2048},
++        {"gate", 4096, 1024},
++        {"up  ", 4096, 1024},
++        {"down", 1024, 4096},
++    };
++    const int Ms[] = {10, 50};
++    const int warmup = 20, iters = 200;
++    GemmFn fns[5] = {
++        flash_rt::w8a16_skinny::w8a16_skinny_gemm,
++        flash_rt::w8a16_skinny::w8a16_skinny_gemm_bn32,
++        flash_rt::w8a16_skinny::w8a16_skinny_gemm_bn64_bk128,
++        flash_rt::w8a16_skinny::w8a16_skinny_gemm_bn32_bk128,
++        flash_rt::w8a16_skinny::w8a16_skinny_gemm_bn128,
++    };
++    const char* fn_names[5] = {"BN64/BK64 ", "BN32/BK64 ", "BN64/BK128",
++                               "BN32/BK128", "BN128/BK64"};
++
++    printf("\n%-5s M  N    K    | var         split_k  us     totGB/s  relF_max\n",
++           "shape");
++    for (const Shape& sh : shapes) {
++        for (int M : Ms) {
++            const int N = sh.N, K = sh.K;
++            std::mt19937 rng(42);
++            std::uniform_int_distribution<int> di(-127, 127);
++            std::uniform_real_distribution<float> df(-3.f, 3.f);
++            std::uniform_real_distribution<float> ds(0.0005f, 0.02f);
++            std::vector<__nv_bfloat16> A(M * K);
++            for (auto& v : A) v = __float2bfloat16(df(rng));
++            std::vector<int8_t> Wq((size_t)N * K);
++            for (auto& v : Wq) v = (int8_t)di(rng);
++            std::vector<float> sc(N);
++            for (auto& v : sc) v = ds(rng);
++
++            __nv_bfloat16 *dA; int8_t *dW; float *dsc, *dpart; __nv_bfloat16 *dD;
++            cudaMalloc(&dA, A.size() * 2);
++            cudaMalloc(&dW, Wq.size());
++            cudaMalloc(&dsc, N * 4);
++            cudaMalloc(&dpart, (size_t)64 * M * N * 4);
++            cudaMalloc(&dD, (size_t)M * N * 2);
++            cudaMemcpy(dA, A.data(), A.size() * 2, cudaMemcpyHostToDevice);
++            cudaMemcpy(dW, Wq.data(), Wq.size(), cudaMemcpyHostToDevice);
++            cudaMemcpy(dsc, sc.data(), N * 4, cudaMemcpyHostToDevice);
++
++            // ── CPU fp64 reference ──
++            std::vector<double> ref((size_t)M * N, 0.0);
++            #pragma omp parallel for collapse(2)
++            for (int n = 0; n < N; ++n) {
++                for (int m = 0; m < M; ++m) {
++                    double acc = 0.0;
++                    for (int k = 0; k < K; ++k)
++                        acc += (double)__bfloat162float(A[(size_t)m * K + k]) *
++                               (double)Wq[(size_t)n * K + k];
++                    ref[(size_t)m * N + n] = acc * (double)sc[n];
++                }
++            }
++
++            double best_us = 1e30; int best_fn = -1, best_sk = 0;
++            double best_relF = 0;
++            for (int f = 0; f < 5; ++f) {
++                for (int sk : {1, 2, 4, 8, 16}) {
++                    if (K / 64 < sk) break;
++                    if (fns[f](dA, dW, dsc, dD, dpart, M, N, K, sk, 0)) continue;
++                    // correctness at this combo
++                    std::vector<__nv_bfloat16> out((size_t)M * N);
++                    cudaMemcpy(out.data(), dD, out.size() * 2, cudaMemcpyDeviceToHost);
++                    double rel = 0;
++                    for (size_t i = 0; i < out.size(); ++i) {
++                        double got = (double)__bfloat162float(out[i]);
++                        double e = fabs(got - ref[i]) / (fabs(ref[i]) + 1e-3);
++                        if (e > rel) rel = e;
++                    }
++                    for (int w = 0; w < warmup; ++w)
++                        fns[f](dA, dW, dsc, dD, dpart, M, N, K, sk, 0);
++                    cudaEvent_t t0, t1;
++                    cudaEventCreate(&t0); cudaEventCreate(&t1);
++                    cudaEventRecord(t0);
++                    for (int it = 0; it < iters; ++it)
++                        fns[f](dA, dW, dsc, dD, dpart, M, N, K, sk, 0);
++                    cudaEventRecord(t1);
++                    cudaEventSynchronize(t1);
++                    float ms; cudaEventElapsedTime(&ms, t0, t1);
++                    cudaEventDestroy(t0); cudaEventDestroy(t1);
++                    double us = ms * 1000.0 / iters;
++                    if (us < best_us) {
++                        best_us = us; best_fn = f; best_sk = sk; best_relF = rel;
++                    }
++                }
++            }
++
++            // 总流量（权重 int8 + partials 写读 + A 读）口径下的有效带宽
++            double sk_used = best_sk;
++            double traffic = (double)N * K                       // W int8
++                           + 2.0 * sk_used * M * N * 4           // partials w+r
++                           + (double)M * K * 2 * sk_used;        // A 每 split 重读
++            double gbs = traffic / best_us / 1000.0;
++            printf("%-5s %3d %4d %5d | %s sk=%-3d %7.2f %8.1f  %.2e\n",
++                   sh.name, M, N, K, fn_names[best_fn], best_sk, best_us, gbs,
++                   best_relF);
++
++            cudaFree(dA); cudaFree(dW); cudaFree(dsc); cudaFree(dpart); cudaFree(dD);
++        }
++    }
++    return 0;
++}
+diff --git a/csrc/bindings.cpp b/csrc/bindings.cpp
+index fc1e358f..f210a8d9 100644
+--- a/csrc/bindings.cpp
++++ b/csrc/bindings.cpp
+@@ -64,6 +64,7 @@
+ #ifdef FLASHRT_PI05_DECODER_SKINNY_SM120
+ #include "kernels/pi05/pi05_decoder_skinny_fp8_sm120.cuh"
+ #endif
++#include "gemm/w8a16_skinny_sm87.cuh"
+ #if defined(ENABLE_CUTLASS_SM120_NVFP4_W4A16) || defined(ENABLE_CUTLASS_SM100_NVFP4_W4A16)
+ #include "quantize/nvfp4_sf_reshape_sm120.cuh"
+ #endif
+@@ -7225,6 +7226,30 @@ PYBIND11_MODULE(flash_rt_kernels, m) {
+ #undef BIND_SPLITK
+ #endif  // ENABLE_CUTLASS_SM120_BLOCK_FP8
+ 
++    // W8A16 weight-only skinny GEMM (decoder branch; sm_80+ kernels, tuned on
++    // Jetson Orin sm_87). D[M,N] bf16 = A[M,K] bf16 @ (Wq[N,K] int8 * scale[N])^T.
++    // Weight-only: activations stay bf16 end-to-end (no A8W8 grip-channel bias).
++    // variant: 0=BN64/BK64 1=BN32/BK64 2=BN64/BK128 3=BN32/BK128 4=BN128/BK64
++    // split_k==1 writes D directly; >1 uses partials + deterministic reduce.
++    m.def("w8a16_skinny_gemm", [](uintptr_t A, uintptr_t W, uintptr_t scale,
++                                  uintptr_t D, uintptr_t partials,
++                                  int M, int N, int K, int variant, int split_k,
++                                  uintptr_t stream) {
++        using namespace flash_rt::w8a16_skinny;
++        using GemmFn = int (*)(const void*, const void*, const float*, void*,
++                               float*, int, int, int, int, cudaStream_t);
++        static const GemmFn fns[5] = {
++            w8a16_skinny_gemm, w8a16_skinny_gemm_bn32,
++            w8a16_skinny_gemm_bn64_bk128, w8a16_skinny_gemm_bn32_bk128,
++            w8a16_skinny_gemm_bn128,
++        };
++        if (variant < 0 || variant > 4) return -2;
++        return fns[variant](to_ptr(A), to_ptr(W), typed_ptr<float>(scale),
++                            to_ptr(D), typed_ptr<float>(partials),
++                            M, N, K, split_k, to_stream(stream));
++    }, py::arg("A"), py::arg("W"), py::arg("scale"), py::arg("D"),
++       py::arg("partials"), py::arg("M"), py::arg("N"), py::arg("K"),
++       py::arg("variant"), py::arg("split_k"), py::arg("stream") = 0);
+ #ifdef FLASHRT_PI05_DECODER_SKINNY_SM120
+     // Skinny FP8 decoder GEMM family (sm_120a): K-split partials + fused consumers,
+     // optional programmatic dependent launch. See kernels/pi05/pi05_decoder_skinny_fp8_sm120.cuh.
+diff --git a/csrc/gemm/w8a16_skinny_sm87.cu b/csrc/gemm/w8a16_skinny_sm87.cu
+new file mode 100644
+index 00000000..e02d158b
+--- /dev/null
++++ b/csrc/gemm/w8a16_skinny_sm87.cu
+@@ -0,0 +1,45 @@
++// W8A16 skinny GEMM host dispatch（sm_87 Orin；kernel 见同名 .cuh）。
++// 变体：BN × BK 组合，benchmarks/w8a16_skinny_sm87 逐一 sweep 后选型。
++#include "gemm/w8a16_skinny_sm87.cuh"
++
++namespace flash_rt {
++namespace w8a16_skinny {
++
++int w8a16_skinny_gemm(const void* A_bf16, const void* W_int8, const float* scale,
++                      void* D_bf16, float* partials, int M, int N, int K,
++                      int split_k, cudaStream_t stream)
++{
++    return w8a16_skinny_gemm_t<64, 64>(A_bf16, W_int8, scale, D_bf16, partials,
++                                       M, N, K, split_k, stream);
++}
++int w8a16_skinny_gemm_bn32(const void* A_bf16, const void* W_int8, const float* scale,
++                           void* D_bf16, float* partials, int M, int N, int K,
++                           int split_k, cudaStream_t stream)
++{
++    return w8a16_skinny_gemm_t<32, 64>(A_bf16, W_int8, scale, D_bf16, partials,
++                                       M, N, K, split_k, stream);
++}
++int w8a16_skinny_gemm_bn64_bk128(const void* A_bf16, const void* W_int8, const float* scale,
++                                 void* D_bf16, float* partials, int M, int N, int K,
++                                 int split_k, cudaStream_t stream)
++{
++    return w8a16_skinny_gemm_t<64, 128>(A_bf16, W_int8, scale, D_bf16, partials,
++                                        M, N, K, split_k, stream);
++}
++int w8a16_skinny_gemm_bn32_bk128(const void* A_bf16, const void* W_int8, const float* scale,
++                                 void* D_bf16, float* partials, int M, int N, int K,
++                                 int split_k, cudaStream_t stream)
++{
++    return w8a16_skinny_gemm_t<32, 128>(A_bf16, W_int8, scale, D_bf16, partials,
++                                        M, N, K, split_k, stream);
++}
++int w8a16_skinny_gemm_bn128(const void* A_bf16, const void* W_int8, const float* scale,
++                            void* D_bf16, float* partials, int M, int N, int K,
++                            int split_k, cudaStream_t stream)
++{
++    return w8a16_skinny_gemm_t<128, 64>(A_bf16, W_int8, scale, D_bf16, partials,
++                                        M, N, K, split_k, stream);
++}
++
++}  // namespace w8a16_skinny
++}  // namespace flash_rt
+diff --git a/csrc/gemm/w8a16_skinny_sm87.cuh b/csrc/gemm/w8a16_skinny_sm87.cuh
+new file mode 100644
+index 00000000..9d03fb50
+--- /dev/null
++++ b/csrc/gemm/w8a16_skinny_sm87.cuh
+@@ -0,0 +1,294 @@
++// W8A16 skinny GEMM for Jetson Orin (sm_87) — decoder branch.
++//
++//   D[M,N] bf16 = (A[M,K] bf16) @ (Wq[N,K] int8 * scale[N] fp32)^T
++//
++// Weight-only int8 (activations stay bf16 end-to-end — the whole point vs the
++// A8W8 CUTLASS path, whose activation quantization bias-decimates the grip
++// channels; see ops probes 10-06/10-07). Weights are the _quantize_decoder_int8
++// artifact: [N, K] row-major (k contiguous) + per-output-channel fp32 scale.
++//
++// Design notes (mirrors pi05_decoder_skinny_fp8_sm120 rationale, sm_87 port):
++//   - Skinny M (chunk=10..50) on N=1024..4096: N/BN blocks alone underfill the
++//     16 SMs, so K is split across blockIdx.z into fp32 partials + a separate
++//     fixed-order reduce (NOT fp32 atomics — the pipeline determinism check
++//     requires bit-exact repeat runs). split_k==1 writes D directly (DIRECT_OUT),
++//     skipping the reduce launch entirely.
++//   - int8 -> bf16 dequant is EXACT for |v|<=127 (bf16 mantissa covers
++//     integers to 256) and happens IN REGISTERS while building the mma B
++//     fragment (v2: no Wbs smem round-trip, one less syncthreads — dequant was
++//     on the critical path in v1, ~half the per-iter time at gate/up).
++//   - W[N,K] rows are contiguous in k, which is exactly the mma `.col` B-operand
++//     layout — 16B vector loads coalesce along k, no transposes anywhere.
++
++#pragma once
++
++// 结构说明：本头文件可被纯 C++ TU（bindings.cpp，g++ 编译）安全 include——
++// 设备代码全部在 __CUDACC__ 门内；5 个 host 入口在 w8a16_skinny_sm87.cu
++// 中定义（那里才实例化 kernel 模板）。bench 同源引用本文件。
++
++#include <cuda_runtime.h>
++#include <cstdint>
++#include <cuda_bf16.h>
++#include <cstring>
++
++namespace flash_rt {
++namespace w8a16_skinny {
++
++// ── host 入口（variant 见 w8a16_skinny_sm87.cu 的 dispatch）──
++int w8a16_skinny_gemm(const void* A_bf16, const void* W_int8, const float* scale,
++                      void* D_bf16, float* partials, int M, int N, int K,
++                      int split_k, cudaStream_t stream);
++int w8a16_skinny_gemm_bn32(const void* A_bf16, const void* W_int8, const float* scale,
++                           void* D_bf16, float* partials, int M, int N, int K,
++                           int split_k, cudaStream_t stream);
++int w8a16_skinny_gemm_bn64_bk128(const void* A_bf16, const void* W_int8, const float* scale,
++                                 void* D_bf16, float* partials, int M, int N, int K,
++                                 int split_k, cudaStream_t stream);
++int w8a16_skinny_gemm_bn32_bk128(const void* A_bf16, const void* W_int8, const float* scale,
++                                 void* D_bf16, float* partials, int M, int N, int K,
++                                 int split_k, cudaStream_t stream);
++int w8a16_skinny_gemm_bn128(const void* A_bf16, const void* W_int8, const float* scale,
++                            void* D_bf16, float* partials, int M, int N, int K,
++                            int split_k, cudaStream_t stream);
++
++#ifdef __CUDACC__
++
++// m16n8k16 bf16 MMA: D(f32,4) += A(bf16,4 regs) * B(bf16,2 regs)
++__device__ __forceinline__ void mma_m16n8k16(float d[4], const uint4& a,
++                                             const uint2& b) {
++    asm volatile(
++        "mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 "
++        "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};\n"
++        : "+f"(d[0]), "+f"(d[1]), "+f"(d[2]), "+f"(d[3])
++        : "r"(a.x), "r"(a.y), "r"(a.z), "r"(a.w), "r"(b.x), "r"(b.y));
++}
++
++// 两个相邻 int8（低字节在前）→ 打包 bfloat162（寄存器内精确反量化，|v|<=127 无损）。
++__device__ __forceinline__ unsigned deq2(unsigned u) {
++    __nv_bfloat162 h;
++    h.x = __float2bfloat16((float)(int)(signed char)(u & 0xff));
++    h.y = __float2bfloat16((float)(int)(signed char)((u >> 8) & 0xff));
++    unsigned r;
++    memcpy(&r, &h, 4);
++    return r;
++}
++
++// ldmatrix.x4：一条指令取整个 16x16 bf16 A-tile，寄存器排布即 mma m16n8k16 的
++// A fragment（a0=(ml,kl) a1=(ml+8,kl) a2=(ml,kl+8) a3=(ml+8,kl+8)）。
++// 行地址：lane 0-15 → 行 0-15 的 kf 列；lane 16-31 → 行 0-15 的 kf+8 列。
++// 行距 (BK+8)*2B=36 词 → 8 行 × 16B 恰好铺满 32 bank，无冲突。
++__device__ __forceinline__ uint4 ldmatrix_a16(const __nv_bfloat16* As,
++                                              int buf, int sub, int kf,
++                                              int lane, int BM, int BK) {
++    const int row  = lane & 15;
++    const int koff = (lane >> 4) * 8;
++    const unsigned addr = (unsigned)__cvta_generic_to_shared(
++        As + ((buf * BM + sub * 16 + row) * (BK + 8) + kf + koff));
++    uint4 av;
++    asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];\n"
++        : "=r"(av.x), "=r"(av.y), "=r"(av.z), "=r"(av.w) : "r"(addr));
++    return av;
++}
++
++// ── main kernel ────────────────────────────────────────────────────────────
++// grid = (N/BN, 1, SPLIT_K), block = 128 threads (4 warps).
++// grid.y 必须为 1：每个额外 m-tile 都会整块重读 W tile，权重流量是这些 shape
++// 的全部成本（v0 在 M=50/grid.y=4 实测 4× 放大）。M 由 SUBM 个 m16 子片覆盖。
++// Each warp owns NTP = BN/32 output column groups; B fragments are dequantized
++// once per k16 step and reused across all SUBM m sub-tiles.
++// 2-stage cp.async pipeline: W(int8) + A(bf16) tiles of k-iter t+1 stream in
++// while iter t MMAs.
++template <int SUBM, int BN, int BK, bool DIRECT_OUT>
++__global__ void __launch_bounds__(128)
++w8a16_skinny_kernel(const __nv_bfloat16* __restrict__ A,   // [M, K]
++                    const int8_t* __restrict__ Wq,         // [N, K]
++                    float* __restrict__ partials,          // [SPLIT_K, M, N]
++                    __nv_bfloat16* __restrict__ D,         // [M, N] (DIRECT_OUT)
++                    const float* __restrict__ scale,       // [N] (DIRECT_OUT)
++                    int M, int N, int K)
++{
++    constexpr int BM = 16 * SUBM;
++    constexpr int NTP = BN / 32;       // n8 tiles per warp (BN=64→2, BN=32→1)
++    static_assert(BN % 32 == 0, "warp owns 32 columns");
++
++    const int split_k = gridDim.z;
++    const int n0    = blockIdx.x * BN;
++    const int m0    = blockIdx.y * BM;
++    const int split = blockIdx.z;
++
++    const int tid  = threadIdx.x;
++    const int lane = tid & 31;
++    const int warp = tid >> 5;
++    const int ml = lane >> 2;          // m inside fragment (0..7)
++    const int kl = (lane & 3) * 2;     // k inside fragment (0,2,4,6)
++
++    // 动态 smem（BK128 静态超 48KB 上限）：As[2][BM][BK+8] bf16 | Wqs[2][BN][BK] i8
++    extern __shared__ __align__(16) char smem_raw[];
++    __nv_bfloat16* As = reinterpret_cast<__nv_bfloat16*>(smem_raw);
++    int8_t* Wqs = reinterpret_cast<int8_t*>(smem_raw + 2 * BM * (BK + 8) * 2);
++
++    float acc[SUBM][NTP][4] = {};
++
++    const int k_lo = split * BK;
++    const int k_step = split_k * BK;
++    const int n_iters = (K - k_lo + k_step - 1) / k_step;
++
++    // cp.async 16B: per-thread source elem ids inside the tile
++    // W: BN*BK/16 vectors; A: BM*BK/8 vectors of 8 bf16
++    auto issue = [&](int it, int buf) {
++        const int k0 = k_lo + it * k_step;
++        #pragma unroll
++        for (int i = tid; i < BN * BK / 16; i += 128) {
++            int n = i / (BK / 16), k = (i % (BK / 16)) * 16;
++            const void* g = &Wq[(size_t)(n0 + n) * K + k0 + k];
++            void* s = &Wqs[(buf * BN + n) * BK + k];
++            asm volatile("cp.async.cg.shared.global [%0], [%1], 16;\n" ::
++                "r"((unsigned)__cvta_generic_to_shared(s)), "l"(g));
++        }
++        #pragma unroll
++        for (int i = tid; i < BM * BK / 8; i += 128) {
++            int m = i / (BK / 8), k = (i % (BK / 8)) * 8;
++            void* s = &As[((buf) * BM + m) * (BK + 8) + k];
++            if (m0 + m < M) {
++                const void* g = &A[(size_t)(m0 + m) * K + k0 + k];
++                asm volatile("cp.async.cg.shared.global [%0], [%1], 16;\n" ::
++                    "r"((unsigned)__cvta_generic_to_shared(s)), "l"(g));
++            } else {
++                asm volatile("cp.async.cg.shared.global [%0], [%1], 16, 0;\n" ::
++                    "r"((unsigned)__cvta_generic_to_shared(s)), "l"(s));
++            }
++        }
++        asm volatile("cp.async.commit_group;\n");
++    };
++
++    if (n_iters > 0) issue(0, 0);
++
++    for (int it = 0; it < n_iters; ++it) {
++        const int buf = it & 1;
++        if (it + 1 < n_iters) issue(it + 1, buf ^ 1);
++        else asm volatile("cp.async.commit_group;\n");   // 空组对齐计数：wait_group 1 恒等待当前 buf
++        // ≤1 group pending → current buf complete
++        asm volatile("cp.async.wait_group %0;\n" :: "n"(1));
++        __syncthreads();
++
++        #pragma unroll
++        for (int kf = 0; kf < BK; kf += 16) {
++            uint2 bv[NTP];       // B fragment：反量化后跨全部 m 子片复用
++            #pragma unroll
++            for (int nt = 0; nt < NTP; ++nt) {
++                int n = warp * (NTP * 8) + nt * 8 + (lane >> 2);
++                const int8_t* Wr = &Wqs[(buf * BN + n) * BK + kf];
++                bv[nt].x = deq2(*reinterpret_cast<const unsigned short*>(Wr + kl));
++                bv[nt].y = deq2(*reinterpret_cast<const unsigned short*>(Wr + kl + 8));
++            }
++            uint4 av[SUBM];      // A fragment：ldmatrix 一发一条
++            #pragma unroll
++            for (int sub = 0; sub < SUBM; ++sub)
++                av[sub] = ldmatrix_a16(As, buf, sub, kf, lane, BM, BK);
++            #pragma unroll
++            for (int sub = 0; sub < SUBM; ++sub)
++                #pragma unroll
++                for (int nt = 0; nt < NTP; ++nt)
++                    mma_m16n8k16(acc[sub][nt], av[sub], bv[nt]);
++        }
++        __syncthreads();   // Wqs[buf]/As[buf] 自由后下一轮 cp.async 才覆写（2 距离复用）
++    }
++
++    // ── epilogue ──
++    float* P = partials + (size_t)split * M * N;
++    #pragma unroll
++    for (int sub = 0; sub < SUBM; ++sub) {
++        #pragma unroll
++        for (int nt = 0; nt < NTP; ++nt) {
++            int n = n0 + warp * (NTP * 8) + nt * 8 + (lane & 3) * 2;
++            int m = m0 + sub * 16 + ml;
++            if (DIRECT_OUT) {
++                const float s0 = scale[n], s1 = scale[n + 1];
++                if (m < M) {
++                    D[(size_t)m * N + n]     = __float2bfloat16(acc[sub][nt][0] * s0);
++                    D[(size_t)m * N + n + 1] = __float2bfloat16(acc[sub][nt][1] * s1);
++                }
++                m += 8;
++                if (m < M) {
++                    D[(size_t)m * N + n]     = __float2bfloat16(acc[sub][nt][2] * s0);
++                    D[(size_t)m * N + n + 1] = __float2bfloat16(acc[sub][nt][3] * s1);
++                }
++            } else {
++                if (m < M) {
++                    P[(size_t)m * N + n]     = acc[sub][nt][0];
++                    P[(size_t)m * N + n + 1] = acc[sub][nt][1];
++                }
++                m += 8;
++                if (m < M) {
++                    P[(size_t)m * N + n]     = acc[sub][nt][2];
++                    P[(size_t)m * N + n + 1] = acc[sub][nt][3];
++                }
++            }
++        }
++    }
++}
++
++// ── deterministic reduce: fixed split order, scale fold, bf16 out ─────────
++// static：头文件可进多个 TU（bench 的 main.cu + 库的 .cu），内链避免重复符号
++static __global__ void w8a16_reduce_kernel(const float* __restrict__ partials,
++                                    const float* __restrict__ scale,
++                                    __nv_bfloat16* __restrict__ D,   // [M, N]
++                                    int M, int N, int split_k)
++{
++    int idx = blockIdx.x * blockDim.x + threadIdx.x;
++    if (idx >= M * N) return;
++    float acc = 0.f;
++    for (int s = 0; s < split_k; ++s)
++        acc += partials[(size_t)s * M * N + idx];
++    int n = idx % N;
++    D[idx] = __float2bfloat16(acc * scale[n]);
++}
++
++// ── launcher ───────────────────────────────────────────────────────────────
++// partials must hold >= split_k * M * N fp32 (unused when split_k == 1).
++// Returns 0 on success. SUBM picked so grid.y == 1 (single weight pass).
++template <int BN, int BK>
++int w8a16_skinny_gemm_t(const void* A_bf16, const void* W_int8, const float* scale,
++                        void* D_bf16, float* partials, int M, int N, int K,
++                        int split_k, cudaStream_t stream)
++{
++    if ((N % BN) != 0 || (K % BK) != 0) return -1;
++    if (split_k <= 0 || split_k > K / BK) return -1;
++    if (M > 64) return -1;   // 靶型：decoder chunk 10/50
++
++    constexpr int SMEM_M4 = 2 * (16 * 4) * (BK + 8) * 2 + 2 * BN * BK;   // SUBM=4
++    constexpr int SMEM_M1 = 2 * 16 * (BK + 8) * 2 + 2 * BN * BK;         // SUBM=1
++    dim3 grid(N / BN, 1, split_k);
++    __nv_bfloat16* D = reinterpret_cast<__nv_bfloat16*>(D_bf16);
++    const __nv_bfloat16* Av = reinterpret_cast<const __nv_bfloat16*>(A_bf16);
++    const int8_t* Wv = reinterpret_cast<const int8_t*>(W_int8);
++    bool direct = (split_k == 1);
++    #define LAUNCH(SUBM, SMEM, DO)                                            \
++        do {                                                                  \
++            static bool attr_done = false;                                    \
++            if (!attr_done && SMEM > 48 * 1024) {                             \
++                cudaFuncSetAttribute(                                         \
++                    (const void*)&w8a16_skinny_kernel<SUBM, BN, BK, DO>,      \
++                    cudaFuncAttributeMaxDynamicSharedMemorySize, SMEM);       \
++                attr_done = true;                                             \
++            }                                                                 \
++            w8a16_skinny_kernel<SUBM, BN, BK, DO>                             \
++                <<<grid, 128, SMEM, stream>>>(Av, Wv, partials, D, scale,     \
++                                              M, N, K);                       \
++        } while (0)
++    if (M <= 16) { if (direct) LAUNCH(1, SMEM_M1, true); else LAUNCH(1, SMEM_M1, false); }
++    else         { if (direct) LAUNCH(4, SMEM_M4, true); else LAUNCH(4, SMEM_M4, false); }
++    #undef LAUNCH
++    int err = (cudaGetLastError() == cudaSuccess) ? 0 : 1;
++    if (err) return err;
++    if (direct) return 0;
++    int threads = 256;
++    w8a16_reduce_kernel<<<(M * N + threads - 1) / threads, threads, 0, stream>>>(
++        partials, scale, D, M, N, split_k);
++    return (cudaGetLastError() == cudaSuccess) ? 0 : 1;
++}
++
++#endif  // __CUDACC__
++
++}  // namespace w8a16_skinny
++}  // namespace flash_rt
+diff --git a/flash_rt/frontends/torch/pi05_rtx.py b/flash_rt/frontends/torch/pi05_rtx.py
+index b5970c31..d3b5e3d9 100644
+--- a/flash_rt/frontends/torch/pi05_rtx.py
++++ b/flash_rt/frontends/torch/pi05_rtx.py
+@@ -796,6 +796,11 @@ class Pi05TorchFrontendRtx:
+         # decoder INT8 so all large GEMMs benefit from tensor-core acceleration.
+         self._use_int8_encoder = self._force_int8_decoder or _enc_only
+         self._int8_encoder_only = _enc_only
++        # FVK_PI05_RTX_W8A16_DECODER=1: weight-only INT8 解码器 GEMM
++        # （激活全程 bf16 — 无 A8W8 激活量化偏置；sm_87 skinny kernel，
++        # 权重复用 _quantize_decoder_int8 工件）。与 encoder/vision 精度正交。
++        self._w8a16_decoder = os.environ.get(
++            "FVK_PI05_RTX_W8A16_DECODER", "0") == "1"
+         # Vision GEMMs (VIS_D=1152, seq=512): static per-tensor INT8 was
+         # measured to break encoder cosine (0.991 → 0.282) — disabled
+         # permanently. Dynamic per-row INT8 is opt-in via
+@@ -854,7 +859,7 @@ class Pi05TorchFrontendRtx:
+             if not (self.use_fp8 and not self._force_bf16 and not self._force_int8_decoder):
+                 raise ValueError("prefix_precision='nvfp4' needs the FP8 frontend (use_fp8=True)")
+             self._quantize_prefix_nvfp4()
+-        if self._force_int8_decoder:
++        if self._force_int8_decoder or self._w8a16_decoder:
+             self._quantize_decoder_int8()
+         if self._use_int8_encoder:
+             self._quantize_encoder_int8()
+@@ -923,6 +928,25 @@ class Pi05TorchFrontendRtx:
+         kwargs = self._pipeline_precision_kwargs_base()
+         kwargs["decoder_kernel"] = self._decoder_kernel
+         kwargs["prefix_precision"] = self._prefix_precision
++        if self._w8a16_decoder:
++            if self._force_int8_decoder:
++                raise ValueError(
++                    "FVK_PI05_RTX_W8A16_DECODER conflicts with "
++                    "FVK_PI05_RTX_FORCE_INT8 (A8W8 decoder)")
++            if self.chunk_size > 64:
++                raise ValueError(
++                    f"W8A16 decoder GEMM supports chunk_size<=64, "
++                    f"got {self.chunk_size}")
++            if kwargs.get("use_fp8_decoder"):
++                logger.warning(
++                    "FVK_PI05_RTX_W8A16_DECODER=1: decoder FP8 disabled, "
++                    "running the W8A16 weight-only kernel instead "
++                    "(encoder/vision precision unchanged)")
++                kwargs["use_fp8_decoder"] = False
++            kwargs["use_w8a16_decoder"] = True
++            logger.warning(
++                "FVK_PI05_RTX_W8A16_DECODER=1: weight-only INT8 decoder "
++                "GEMMs (bf16 activations, sm_87 skinny kernel)")
+         return kwargs
+ 
+     def _pipeline_precision_kwargs_base(self) -> dict:
+diff --git a/flash_rt/models/pi05/pipeline_rtx.py b/flash_rt/models/pi05/pipeline_rtx.py
+index 4fbe6e97..01634cfc 100644
+--- a/flash_rt/models/pi05/pipeline_rtx.py
++++ b/flash_rt/models/pi05/pipeline_rtx.py
+@@ -180,6 +180,7 @@ class Pi05Pipeline:
+                  chunk_size: int = NUM_STEPS_DEFAULT,
+                  use_fp8: bool = True, use_fp8_decoder: bool = True,
+                  use_int8_decoder: bool = False,
++                 use_w8a16_decoder: bool = False,
+                  use_int8_encoder: bool = False,
+                  use_int8_vision: bool = False,
+                  use_int8_vision_static: bool = False,
+@@ -233,6 +234,7 @@ class Pi05Pipeline:
+         self.use_fp8 = bool(use_fp8)
+         self.use_fp8_decoder = bool(use_fp8_decoder)
+         self.use_int8_decoder = bool(use_int8_decoder)
++        self.use_w8a16_decoder = bool(use_w8a16_decoder)
+         self.use_int8_encoder = bool(use_int8_encoder)
+         self.use_int8_vision = bool(use_int8_vision)
+         # Static INT8 vision: uses pre-calibrated per-layer per-tensor scales.
+@@ -411,6 +413,11 @@ class Pi05Pipeline:
+         B["decoder_gate_merged"] = CudaBuffer.device_empty(ds * 2 * DEC_H, BF16)
+         # Gate buffer for SiLU-gated EVT fusion (decoder): (ds, DEC_H) BF16
+         B["decoder_gate_buf"] = CudaBuffer.device_empty(ds * DEC_H, BF16)
++        if self.use_w8a16_decoder:
++            # W8A16 split-k fp32 暂存：最大档 split_k=16 × M=64 × N=4096，
++            # 5 形状共用（同流串行覆盖安全）。必须在图捕获前分配。
++            B["w8a16_partials"] = CudaBuffer.device_empty(
++                16 * 64 * 4096, FP32)
+         B["diffusion_noise"] = CudaBuffer.device_empty(ds * ACTION_DIM, BF16)
+         # Optional RTC-prefix conditioning slot. It is only read by the
+         # explicit rtc-prefix action graph, not by the default full graph.
+@@ -1166,6 +1173,45 @@ class Pi05Pipeline:
+             act_fp8_ptr, w_fp8_ptr, out_bf16_ptr,
+             M, N, K, act_scale_ptr, w_scale_ptr, stream)
+ 
++    # W8A16 weight-only 解码器 GEMM（sm_87 skinny kernel，
++    # csrc/gemm/w8a16_skinny_sm87.cuh；选型表来自
++    # benchmarks/w8a16_skinny_sm87 的 10-07 实测，decoder 5 形状）。
++    # variant: 0=BN64/BK64 1=BN32/BK64 2=BN64/BK128 3=BN32/BK128 4=BN128/BK64
++    @staticmethod
++    def _w8a16_cfg(M: int, N: int, K: int) -> tuple[int, int]:
++        if M <= 16:
++            if N <= 1024 and K >= 2048:      # o / down：N 小，split-k 补满 SM
++                return (4, 8) if K <= 2048 else (0, 4)
++            return (0, 1)                    # qkv / gate / up
++        if N <= 1024 and K >= 2048:
++            return (0, 4) if K <= 2048 else (4, 4)
++        if N >= 4096:
++            return (4, 1)                    # gate / up @ M>16
++        return (0, 1)                        # qkv
++
++    def _w8a16_gemm(self, act_ptr: int, weight_name: str, out_ptr: int,
++                    M: int, N: int, K: int, stream: int) -> None:
++        """Weight-only INT8 GEMM：bf16 激活 @ int8 权重（W8A16）。
++
++        激活全程 bf16（与 A8W8 的本质区别：无激活量化偏置）。权重/尺度
++        复用 INT8 store 的 [N,K] row-major + 每输出通道 fp32 scale 工件。
++        """
++        if M > 64:
++            raise RuntimeError(
++                f"W8A16 decoder GEMM supports M<=64, got {M} "
++                f"(chunk_size={self.chunk_size})")
++        w_i8_ptr, w_scale_ptr = self._weight_int8(weight_name)
++        variant, split_k = self._w8a16_cfg(M, N, K)
++        status = self.fvk.w8a16_skinny_gemm(
++            act_ptr, w_i8_ptr, w_scale_ptr, out_ptr,
++            self.bufs["w8a16_partials"].ptr.value,
++            M, N, K, variant, split_k, stream=stream)
++        if status != 0:
++            raise RuntimeError(
++                f"W8A16 skinny GEMM failed for {weight_name}: "
++                f"status={status} shape=({M},{N},{K}) variant={variant} "
++                f"split_k={split_k}")
++
+     def _int8_gemm_fused(self, act_i8_ptr: int, weight_name: str,
+                          out_bf16_ptr: int, M: int, N: int, K: int,
+                          act_scale_ptr: int, stream: int) -> None:
+@@ -1981,6 +2027,11 @@ class Pi05Pipeline:
+                     B["decoder_QKV"].ptr.value,
+                     ds, (DEC_NH + 2 * DEC_NKV) * DEC_HD, DEC_D,
+                     self._int8_scale_buf(qkv_name, ds).ptr.value, stream)
++            elif self.use_w8a16_decoder:
++                self._w8a16_gemm(
++                    B["x_normed_buf"].ptr.value, qkv_name,
++                    B["decoder_QKV"].ptr.value,
++                    ds, (DEC_NH + 2 * DEC_NKV) * DEC_HD, DEC_D, stream)
+             else:
+                 gemm.bf16_nn(
+                     B["x_normed_buf"].ptr.value, W["decoder_attn_qkv_w"][i],
+@@ -2031,6 +2082,11 @@ class Pi05Pipeline:
+                 f"decoder_attn_o_w_{i}",
+                 B["x_normed_buf"].ptr.value,
+                 ds, DEC_D, DEC_NH * DEC_HD, stream)
++        elif self.use_w8a16_decoder:
++            self._w8a16_gemm(
++                dec_o_ptr, f"decoder_attn_o_w_{i}",
++                B["x_normed_buf"].ptr.value,
++                ds, DEC_D, DEC_NH * DEC_HD, stream)
+         else:
+             gemm.bf16_nn(
+                 dec_o_ptr, W["decoder_attn_o_w"][i],
+@@ -2096,6 +2152,15 @@ class Pi05Pipeline:
+                     B["decoder_gate_buf"].ptr.value,
+                     B["decoder_hidden"].ptr.value,
+                     ds, DEC_H, DEC_D, act_scale_gu_ptr, stream)
++            elif self.use_w8a16_decoder:
++                self._w8a16_gemm(
++                    B["x_normed_buf"].ptr.value, gate_name,
++                    B["decoder_gate_merged"].ptr.value,
++                    ds, DEC_H, DEC_D, stream)
++                self._w8a16_gemm(
++                    B["x_normed_buf"].ptr.value, up_name,
++                    B["decoder_hidden"].ptr.value,
++                    ds, DEC_H, DEC_D, stream)
+             else:
+                 gemm.bf16_nn(
+                     B["x_normed_buf"].ptr.value, W["decoder_ffn_gate_w"][i],
+@@ -2136,6 +2201,16 @@ class Pi05Pipeline:
+                 down_name,
+                 B["x_normed_buf"].ptr.value,
+                 ds, DEC_D, DEC_H, stream)
++        elif self.use_w8a16_decoder:
++            fvk.gate_geglu(
++                B["decoder_gate_merged"].ptr.value,
++                B["decoder_hidden"].ptr.value,
++                B["decoder_hidden"].ptr.value,
++                ds * DEC_H, stream=stream)
++            self._w8a16_gemm(
++                B["decoder_hidden"].ptr.value, down_name,
++                B["x_normed_buf"].ptr.value,
++                ds, DEC_D, DEC_H, stream)
+         else:
+             fvk.gate_geglu(
+                 B["decoder_gate_merged"].ptr.value,
+-- 
+2.25.1
+

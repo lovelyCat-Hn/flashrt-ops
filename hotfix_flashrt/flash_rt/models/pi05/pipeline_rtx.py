@@ -180,6 +180,7 @@ class Pi05Pipeline:
                  chunk_size: int = NUM_STEPS_DEFAULT,
                  use_fp8: bool = True, use_fp8_decoder: bool = True,
                  use_int8_decoder: bool = False,
+                 use_w8a16_decoder: bool = False,
                  use_int8_encoder: bool = False,
                  use_int8_vision: bool = False,
                  use_int8_vision_static: bool = False,
@@ -233,6 +234,7 @@ class Pi05Pipeline:
         self.use_fp8 = bool(use_fp8)
         self.use_fp8_decoder = bool(use_fp8_decoder)
         self.use_int8_decoder = bool(use_int8_decoder)
+        self.use_w8a16_decoder = bool(use_w8a16_decoder)
         self.use_int8_encoder = bool(use_int8_encoder)
         self.use_int8_vision = bool(use_int8_vision)
         # Static INT8 vision: uses pre-calibrated per-layer per-tensor scales.
@@ -411,6 +413,11 @@ class Pi05Pipeline:
         B["decoder_gate_merged"] = CudaBuffer.device_empty(ds * 2 * DEC_H, BF16)
         # Gate buffer for SiLU-gated EVT fusion (decoder): (ds, DEC_H) BF16
         B["decoder_gate_buf"] = CudaBuffer.device_empty(ds * DEC_H, BF16)
+        if self.use_w8a16_decoder:
+            # W8A16 split-k fp32 暂存：最大档 split_k=16 × M=64 × N=4096，
+            # 5 形状共用（同流串行覆盖安全）。必须在图捕获前分配。
+            B["w8a16_partials"] = CudaBuffer.device_empty(
+                16 * 64 * 4096, FP32)
         B["diffusion_noise"] = CudaBuffer.device_empty(ds * ACTION_DIM, BF16)
         # Optional RTC-prefix conditioning slot. It is only read by the
         # explicit rtc-prefix action graph, not by the default full graph.
@@ -1165,6 +1172,45 @@ class Pi05Pipeline:
         self._fp8_matmul(
             act_fp8_ptr, w_fp8_ptr, out_bf16_ptr,
             M, N, K, act_scale_ptr, w_scale_ptr, stream)
+
+    # W8A16 weight-only 解码器 GEMM（sm_87 skinny kernel，
+    # csrc/gemm/w8a16_skinny_sm87.cuh；选型表来自
+    # benchmarks/w8a16_skinny_sm87 的 10-07 实测，decoder 5 形状）。
+    # variant: 0=BN64/BK64 1=BN32/BK64 2=BN64/BK128 3=BN32/BK128 4=BN128/BK64
+    @staticmethod
+    def _w8a16_cfg(M: int, N: int, K: int) -> tuple[int, int]:
+        if M <= 16:
+            if N <= 1024 and K >= 2048:      # o / down：N 小，split-k 补满 SM
+                return (4, 8) if K <= 2048 else (0, 4)
+            return (0, 1)                    # qkv / gate / up
+        if N <= 1024 and K >= 2048:
+            return (0, 4) if K <= 2048 else (4, 4)
+        if N >= 4096:
+            return (4, 1)                    # gate / up @ M>16
+        return (0, 1)                        # qkv
+
+    def _w8a16_gemm(self, act_ptr: int, weight_name: str, out_ptr: int,
+                    M: int, N: int, K: int, stream: int) -> None:
+        """Weight-only INT8 GEMM：bf16 激活 @ int8 权重（W8A16）。
+
+        激活全程 bf16（与 A8W8 的本质区别：无激活量化偏置）。权重/尺度
+        复用 INT8 store 的 [N,K] row-major + 每输出通道 fp32 scale 工件。
+        """
+        if M > 64:
+            raise RuntimeError(
+                f"W8A16 decoder GEMM supports M<=64, got {M} "
+                f"(chunk_size={self.chunk_size})")
+        w_i8_ptr, w_scale_ptr = self._weight_int8(weight_name)
+        variant, split_k = self._w8a16_cfg(M, N, K)
+        status = self.fvk.w8a16_skinny_gemm(
+            act_ptr, w_i8_ptr, w_scale_ptr, out_ptr,
+            self.bufs["w8a16_partials"].ptr.value,
+            M, N, K, variant, split_k, stream=stream)
+        if status != 0:
+            raise RuntimeError(
+                f"W8A16 skinny GEMM failed for {weight_name}: "
+                f"status={status} shape=({M},{N},{K}) variant={variant} "
+                f"split_k={split_k}")
 
     def _int8_gemm_fused(self, act_i8_ptr: int, weight_name: str,
                          out_bf16_ptr: int, M: int, N: int, K: int,
@@ -1981,6 +2027,11 @@ class Pi05Pipeline:
                     B["decoder_QKV"].ptr.value,
                     ds, (DEC_NH + 2 * DEC_NKV) * DEC_HD, DEC_D,
                     self._int8_scale_buf(qkv_name, ds).ptr.value, stream)
+            elif self.use_w8a16_decoder:
+                self._w8a16_gemm(
+                    B["x_normed_buf"].ptr.value, qkv_name,
+                    B["decoder_QKV"].ptr.value,
+                    ds, (DEC_NH + 2 * DEC_NKV) * DEC_HD, DEC_D, stream)
             else:
                 gemm.bf16_nn(
                     B["x_normed_buf"].ptr.value, W["decoder_attn_qkv_w"][i],
@@ -2029,6 +2080,11 @@ class Pi05Pipeline:
             self._int8_gemm(
                 dec_o_ptr, ds * DEC_NH * DEC_HD,
                 f"decoder_attn_o_w_{i}",
+                B["x_normed_buf"].ptr.value,
+                ds, DEC_D, DEC_NH * DEC_HD, stream)
+        elif self.use_w8a16_decoder:
+            self._w8a16_gemm(
+                dec_o_ptr, f"decoder_attn_o_w_{i}",
                 B["x_normed_buf"].ptr.value,
                 ds, DEC_D, DEC_NH * DEC_HD, stream)
         else:
@@ -2096,6 +2152,15 @@ class Pi05Pipeline:
                     B["decoder_gate_buf"].ptr.value,
                     B["decoder_hidden"].ptr.value,
                     ds, DEC_H, DEC_D, act_scale_gu_ptr, stream)
+            elif self.use_w8a16_decoder:
+                self._w8a16_gemm(
+                    B["x_normed_buf"].ptr.value, gate_name,
+                    B["decoder_gate_merged"].ptr.value,
+                    ds, DEC_H, DEC_D, stream)
+                self._w8a16_gemm(
+                    B["x_normed_buf"].ptr.value, up_name,
+                    B["decoder_hidden"].ptr.value,
+                    ds, DEC_H, DEC_D, stream)
             else:
                 gemm.bf16_nn(
                     B["x_normed_buf"].ptr.value, W["decoder_ffn_gate_w"][i],
@@ -2134,6 +2199,16 @@ class Pi05Pipeline:
             self._int8_gemm(
                 B["decoder_hidden"].ptr.value, ds * DEC_H,
                 down_name,
+                B["x_normed_buf"].ptr.value,
+                ds, DEC_D, DEC_H, stream)
+        elif self.use_w8a16_decoder:
+            fvk.gate_geglu(
+                B["decoder_gate_merged"].ptr.value,
+                B["decoder_hidden"].ptr.value,
+                B["decoder_hidden"].ptr.value,
+                ds * DEC_H, stream=stream)
+            self._w8a16_gemm(
+                B["decoder_hidden"].ptr.value, down_name,
                 B["x_normed_buf"].ptr.value,
                 ds, DEC_D, DEC_H, stream)
         else:
