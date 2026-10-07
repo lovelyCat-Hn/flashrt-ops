@@ -14,7 +14,7 @@
 
 **机器识别**：三台机 hostname 全叫 galbot-echo，**勿用 hostname 区分**；沟通中称"本机（第三台）"。
 
-- [本机（第三台）部署进度](galbot-machine3-deployment-state.md) — **本机状态权威文件**。L4T R35.6.4，~/holy 即仓库根；**10-05 切回 pick 任务**：ckpt=pi05_g1_pick_deploy（040000 装配+对齐校验全绿，句 "Left arm pick up A..."，起始位姿 0% 闭爪；place 线 pi05_g1_place_deploy 三键在 config 注释存档可切回，33% 起始夹爪是 places 语义非毛刺）；闭环 `--horizon` 默认 50；launcher 中途 restart 只起半套栈，必须整机重启；**10-04 RTC 实验完结**：B 脚本 hold 兜底 14 跑全绿，**工作点 v2=25/0.38/1.65 已定案入 config（R 落盒 14.0-14.5s 纪录）**；⚠ 全天空爪，持物物理 place 复验挂着。▸ 问"装到哪了/下一步"、改 ckpt/数据集/工作点配置前。
+- [本机（第三台）部署进度](galbot-machine3-deployment-state.md) — **本机状态权威文件**。L4T R35.6.4，~/holy 即仓库根；**10-07 晚切回 place 任务**（ckpt=pi05_g1_place_deploy，33% 持物起始位姿，包络护栏已从 only_place 派生；pick 三键注释存档可切回）；B 脚本已接入 `--nav-suspend` 导航搁置杠杆（默认关，−55ms/GR3D 50→7%，见第 6 节）；闭环 `--horizon` 默认 50；launcher 中途 restart 只起半套栈，必须整机重启；**10-04 RTC 实验完结**：B 脚本 hold 兜底 14 跑全绿，**工作点 v2=25/0.38/1.65 已定案入 config（R 落盒 14.0-14.5s 纪录）**；⚠ 全天空爪，持物物理 place 复验挂着。▸ 问"装到哪了/下一步"、改 ckpt/数据集/工作点配置前。
 - [本机相机 transport 不匹配](galbot-machine3-camera-transport-unmatch.md) — 相机时好时坏，**完整重启采集栈即愈**（10-07 第三次应验；勿直接 kill 采集守护，launcher 会组杀兄弟进程）；失败窗口期相机话题对所有外部进程隐身，embosa 旁路也通不了（健康代旁路能配对但**载荷 0 字节**——相机图像不走裸 reader 通路，旁路只配判"隐身 vs 仅 SDK"）；`transport no support` 行六代守护恒 4 行=启动噪声，非判别信号。工具：read_camera_bypass.py / sdk_camera_smoke.py / embosa_topic_tool。▸ 相机话题消失、SDK 取图失败、"刚才还好好的"。
 
 ## 2. 环境与推理引擎（FlashRT / pi0.5）
