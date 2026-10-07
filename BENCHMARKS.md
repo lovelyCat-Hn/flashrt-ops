@@ -377,3 +377,20 @@ Sl、CPU 回落正常、相机 6/6。
 - **约束**：搁置只用于「臂上任务+底盘不动」窗口（localization 冻结期位姿不更新，
   底盘要先 CONT）；闭环验证跑需实做确认（冻结态下 SDK 关节路径从未出过问题，
   但真机闭环未验）。
+
+### 补充 ｜ 剩余 ~81ms 的归属切分（sdkfree 探针，2026-10-07）
+
+新探针 `scripts/probes/sdkfree_infer_probe.py`：无 SDK 进程、磁盘 JPEG 喂帧
+（三视角映射与 run_g1_inference 同款）、导航搁置态冻结帧 n=20：
+**318.2ms ≈ SDK 在场 320.5（Δ2.3=噪声）→ 我们进程的订阅/线程成本 ≈ 0**。
+剩余环境差值（318.2 − 空载参考 236.8 ≈ 81ms）**全部在守护进程侧**：三路相机
+capture 30fps 编码+DMA（~82% CPU，要图必须它们跑）、motion_plan（31% CPU；
+strings 证据=SDK 内含 galbot_motion_planning.cpp，但关节空间 API 是否经过它
+未证，GalbotMotion 任务空间肯定经过）、hpu_comm/robot_state/Perception 等小头。
+
+**环境侧剩余可动选项**（都有共享栈代价，非纯工程决策）：
+① 采集降帧/降分辨率（我们每轮只需 ~2.4fps，栈在跑 30fps×3；估 −30~60ms；
+动 vendor 配置 /userdata/user_config/base，XCU/遥测/回放等消费者待评估）；
+② motion_plan 搁置（估 −15~25ms；失败方向=命令不到→臂停，偏安全；
+需闭环实做验证关节路径不经过它）；
+③ 剩余 ~30-40ms = 「机器人活着」的底价（编码器之外的常驻服务+DMA），不建议再抠。
