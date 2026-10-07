@@ -26,6 +26,7 @@ GEMM 的输入（qkv/gate/up 的 GEMM 输入=rms_norm 出来后未旋转的 x_no
 """
 import argparse
 import ctypes
+import functools
 import math
 import os
 import pathlib
@@ -42,7 +43,10 @@ ap.add_argument("--frames", default="0,60,120,180,240,300")
 ap.add_argument("--configs", default="bf16,rot_bf16,int8,rot8")
 ap.add_argument("--npz", default="/tmp/ablation_only_place_ep0.npz")
 ap.add_argument("--out", default="/tmp/rot_equivalence_probe.npz")
+ap.add_argument("--horizon", type=int, default=0,
+                help=">0 时覆盖前端 chunk_size（decoder M）；0=原生默认 10")
 args = ap.parse_args()
+HORIZON = int(args.horizon)
 
 os.environ["PI05_NO_GRAPH"] = "1"
 os.environ.setdefault("FLASHRT_PI05_STATE_PROMPT_MODE", "fixed")
@@ -127,7 +131,7 @@ ENC_NKV, ENC_HD = _PR.ENC_NKV, _PR.ENC_HD
 
 def fixed_noise(i: int):
     g = torch.Generator().manual_seed(20260930 + i)
-    return torch.randn(10, 32, generator=g)
+    return torch.randn(HORIZON or 10, 32, generator=g)
 
 # ── FWHT（未归一化）+ 自检 ──
 def fwht(x: torch.Tensor) -> torch.Tensor:
@@ -439,6 +443,27 @@ def _cap_layer(self, i, seq, fuse_b1, stream):
 
 Pi05Pipeline._encoder_layer = _cap_layer   # 全档安装：bf16 参照也要采
 
+# ── dec8：encoder bf16 + decoder A8W8（上游 FORCE_INT8 是 enc+dec 绑定，这里解绑）──
+# 同一 wrapper 常驻：chunk 注入按 HORIZON 全档门控（bf16 参照必须同 chunk，口径才一致）；
+# encoder 解绑按 _DEC8_ACTIVE 门控（仅 dec8 档 load 窗口内生效）。
+_ORIG_FE_INIT = _FE.__init__
+_DEC8_ACTIVE = [False]
+_DEC8_FE = [None]
+
+
+@functools.wraps(_ORIG_FE_INIT)   # 必须：api.load_model 按签名过滤 kwargs，裸 *a,**kw 会丢 action_dim/num_views
+def _probe_fe_init(self, *a, **kw):
+    if HORIZON > 0:
+        kw["chunk_size"] = HORIZON   # 走原生 ctor 路径，styles/buffers 全按新 chunk 建
+    _ORIG_FE_INIT(self, *a, **kw)
+    if _DEC8_ACTIVE[0]:
+        self._use_int8_encoder = False   # decoder A8W8 照常（_quantize_decoder_int8 在 load 里跑），encoder 退回 bf16
+        _DEC8_FE[0] = self
+
+
+_FE.__init__ = _probe_fe_init
+
+
 # ── 主循环 ──
 CKPT = str(pathlib.Path(args.ckpt).expanduser())
 store, lat, kv_all = {}, {}, {}
@@ -452,8 +477,12 @@ for name in args.configs.split(","):
     is_prof = name == "prof"
     is_calib = name == "calib"
     is_chan = name in ("chan8", "chan8all")
+    is_dec8 = name == "dec8"
     if name == "bf16" or is_rot_bf16:
         os.environ["FVK_PI05_RTX_FORCE_BF16"] = "1"
+    elif is_dec8:
+        os.environ["FVK_PI05_RTX_FORCE_INT8"] = "1"
+        _DEC8_ACTIVE[0] = True
     else:
         os.environ["FVK_PI05_RTX_INT8_ENCODER_ONLY"] = "1"
     print(f"───── [{name}] ─────", flush=True)
@@ -477,6 +506,11 @@ for name in args.configs.split(","):
                                 cache_frames=1, action_dim=16)
     if name == "rot8" or is_chan:
         _FE._quantize_encoder_int8 = _ORIG_QENC
+    if is_dec8:
+        _DEC8_ACTIVE[0] = False   # 关窗，后续档构造不再解绑
+        _fe = _DEC8_FE[0]
+        print(f"[dec8] 验证 action_dim={_fe._out_action_dim} "
+              f"chunk={_fe.chunk_size} enc_int8={_fe._use_int8_encoder}", flush=True)
     print(f"load {time.time() - t0:.0f}s", flush=True)
     model._pipe.use_cuda_graph = False
     ns = model._pipe.norm_stats
