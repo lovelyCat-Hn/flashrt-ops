@@ -52,5 +52,5 @@
 
 - `~/holy/DEPLOY.md` — 新机部署指南（纯环境包配方 v3，7.5G 不含 models）
 - `~/holy/USAGE.md` — 操作手册（装机 + 日常使用）
-- `~/holy/BENCHMARKS.md` — 基准报告（对外汇报用，2026-09-21 echo 机全部实测数据）
+- `~/holy/BENCHMARKS.md` — 基准报告（对外汇报用；**2026-10-08 拆分**：只留当前定档速览+10-07 现行章节——延迟阶梯/v3 工作点/W8A16/nav-suspend/归因闭合；echo 机 09-21~09-24 早期数据与已推翻结论（定档 eager、INT8 延迟档、cache_frames=2）整体移入 `BENCHMARKS_ARCHIVE.md`，其顶部有 ⚠ 标注防误引）
 - `~/holy/scripts/` — 2026-10-04 分层：`inference/` 直接入口（run_g1_loop_rtc=闭环定案入口 / run_g1_loop / run_g1_inference / g1_config.py 等，共享 config/g1.toml）、`g1/` 整备标定、`dataset/` 数据集工具、`eval/` 精度评估、`test/` 性能诊断、`probes/` 探针封存（g1_traj_probe / int8 三件套）；`config/README.md` = g1.toml 导读
