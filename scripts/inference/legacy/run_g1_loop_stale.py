@@ -1,18 +1,11 @@
 #!/usr/bin/env python
-"""G1 双臂闭环 receding-horizon·RTC 变体（B 脚本）：推理迟到 hold 等待，不喂深尾。
+"""【已存档 2026-10-08】原 A 脚本（推理迟到=旧 chunk 深尾续航，无 hold）。
 
-与 A 脚本（run_g1_loop.py）逐行同源，唯一差异 = 推理迟到时的兜底：
-  A：消费配额后喂旧 chunk 深尾步（20-49）续航——深尾是衰减/反转的计划垃圾，
-     pace 破水位时臂往复 + 夹爪翻摆（9/30 sweep 0.40/0.38 破位实录）
-  B（本脚本，默认）：RTC hold——hold 最后目标单调收敛（几何逼近永不过冲），
-     轮询早退（推理一落地立即换块，不等满窗），夹爪行不变被 chg 阈值自然抑制
-     （不翻摆）；--no-rtc-hold 在本脚本内退回 A 行为做对照
-出处：Physical Intelligence "Real-Time Chunking" + lerobot
-src/lerobot/policies/rtc/modeling_rtc.py（Apache-2.0）。只搬执行侧调度层
-（extension/等待）；去噪引导层（denoise_step 前缀引导）未搬——需 per-ODE-step
-钩子 + autograd 穿注意力，与 CUDA graph 捕获冲突，且本链路 delay≈1 轮收益有限
-（2026-10-04 评估）。预期：A/B 同参数稳态行为一致（零 hold）；pace 压到水位下
-（0.38-0.40）时 B 平滑退化（hold 窗=纯墙钟）而 A 出深尾垃圾——主对照实验。
+已被仓库根的 run_g1_loop.py --late-action stale 等价取代（CLI 旗名仍为旧名；
+config [loop] 新键名已同步，见 docs/lerobot-alignment.md）。保留仅为
+A/B 对照考古与历史复现；新任务一律用 run_g1_loop.py。
+
+G1 双臂闭环 receding-horizon：推理→执行→再观测 连续循环（真机）。
 
 目的：实测执行链路的实时延迟与抖动（2026-09-22 闭环打通后的量化步骤）。
 ⚠ 加 --exec 会连续真实驱动双臂！安全设计：
@@ -32,17 +25,14 @@ src/lerobot/policies/rtc/modeling_rtc.py（Apache-2.0）。只搬执行侧调度
 每轮遥测：推理 ms / 取图 ms / 每步执行 ms / 回读跟踪误差 mrad /
 相邻步指令增量（抖动代理）/ 汇总分位数。
 流水线：下一块推理在本轮首条指令执行期间后台完成（predict-only 入后台，
-SDK 调用全留主线程）。配额步消费完而推理未就绪时——B 默认 RTC hold：
-hold 最后目标单调收敛等推理（轮询早退、夹爪不重发、永不喂深尾步）；
---no-rtc-hold 退回 A 行为（旧 chunk 剩余步"续航"，深尾=计划垃圾风险）。
-可选坡升（--rtc-ramp N，执行侧 crossfade）：hold 连续 ≥2 窗（臂真减速过）
-后的 N 轮臂速限幅 0.5→1.0 线性恢复，柔化再起步；1 窗轮询早退的 hold 不触发
-（臂未减速，坡升纯属慢性拖慢）。零推理成本，对应 lerobot 执行侧 blend。
+SDK 调用全留主线程）；配额步消费完而推理未就绪时，用旧 chunk 剩余步
+"续航"追踪（限幅/护栏不变，观测滞后相应加长），推理再慢也不站桩，
+chunk 耗尽才需等待。
 
 用法:
   LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
   ~/miniforge3/envs/flash_pyrt311/bin/python \
-      ~/holy/scripts/inference/run_g1_loop_rtc.py \
+      ~/holy/scripts/inference/run_g1_loop.py \
       [--ckpt ~/holy/models/pi05_g1_deploy] [--exec] \
       [--rounds 10] [--steps-per-round 3] [--delta-max 0.05] \
       [--speed 0.15] [--max-excursion 0.25] [--prompt "..."]
@@ -56,7 +46,6 @@ import os
 import pathlib
 import select
 import signal
-import subprocess
 import sys
 import termios
 import threading
@@ -126,36 +115,6 @@ ap.add_argument("--config", default=g1_config.DEFAULT_PATH,
 ap.add_argument("--log-file", default=None,
                 help="日志文件路径（默认 <仓库>/logs/loop_<时间戳>.log；终端照常显示，"
                      "全文同步写文件，判读免复制）")
-ap.add_argument("--no-rtc-hold", action="store_true",
-                help="关闭 RTC hold，退回 A 脚本行为（推理迟到=旧 chunk 深尾续航）")
-ap.add_argument("--rtc-hold-max", type=int, default=6,
-                help="RTC hold 连续窗数上限：超过判定推理挂死，中止循环（默认 6 窗）")
-ap.add_argument("--rtc-ramp", type=int, default=0,
-                help="坡升轮数 N：hold 连续 ≥2 窗（臂真减速过）后的 N 轮臂速限幅 "
-                     "0.5→1.0 线性恢复，柔化再起步（执行侧 crossfade，零推理成本）。"
-                     "1 窗早退的 hold 不触发——臂没减速，坡升纯属慢性拖慢。0=关闭（默认）")
-ap.add_argument("--grip-state-cmd", action="store_true",
-                help="state 夹爪维(dim7/15)改喂【指令值】而非 SDK 回读：回读滞后 "
-                     "~6.3-8s 而 pick 关键窗口 ~7s——喂回读=模型全程看到冻结在起始值"
-                     "的夹爪状态（数据集 state 跟随指令仅 ~0.3-1s，10-05 判读）。"
-                     "10-05 pick 四跑 R 爪全程 0%% 即此病。需 --grip；默认关=喂回读"
-                     "（place 线一直这么跑的）")
-ap.add_argument("--env-margin", type=float, default=0.15,
-                help="关节包络护栏余量，rad（默认 0.15）。包络=<ckpt>/joint_envelope.json"
-                     "（任务数据集臂关节逐维 [min,max]）：指令越界=模型在幻想训练分布"
-                     "里不存在的构型——往桌下伸/顶桌即此类（刚性模式压桌→fault）")
-ap.add_argument("--env-abort-n", type=int, default=5,
-                help="连续 N 轮指令被包络截断即停循环（默认 5）：持续越界=感知漂移，"
-                     "继续跑只会反复撞桌")
-ap.add_argument("--no-env-guard", action="store_true",
-                help="关闭关节包络护栏（排障对照用）")
-ap.add_argument("--nav-suspend", action="store_true",
-                help="闭环期间 SIGSTOP 搁置导航栈 7 进程（localization/fusion/"
-                     "navigation_plan/vtn/surround/swallows/lidar_capture）："
-                     "2026-10-07 实测推理 375.3→320.5ms（−54.8ms）、GR3D 50→7。"
-                     "退出自动 CONT（含 kill -9，守护网兜底）。"
-                     "⚠ 只用于臂上任务+底盘不动窗口：冻结期 localization 位姿停更，"
-                     "底盘先恢复导航。默认关")
 args = ap.parse_args()
 
 # ── 全文日志落盘：q 退出走 os._exit 不刷缓冲（09-23 坑），故逐行强制 flush ──
@@ -211,111 +170,6 @@ g1_config.apply(args, {
 })
 if args.no_grip:
     args.grip = False
-print(f"[loop-rtc] B 变体 | 迟到兜底: "
-      f"{'A 深尾续航（--no-rtc-hold）' if args.no_rtc_hold else 'RTC hold（默认）'}"
-      f" | hold 上限 {args.rtc_hold_max} 窗"
-      + (f" | 坡升 {args.rtc_ramp} 轮（hold≥2 窗后限速 0.5→1.0）"
-         if args.rtc_ramp > 0 else ""))
-
-
-# ── 导航栈 SIGSTOP 搁置（--nav-suspend 开启，默认关）──
-# 机制：kill -STOP 进程原地冻结——无 exit 事件，launcher 的退出拉起逻辑不触发
-# （2026-10-07 vtn 8s 探针实证：冻结期 launcher 日志零增量、兄弟全活），
-# CONT 原地复活，不重初始化不重载图。约束：只用于「臂上任务+底盘不动」窗口。
-# 恢复多重保险：① 各退出路径显式 resume（q/Ctrl-C/异常/正常完成）；
-# ② 独立守护进程盯父进程，父进程任何死法（含 kill -9/段错误）即 CONT 全部。
-NAV_SUSPEND_NAMES = (
-    "localization_server", "galbot_fusion_main", "service_navigation_plan",
-    "galbot_vtn", "surround_cameras_capture", "swallows", "service_lidar_capture",
-)
-_NAV_GUARD_SRC = """
-import os, sys, time, signal
-signal.signal(signal.SIGINT, signal.SIG_IGN)
-signal.signal(signal.SIGTERM, signal.SIG_IGN)
-ppid = os.getppid()
-pids = [int(x) for x in sys.argv[1].split(',') if x]
-while True:                      # 父进程（本脚本）消失才往下走
-    time.sleep(0.3)
-    try:
-        os.kill(ppid, 0)
-    except OSError:
-        break
-for p in pids:
-    try:
-        os.kill(p, signal.SIGCONT)   # 最后一道网：主进程任何死法都恢复导航栈
-    except OSError:
-        pass
-"""
-
-
-class NavSuspend:
-    """导航栈搁置器：只停 NAV_SUSPEND_NAMES 内、且当前不在冻结态的进程。
-
-    只认领自己 STOP 的 pid（resume 时只 CONT 这些），对别人冻结的进程不碰。
-    """
-
-    def __init__(self):
-        self.stopped = {}                     # pid -> name
-        self._guard = None
-
-    def _find_pids(self):
-        found = {}
-        for pid in os.listdir("/proc"):
-            if not pid.isdigit():
-                continue
-            try:
-                with open(f"/proc/{pid}/cmdline", "rb") as f:
-                    arg0 = f.read().split(b"\x00")[0].decode("utf-8", "replace")
-            except OSError:
-                continue
-            base = os.path.basename(arg0)
-            if base in NAV_SUSPEND_NAMES:
-                found[int(pid)] = base
-        return found
-
-    def suspend(self):
-        cands = self._find_pids()
-        missing = [n for n in NAV_SUSPEND_NAMES if n not in cands.values()]
-        if missing:
-            print(f"[nav-suspend] ⚠ 未找到（跳过）: {missing}")
-        # 守护网先起（继承 pid 表），再下发 STOP——任何死法都有人收尾
-        self._guard = subprocess.Popen(
-            [sys.executable, "-c", _NAV_GUARD_SRC,
-             ",".join(str(p) for p in sorted(cands))],
-            start_new_session=True,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        for pid, name in sorted(cands.items()):
-            try:
-                with open(f"/proc/{pid}/stat") as f:
-                    if f.read().split()[2] == "T":   # 已冻结（非我们所停）：不碰
-                        continue
-            except (OSError, IndexError):
-                continue
-            try:
-                os.kill(pid, signal.SIGSTOP)
-                self.stopped[pid] = name
-            except OSError as e:
-                print(f"[nav-suspend] ⚠ STOP {name}({pid}) 失败: {e}")
-        print(f"[nav-suspend] 已冻结 {len(self.stopped)} 进程: "
-              + ", ".join(f"{n}({p})" for p, n in sorted(self.stopped.items()))
-              + f" | 守护网 pid={self._guard.pid}")
-        print("[nav-suspend] ⚠ 冻结期底盘勿动（localization 位姿停更）；"
-              "相机 capture 不在冻结集，取图不受影响")
-
-    def resume(self):
-        if not self.stopped:
-            return
-        for pid in sorted(self.stopped):
-            try:
-                os.kill(pid, signal.SIGCONT)
-            except OSError:
-                pass
-        print(f"[nav-suspend] 已恢复 {len(self.stopped)} 进程"
-              "（CONT 幂等；守护网发现主进程退出后自退）")
-        self.stopped.clear()
-
-
-NAV = None   # suspend 后指向 NavSuspend 实例；各退出路径 None 守卫调用 resume
 
 
 class QuitWatcher:
@@ -368,19 +222,13 @@ class QuitWatcher:
                     print("\n⛔ 收到中断信号 —— 立即退出"
                           "（已下发目标可能仍在限速执行）")
                     self.restore()
-                    if NAV is not None:
-                        NAV.resume()
                     os._exit(130)
                 if sys.stdin.read(1) in ("q", "Q"):
                     print("\n⛔ 按下 q —— 立即退出（已下发目标可能仍在限速执行）")
                     self.restore()
-                    if NAV is not None:
-                        NAV.resume()
                     os._exit(2)
             except Exception:
                 self.restore()
-                if NAV is not None:
-                    NAV.resume()
                 os._exit(3)   # 监听线程死了比静默更危险：宁可误退不可失控
 
 
@@ -400,8 +248,6 @@ def _fatal_hook(t, v, tb):
         except Exception:
             pass
     WATCH.restore()
-    if NAV is not None:
-        NAV.resume()
     os._exit(1)
 
 
@@ -416,31 +262,6 @@ VIEWS = int(mf.get("views", 3))
 CAM_MAP = mf.get("camera_map", {"image": "HEAD_RIGHT_CAMERA",
                                 "wrist_image": "LEFT_ARM_CAMERA",
                                 "wrist_image_right": "RIGHT_ARM_CAMERA"})
-
-# ── 关节包络护栏（压桌防护，2026-10-06）：任务数据集臂关节合法构型盒。SDK 侧
-# 臂端 fault/堵钻不回传（指令恒 SUCCESS，10-06 实录），刚性伺服撞桌只会硬压到
-# 进 fault——唯一的软防线是在指令侧拦住"训练分布外的构型"。Motion.init 脱机
-# 挂死（实测 >120s），FK 路线不可用，故用数据集包络做几何代理。
-# ⚠ 2026-10-07 修范畴错误：模型输出=delta（relative_actions_processor，见
-# plan_step），护栏比对对象必须是 BASE_ARM+delta 绝对构型（chunk_abs_block），
-# 不能直接比 delta——否则首块 delta≈0 必"越界"拦停（10-07 首跑实录）──
-ENV_LO = ENV_HI = None
-_env_file = CKPT / "joint_envelope.json"
-if args.no_env_guard:
-    print("[护栏] 关节包络护栏已 --no-env-guard 关闭")
-elif _env_file.exists():
-    _env = json.loads(_env_file.read_text())
-    # 此处在 import numpy 之前，只做纯 python 解析；数组化+余量在下方
-    # import numpy 之后统一做（10-07 修 np 前置引用 bug——pick 时代同炸，
-    # 只是护栏合入后没有真机全跑过所以没暴露）
-    _inf = float("inf")
-    ENV_LO = [(-_inf if v is None else float(v)) for v in _env["action_lo"]]
-    ENV_HI = [(_inf if v is None else float(v)) for v in _env["action_hi"]]
-    print(f"[护栏] 关节包络开：{_env_file.name}（来源 {_env.get('source', '?')}；"
-          f"余量 ±{args.env_margin} rad；越界=截断 chunk，连续 {args.env_abort_n} "
-          f"轮→停）")
-else:
-    print(f"[护栏] 未找到 {_env_file}——关节包络护栏关闭（当前 ckpt 无任务包络）")
 
 # ── 夹爪下发配置（--grip；宽度来自 manifest 标定，无标定拒绝开启）──
 GRIP = None
@@ -457,9 +278,6 @@ if args.grip:
             "chg": args.grip_chg, "sent": {}}
     print(f"夹爪下发开启: 0%→{wmin} m | 100%→{wmax} m | 速度 {args.grip_speed} m/s | "
           f"力矩 {args.grip_effort} N | 变化阈值 {args.grip_chg}%")
-    if args.grip_state_cmd:
-        print("⚠ state 夹爪维(7/15)喂【指令值】（--grip-state-cmd）：SDK 回读滞后 "
-              "~6.3-8s > pick 窗口 ~7s，回读=冻结起始值（10-05 四跑实证）")
 
 # 2026-09-23 tf_matrix 实证：INT8 两档（全 INT8 / 仅编码器）均毁动作质量
 # （块均 cos 0.15/0.27 vs bf16 0.98）——定档 bf16，显式锁定（详见 BENCHMARKS 附录）
@@ -477,16 +295,6 @@ os.environ["FLASH_RT_PI05_ACTION_CHUNK_SIZE"] = str(args.horizon)
 
 import numpy as np  # noqa: E402
 import cv2  # noqa: E402
-
-# 包络护栏数组化+余量（解析在上方 import 之前完成；margin 语义同 10-06 原版）
-if ENV_LO is not None:
-    _m = args.env_margin
-    ENV_LO = np.array(ENV_LO, dtype=np.float32)
-    ENV_HI = np.array(ENV_HI, dtype=np.float32)
-    ENV_LO[:7] -= _m
-    ENV_LO[8:15] -= _m
-    ENV_HI[:7] += _m
-    ENV_HI[8:15] += _m
 import flash_rt.frontends.torch.pi05_rtx as _fe  # noqa: E402
 
 # 回退 eager 时才封图（PI05_NO_GRAPH=1）；默认开图（scripts/test/bench_pi05.py 同款）
@@ -540,25 +348,6 @@ def state_from_joints(vals) -> np.ndarray:
     return st
 
 
-def grip_state_cmd_override(st_raw):
-    """--grip-state-cmd：state 夹爪维(7/15)改喂最后指令值（默认=SDK 回读）。
-
-    SDK 夹爪反馈滞后 ~6.3-8s（2026-09-23 实测），pick 的关键窗口只有 ~7s——
-    喂回读=模型全程看到冻结在起始值的夹爪状态；数据集 state 跟随指令仅
-    ~0.3-1s（10-05 判读 ep0：开爪 1s 内跟上、闭到物体稳读 33.5%）。指令值
-    即数据集语义的快跟随，把 train/serve 的夹爪 state 拉回一致。
-    未发过指令的爪（GRIP["sent"] 空）保留回读值——起步时两者本就一致。
-    """
-    if GRIP is None or not args.grip_state_cmd:
-        return st_raw
-    st = np.array(st_raw, dtype=np.float32)
-    for name, dim in GRIP["names"]:
-        sent = GRIP["sent"].get(name)
-        if sent is not None:
-            st[dim] = sent
-    return st
-
-
 def read_joints(robot, names) -> np.ndarray:
     vals = robot.get_joint_positions([], names)
     if not vals or len(vals) != len(names):
@@ -600,38 +389,6 @@ def pstats(ms):
             f"max {a.max():.1f} ms")
 
 
-def chunk_abs_block(chunk):
-    """chunk delta 块 → 绝对构型块（包络护栏的比对对象，2026-10-07 修范畴错误）。
-
-    训练管线 relative_actions_processor：臂维=delta（相对本块预测时刻臂位
-    BASE_ARM）、夹爪维=绝对 0-100（plan_step/build_traj 同款换算）。
-    包络盒来自数据集 action 列逐维 [min,max]=绝对构型——必须用 BASE_ARM+delta
-    比对；直接拿 delta 比对=必拦停（delta≈0 恒不在盒内，10-07 首跑实录）。
-    """
-    a = np.empty_like(chunk)
-    a[:, :7] = chunk[:, :7] + BASE_ARM[None, :7]
-    a[:, 7] = chunk[:, 7]            # 夹爪界=±inf，原值恒过
-    a[:, 8:15] = chunk[:, 8:15] + BASE_ARM[None, 7:14]
-    a[:, 15] = chunk[:, 15]
-    return a
-
-
-def env_first_violation(ch):
-    """关节包络检查：返回首个越界行 (行号, 维, 值, 界)；全干净返回 None。
-
-    ch: (n,16) 数据集维序动作块。臂维 0-6=右臂、8-15=左臂（ENV 已含余量），
-    夹爪维界=±inf 恒过。逐行向量化，n≤horizon(50)，微秒级。
-    """
-    bad = (ch > ENV_HI[None, :]) | (ch < ENV_LO[None, :])
-    rows = np.flatnonzero(bad.any(axis=1))
-    if rows.size == 0:
-        return None
-    r = int(rows[0])
-    j = int(np.flatnonzero(bad[r])[0])
-    upper = bool(ch[r, j] > ENV_HI[j])
-    return r, j, float(ch[r, j]), float(ENV_HI[j] if upper else ENV_LO[j])
-
-
 def send_grip(robot, chunk_row):
     """chunk 行 dim7/dim15（0~100%）→ 标定宽度下发（超阈值才发，非阻塞）。
 
@@ -668,10 +425,6 @@ print(f"start_controller('all') → {st}")
 if not str(st).startswith("ControlStatus.SUCCESS"):
     raise SystemExit("控制器未 SUCCESS，终止（先跑 run_g1_execute.py 排查）")
 
-if args.nav_suspend:
-    NAV = NavSuspend()
-    NAV.suspend()
-
 HOME = read_joints(robot, ARM_NAMES)   # 起始位 = 漂移护栏基准（应在预热工作位）
 print(f"起始位（漂移护栏基准）: {np.round(HOME, 3).tolist()}")
 print("⚠ 若当前不是预热工作位，先跑 g1_pose_warmup.py 再来")
@@ -699,10 +452,8 @@ spc = max(1, min(args.steps_per_cmd, n_steps))   # 合步宽度（≤ 每轮步�
 BUDGET = spc * args.delta_max                    # 每条指令位移限幅
 V_MIN = 0.02                                     # 半程配速下限 rad/s（驻停时缓爬）
 if args.pace < 0.55:
-    print(f"⚠ --pace {args.pace}s 低于 bf16 推理+取图水位 ~0.42s："
-          + ("推理迟到将以 RTC hold 填补（单调收敛无深尾，但每个 hold 窗是"
-             "实打实墙钟；轮询早退只免掉窗内剩余）" if not args.no_rtc_hold else
-             "推理未就绪段以旧 chunk 深尾续航填补（A 行为：计划垃圾、臂往复风险）"))
+    print(f"⚠ --pace {args.pace}s 偏小：bf16 推理+取图水位 ~0.42s 余量紧张，"
+          "推理未就绪段会以旧 chunk 续航指令填补（机制仍在，非站桩）")
 if args.pace_div < 1.0:
     print(f"⚠ --pace-div {args.pace_div} < 1：臂会提前到点干等窗口结束"
           "（速度过零停顿），无收益；半程=2 / 全程=1")
@@ -762,11 +513,6 @@ if not args.do_exec:
         print(f"  指令[步{k}-{k_end - 1}]: 限幅后 {np.round(tgt, 3).tolist()}"
               f"\n        离起始位峰值 {drift * 1000:.0f} mrad"
               f"（护栏 {args.max_excursion * 1000:.0f}）")
-        if ENV_LO is not None:
-            _v = env_first_violation(chunk_abs_block(chunk))
-            _m = ("全块通过" if _v is None else
-                  f"⛔ 行{_v[0]} 维{_v[1]}={_v[2]:.3f} 越界 {_v[3]:.3f}")
-            print(f"        包络预检: {_m}")
         if GRIP:
             desc = []
             for name, dim in GRIP["names"]:
@@ -776,8 +522,6 @@ if not args.do_exec:
             print(f"        夹爪目标: {'  '.join(desc)}")
     print("\n[干跑] 未下发任何命令。加 --exec 真实执行。")
     WATCH.restore()
-    if NAV is not None:
-        NAV.resume()
     robot.request_shutdown(); robot.wait_for_shutdown(); robot.destroy()
     os._exit(0)
 
@@ -794,16 +538,8 @@ infer_ms, grab_ms, round_ms, step_ms, track_err = [], [], [], [], []
 pace_hist = []                       # 配速 rad/s（追踪式，速度=导程÷(div×窗口)）
 cmd_hist = None
 aborted = False
-sustain_cmds = 0                     # --no-rtc-hold 路径的深尾"续航"条数
+sustain_cmds = 0                     # 配额外"续航"指令条数（掩盖慢推理）
 sust_last = 0                        # 上一轮续航条数（打进下轮表头，破水位一眼可见）
-hold_windows = 0                     # RTC hold 等待窗总数（B 变体核心遥测）
-hold_last = 0                        # 上一轮 hold 窗数（打进下轮表头）
-ramp_left = 0                        # 坡升剩余轮数（>0 时臂速按 0.5→1.0 线性限幅）
-env_hits = 0                         # 包络护栏：连续越界轮数（干净轮清零）
-env_trunc = 0                        # 包络护栏：累计截断轮数（汇总用）
-res_bad = 0                          # 导程残差 ≥100 mrad 连续段数（告警用）
-res_warned = False                   # 残差告警每跑只打一次
-ramp_fired = 0                       # 坡升激活次数（多窗 hold 次数，汇总遥测）
 
 
 class _PredictJob:
@@ -854,8 +590,7 @@ def fresh_obs():
     """
     t_g = time.perf_counter()
     obs = grab_views(robot)
-    st_raw = grip_state_cmd_override(
-        state_from_joints(read_joints(robot, STATE_NAMES)))
+    st_raw = state_from_joints(read_joints(robot, STATE_NAMES))
     st_n = normalize_state(st_raw, ns)
     grab_ms.append((time.perf_counter() - t_g) * 1000)
     return obs, st_n, st_raw[ARM_SLICE]
@@ -873,37 +608,11 @@ for r in range(args.rounds):
     chunk = job.result()             # 上轮执行期间启动的推理——此刻早已就绪
     BASE_ARM = job.state_arm         # 新块 delta 基准 = 该块预测时刻臂位
     infer_ms.append(job.dur_ms)
-    if hold_last:
-        _sus = f"RTC hold {hold_last} 窗（等推理：hold 最后目标单调收敛，不喂深尾）"
-    elif sust_last:
-        _sus = (f"续航 {sust_last} 条 ⚠ 破推理水位（--no-rtc-hold 深尾模式："
-                f"计划垃圾、臂往复风险）")
-    else:
-        _sus = "零等待"
+    _sus = ("零续航" if sust_last == 0
+            else f"续航 {sust_last} 条 ⚠ 破推理水位（pace 须 ≥ 推理+取图，续航喂"
+                 f" chunk 深尾步=计划垃圾，臂会往复）")
     print(f"\n── 轮 {r} | t+{time.perf_counter() - t_loop0:6.1f}s | "
           f"推理 {job.dur_ms:.0f} ms，与上轮执行重叠，{_sus} ──")
-    if ENV_LO is not None:
-        _v = env_first_violation(chunk_abs_block(chunk))
-        if _v is None:
-            env_hits = 0
-        else:
-            _r, _j, _val, _bnd = _v
-            env_hits += 1
-            env_trunc += 1
-            _side = "上" if _val > _bnd else "下"
-            print(f"⛔ 包络护栏：指令行{_r} 维{_j}={_val:.3f} 越{_side}界 "
-                  f"{_bnd:.3f}——截到行{_r}前缀（连续 {env_hits}/"
-                  f"{args.env_abort_n} 轮）")
-            if _r == 0:
-                print("⛔ 行 0 即越界，无处可截——停止循环（机械臂留在原地）")
-                aborted = True
-                continue
-            if env_hits >= args.env_abort_n:
-                print("⛔ 连续越界=感知漂移（场景认错了），继续跑只会反复撞桌"
-                      "——停止循环（机械臂留在原地）")
-                aborted = True
-                continue
-            chunk = chunk[:_r]
     if args.chunk_mode == "traj":
         cur0 = read_joints(robot, ARM_NAMES)
         traj, n_pts, final_p = build_traj(chunk, cur0)
@@ -942,13 +651,10 @@ for r in range(args.rounds):
         if round_ms[-1] > 1:
             print(f"  轮耗时 {round_ms[-1]:.0f} ms（重规划频率 {1000 / round_ms[-1]:.1f} Hz）")
         continue
-    # 消费配额 n_steps 步后若新块未就绪：
-    #   B 默认（RTC hold）→ hold 最后目标单调收敛等推理（轮询早退、夹爪行不变、
-    #     永不喂深尾步；出处见文件头——PI RTC 执行侧调度层）；
-    #   --no-rtc-hold → A 脚本行为：旧 chunk 剩余步"续航"追踪（深尾=计划垃圾）。
-    # 两条路都受 ±BUDGET 限幅 + 漂移护栏，不放大行程风险
+    # 消费配额 n_steps 步后若新块未就绪 → 用旧 chunk 剩余步"续航"追踪，
+    # 轮间零站桩（推理 825ms 实测 > 滑行 539ms 的对策）；chunk 耗尽才需等待。
+    # 每条指令仍受 ±BUDGET 限幅 + 漂移护栏，续航不放大行程风险
     sust_before = sustain_cmds
-    hold_before = hold_windows
     k = 0
     while k < len(chunk):
         k_end = min(k + spc, len(chunk))   # 本条指令消费 chunk 步 [k, k_end)
@@ -960,7 +666,6 @@ for r in range(args.rounds):
                   f"{args.max_excursion * 1000:.0f}，停止循环（机械臂留在原地）")
             aborted = True
             break
-        ramp_f = 1.0                       # 本窗坡升系数（1.0=不限速）
         cmd_delta = (tgt - cmd_hist) if cmd_hist is not None else np.zeros_like(tgt)
         cmd_hist = tgt.copy()
         gp = send_grip(robot, chunk[k_end - 1])   # 夹爪伴随后臂目标，发在计时区外
@@ -984,11 +689,6 @@ for r in range(args.rounds):
             if args.near_div >= 1.0 and gap0 < args.near_gap:
                 div_eff = args.near_div   # 近距阻尼：单调收敛+滤计划摆幅
             pace_v = max(V_MIN, min(gap0 / (div_eff * args.pace), args.speed))
-            if ramp_left > 0:
-                # 坡升：多窗 hold（臂真减速过）后的再起步柔化，0.5→1.0 线性恢复
-                ramp_f = 0.5 + 0.5 * (args.rtc_ramp - ramp_left) / args.rtc_ramp
-                pace_v *= ramp_f
-                ramp_left -= 1
             robot.set_joint_positions(tgt.tolist(), joint_names=ARM_NAMES,
                                       is_blocking=False, speed_rad_s=pace_v)
             pace_hist.append(pace_v)
@@ -1002,14 +702,8 @@ for r in range(args.rounds):
         ach = read_joints(robot, ARM_NAMES)
         err = float(np.max(np.abs(ach - tgt))) * 1000
         track_err.append(err)
-        res_bad = res_bad + 1 if err >= 100.0 else 0
-        if res_bad >= 3 and not res_warned:
-            res_warned = True
-            print("⚠ 导程残差 ≥100 mrad 持续 3 段——疑似爪尖受阻（顶桌/卡物），"
-                  "注意观察，必要时按 q 停")
         tag = f"指令[步{k}-{k_end - 1}]" + ("·续航" if k >= n_steps else "") \
-            + ("·近阻尼" if div_eff != args.pace_div else "") \
-            + (f"·坡升{ramp_f:.2f}" if ramp_f < 1.0 else "")
+            + ("·近阻尼" if div_eff != args.pace_div else "")
         if k >= n_steps:
             sustain_cmds += 1
         print(f"  {tag}: |Δcmd| "
@@ -1020,76 +714,13 @@ for r in range(args.rounds):
             aborted = True
             break
         k = k_end
-        # 配额消费完：新块就绪（或已是最后一轮）→ 立即换块零等待
+        # 配额消费完：新块就绪（或已是最后一轮）→ 立即换块零等待；否则续航
         if k >= n_steps and (r == args.rounds - 1 or job.done()):
             break
-        if k >= n_steps:
-            if args.no_rtc_hold:
-                continue               # A 行为：旧 chunk 深尾续航
-            # ── RTC hold：等推理，单调收敛到本块已消费段终点（chunk[n_steps-1]）──
-            # 与 A 的深尾续航差异：目标不动（几何逼近永不过冲→无往复）、夹爪行
-            # 不变（chg 阈值抑制重发→无翻摆）、逐 10ms 轮询（推理落地立即换块，
-            # 不烧满剩余窗）。护栏/限幅/配速律照旧，hold 窗是纯墙钟成本
-            hold_n = 0
-            while not job.done() and not aborted:
-                hold_n += 1
-                hold_windows += 1
-                if hold_n > args.rtc_hold_max:
-                    print(f"⛔ 推理连续 {args.rtc_hold_max} 窗未归——判定挂死，"
-                          "停止循环（机械臂留在原地）")
-                    aborted = True
-                    break
-                cur = read_joints(robot, ARM_NAMES)
-                tgt_h = cur + np.clip(tgt - cur, -BUDGET, BUDGET)
-                drift = float(np.max(np.abs(tgt_h - HOME)))
-                if drift > args.max_excursion:
-                    print(f"⛔ 漂移护栏：关节最大偏离 {drift * 1000:.0f} mrad > "
-                          f"{args.max_excursion * 1000:.0f}，停止循环（机械臂留在原地）")
-                    aborted = True
-                    break
-                cmd_delta = ((tgt_h - cmd_hist) if cmd_hist is not None
-                             else np.zeros_like(tgt_h))
-                cmd_hist = tgt_h.copy()
-                gp = send_grip(robot, chunk[min(n_steps, len(chunk)) - 1])
-                if gp:
-                    print(f"  夹爪: {gp}")
-                t_s = time.perf_counter()
-                gap0 = float(np.max(np.abs(tgt_h - cur)))
-                div_eff = args.pace_div
-                if args.near_div >= 1.0 and gap0 < args.near_gap:
-                    div_eff = args.near_div   # 近距阻尼同主路径
-                pace_v = max(V_MIN, min(gap0 / (div_eff * args.pace), args.speed))
-                robot.set_joint_positions(tgt_h.tolist(), joint_names=ARM_NAMES,
-                                          is_blocking=False, speed_rad_s=pace_v)
-                pace_hist.append(pace_v)
-                while (time.perf_counter() - t_s < args.pace
-                       and not job.done()):
-                    time.sleep(0.01)      # 轮询早退：推理一落地立即出窗
-                step_ms.append((time.perf_counter() - t_s) * 1000)
-                ach = read_joints(robot, ARM_NAMES)
-                err = float(np.max(np.abs(ach - tgt_h))) * 1000
-                track_err.append(err)
-                res_bad = res_bad + 1 if err >= 100.0 else 0
-                if res_bad >= 3 and not res_warned:
-                    res_warned = True
-                    print("⚠ 导程残差 ≥100 mrad 持续 3 段——疑似爪尖受阻"
-                          "（顶桌/卡物），注意观察，必要时按 q 停")
-                print(f"  指令[hold {hold_n}]: |Δcmd| "
-                      f"{float(np.max(np.abs(cmd_delta))) * 1000:5.1f} mrad | "
-                      f"执行 {step_ms[-1]:5.0f} ms | 导程残差 {err:4.1f} mrad | "
-                      f"ControlStatus.SUCCESS(tracked)")
-            if aborted:
-                break
-            if args.rtc_ramp > 0 and hold_n >= 2:
-                # 臂在 hold 中真减速过（≥1 个完整额外窗收敛）→ 后 N 轮限速再起步
-                ramp_left = args.rtc_ramp
-                ramp_fired += 1
-            break                          # 推理就绪 → 正常换块（零深尾）
     round_ms.append((time.perf_counter() - t_r) * 1000)
     if round_ms[-1] > 1:
         print(f"  轮耗时 {round_ms[-1]:.0f} ms（重规划频率 {1000 / round_ms[-1]:.1f} Hz）")
     sust_last = sustain_cmds - sust_before
-    hold_last = hold_windows - hold_before
 
 # ── ④ 汇总 ──
 if GRIP:
@@ -1116,7 +747,6 @@ if track_err:
           f"（配速系数 {args.pace_div:g}"
           + (f"，近距 {args.near_gap*1000:.0f} mrad 内阻尼 {args.near_div:g}"
              if args.near_div >= 1.0 else "")
-          + (f"；包络护栏截断 {env_trunc} 轮" if ENV_LO is not None else "")
           + "：残差≈导程×(1-1/div) 属预期；"
           "≈1 到点，残差≈0 且臂停=到点干等推理）")
 if pace_hist:
@@ -1124,20 +754,12 @@ if pace_hist:
     print(f"配速: p50 {qp[0]:.3f} | p95 {qp[1]:.3f} | max {max(pace_hist):.3f} rad/s"
           f"（导程÷({args.pace_div:g}×窗口 {args.pace}s)，上限 {args.speed}，下限 {V_MIN}）")
     print("抖动判读：|Δcmd| 快速变号=抖动；持续同号=漂移（由护栏兜底）")
-if hold_windows:
-    print(f"RTC hold 等待窗: {hold_windows} 个（推理迟到，hold 最后目标单调收敛；"
-          f"A 脚本同场景为深尾续航=计划垃圾；上限 {args.rtc_hold_max} 窗未触发挂死判定）")
 if sustain_cmds:
-    print(f"深尾续航: {sustain_cmds} 条（--no-rtc-hold 路径：配额外消费旧 chunk 步）")
-if args.rtc_ramp > 0:
-    print(f"坡升触发: {ramp_fired} 次（hold≥2 窗后 {args.rtc_ramp} 轮限速 0.5→1.0 再起步；"
-          f"1 窗早退的 hold 不触发，臂未减速无需柔化）")
+    print(f"续航指令: {sustain_cmds} 条（配额外消费旧 chunk 步，掩盖慢推理轮间站桩）")
 print(f"最终偏离起始位: {exc:.0f} mrad（护栏 {args.max_excursion * 1000:.0f} mrad）"
       + (" ⛔ 护栏触发过" if aborted else ""))
 
 WATCH.restore()
-if NAV is not None:
-    NAV.resume()
 print("SDK 关闭中...")
 robot.request_shutdown(); robot.wait_for_shutdown(); robot.destroy()
 os._exit(0)   # SDK 残留线程，干净退出
