@@ -303,6 +303,13 @@ service_lidar_capture）；`run_g1_inference.py` 冻结帧 n=20，bf16 tier，gr
 **条件**：`run_g1_loop_rtc.py`（B 脚本，RTC hold），only_place 任务，`--horizon 50`；
 速度律 臂速÷原速 = n/(30×pace×div)；v3 前置 `--nav-suspend`。
 
+**执行器出处**（详脚本文件头）：B 脚本执行侧调度层 = Physical Intelligence
+"Real-Time Chunking" + lerobot `src/lerobot/policies/rtc/modeling_rtc.py`
+（Apache-2.0）移植。范围：RTC hold（推理迟到单调收敛等待，不喂旧 chunk 深尾）
++ 再起步坡升（对应 lerobot 执行侧 blend）；去噪引导层（denoise_step 前缀引导）
+未搬（per-ODE-step 钩子与 CUDA graph 捕获冲突，delay≈1 轮收益有限）。配速律
+v4 追踪式（速度=导程÷(div×pace)，每窗按比例走导程）为自研。
+
 **表 7-1 工作点对比**
 
 | 工作点 | spc/pace/div | 速度律 | L 释放 | R 落盒 | 轮耗时 p50 | hold 窗 |
