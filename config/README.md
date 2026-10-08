@@ -7,7 +7,7 @@
 ## 1. 加载机制（一条链）
 
 ```
-入口脚本（run_g1_loop.py 等 10 个）
+入口脚本（run_g1_loop.py 等 10 个；legacy/ 下存档脚本不在此列）
   └─ import g1_config（scripts/inference/g1_config.py，共享配置模块）
        └─ load() → 默认读 DEFAULT_PATH = /home/galbot/holy/config/g1.toml（绝对路径）
             缺文件不崩 → 退回模块内 BUILTIN 内置默认（与 toml 同源兜底）
@@ -53,7 +53,7 @@ BUILTIN 是 toml 缺失/损坏时的兜底。**两边一起改**，改完可用�
 | `inference/run_g1_execute.py` | `[run]` `[execute]` `[gripper]` |
 | `inference/run_g1_loop.py` | `[run]` `[loop]` `[gripper]` |
 | `inference/run_g1_inference.py` | `[run]` `[inference]` |
-| `inference/run_g1_replay.py` | `[run]` `[replay]` |
+| `inference/run_g1_replay.py` | `[run]` `[replay]`（另跨读 `[loop].max_excursion/.switch_dist`——[loop] 节名不可改） |
 | `g1/g1_pose_warmup.py` | `[run]` `[warmup]` `[gripper]` |
 | `g1/g1_grip.py` | `[run]` `[gripper]` |
 
@@ -63,6 +63,9 @@ BUILTIN 是 toml 缺失/损坏时的兜底。**两边一起改**，改完可用�
 
 - **"参数没生效"**：看启动 `[config]` 打印——没列出 = toml 没覆盖它，可能是 CLI 显式传了、
   或键名拼错（tomllib 静默忽略未知键）
+- **启动报 "[loop].xxx 已改名"**：`steps_per_round`/`steps_per_cmd` 已更名
+  `n_action_steps`/`steps_per_command`（2026-10-08，对照表 docs/lerobot-alignment.md）
+  ——load() 硬报错防静默回落，按提示改 toml 键名即可
 - **toml 文件被删/路径错**：不崩，静默走 BUILTIN——行为变了先确认文件在不在
 - **py3.8 系统解析报 tomllib 找不到**：g1.toml 必须用 flash_pyrt311 环境的脚本跑
   （`~/holy/run.sh` 已封正确解释器），别用系统 python3 直接调

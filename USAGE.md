@@ -118,18 +118,20 @@ flashpy ~/holy/scripts/inference/run_g1_inference.py --ckpt ~/holy/models/pi05_g
   夹爪数据集是 0~100（33=持物起步），SDK 读数是开口宽度（米），标定后经 manifest 换算
 - 夹爪标定：`--grip-wmin/--grip-wmax`（满/零开度 SDK 宽度），写入 manifest
 
-### 3.6 G1 闭环执行（run_g1_loop_rtc，2026-10-04 工作点 v2 定案）
+### 3.6 G1 闭环执行（run_g1_loop，2026-10-07 工作点 v3 定案）
 
 ```bash
 # 前提: 3.5 三步全绿 + warmup 已跑；急停在手边
-~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_rtc.py --exec --rounds 60
+~/holy/run.sh ~/holy/scripts/inference/run_g1_loop.py --exec --rounds 60
 
-# 工作点已写进 config/g1.toml [loop]（spc=25 / 合步 25 / pace 0.38 / div 1.65 /
-# near-div 2 / near_gap 0.06 / speed 1.0 / delta_max 0.3），无需 CLI 传参。
-# 速度律: 臂速÷数据集原速 = n/(30×pace×div)，当前组合 ≈1.33× 原速；
-# R 落盒实测 14.0-14.5s（数据集 13s）。
-# pace 0.38 低于推理水位由 RTC hold 兜底（推理迟到=hold 最后目标单调收敛，
-# 零深尾垃圾）；A 脚本 run_g1_loop.py 无兜底，勿用它跑破水位档。
+# 工作点已写进 config/g1.toml [loop]（n_action_steps=25 / 合步 25 / pace 0.35 /
+# div 1.5 / near-div 2 / near_gap 0.06 / speed 1.0 / delta_max 0.3），无需 CLI 传参。
+# 速度律: 臂速÷数据集原速 = n/(30×pace×div)，当前组合 ≈1.59× 原速；
+# R 落盒实测 10.0s（数据集 13s，空爪纪录）。
+# v3 前置 --nav-suspend（导航栈冻结→推理 329±7ms，水位≈0.34-0.35）。
+# pace 0.35 贴水位由 hold 兜底（推理迟到=hold 最后目标单调收敛，零深尾垃圾；
+# --late-action stale=旧 chunk 深尾续航，原 A 脚本行为，勿用于破水位档，
+# 仅 A/B 对照实验用）。参数命名对照 lerobot 术语: docs/lerobot-alignment.md
 # 图模式默认开（WithFlags 热修）；异常回退: 前缀 PI05_NO_GRAPH=1
 ```
 

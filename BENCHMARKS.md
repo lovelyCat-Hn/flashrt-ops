@@ -19,7 +19,7 @@
 | INT8 W8A8（编码器/全/旋转/按通道） | — | 拒收 | §三 |
 | CUDA graph | 开（本机默认） | 在用 | ARCHIVE#WithFlags |
 | cache_frames | 1 | 2 已判死 | ARCHIVE 标注#4 |
-| 闭环执行器 | run_g1_loop_rtc.py + `--nav-suspend` | 在用 | §五/§七 |
+| 闭环执行器 | run_g1_loop.py + `--nav-suspend` | 在用 | §五/§七 |
 | 闭环工作点 | v3 = 25/0.35/1.5（1.59×） | 在用（⚠ 持物未验） | §七 |
 
 **表 0-2 延迟阶梯摘要**（冻结帧=零运动零取图，条件详见 §一）
@@ -300,8 +300,10 @@ service_lidar_capture）；`run_g1_inference.py` 冻结帧 n=20，bf16 tier，gr
 
 ## 七、闭环工作点（place 空爪，2026-10-04 ~ 10-07）
 
-**条件**：`run_g1_loop_rtc.py`（B 脚本，RTC hold），only_place 任务，`--horizon 50`；
-速度律 臂速÷原速 = n/(30×pace×div)；v3 前置 `--nav-suspend`。
+**条件**：`run_g1_loop.py`（采集时名 run_g1_loop_rtc.py/"B 脚本"，RTC hold=现默认
+`--late-action hold`），only_place 任务，`--chunk-size 50`（旧旗 `--horizon`）；
+速度律 臂速÷原速 = n/(30×pace×div)；v3 前置 `--nav-suspend`。2026-10-08 命名
+正规化对照见 docs/lerobot-alignment.md。
 
 **执行器出处**（详脚本文件头）：B 脚本执行侧调度层 = Physical Intelligence
 "Real-Time Chunking" + lerobot `src/lerobot/policies/rtc/modeling_rtc.py`
@@ -338,5 +340,5 @@ v4 追踪式（速度=导程÷(div×pace)，每窗按比例走导程）为自研
 | 表 3-2~3-6 量化消融 | `~/holy/run.sh ~/holy/scripts/probes/rot_equivalence_probe.py --configs <档>`（chan8 先 `--configs calib`） |
 | 表 3-7 位点消融 | `~/holy/run.sh ~/holy/scripts/probes/int8_site_ablation.py --configs bf16,enc8,no_l0-8,no_l9-17,no_attn,no_ffn` |
 | 表 5-x 导航搁置 | `kill -STOP <7 进程>` + 同遥测；sdkfree：`~/holy/run.sh ~/holy/scripts/probes/sdkfree_infer_probe.py` |
-| 表 7-x 闭环 | `~/holy/scripts/inference/run_g1_loop_rtc.py --nav-suspend [--exec] --steps-per-round 25 --steps-per-cmd 25 --pace 0.35 --pace-div 1.5`（⚠ `--exec` 驱臂） |
+| 表 7-x 闭环 | `~/holy/scripts/inference/run_g1_loop.py --nav-suspend [--exec] --n-action-steps 25 --steps-per-command 25 --pace 0.35 --pace-div 1.5`（⚠ `--exec` 驱臂） |
 | 原始输出 | `evidence/20261006-07_quant_kv_ablation/`（quant）；闭环日志 `logs/loop_*.log` |
