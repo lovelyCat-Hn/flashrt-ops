@@ -48,6 +48,7 @@ SDK 调用全留主线程）。可选坡升（--hold-ramp N，执行侧 crossfad
 """
 import argparse
 import atexit
+from collections import deque
 import functools
 import g1_config  # noqa: E402  同目录共享配置（CLI > config/g1.toml > 内置默认）
 import json
@@ -602,10 +603,39 @@ def grab_views(robot) -> dict:
     return out
 
 
-def pstats(ms):
-    a = np.array(ms)
-    return (f"p50 {np.percentile(a, 50):.1f} | p95 {np.percentile(a, 95):.1f} | "
-            f"max {a.max():.1f} ms")
+class LatencyTracker:
+    """时延样本收集器。结构参照 lerobot policies/rtc/latency_tracker.py
+    （Apache-2.0），两处有意偏离（docs/lerobot-alignment.md §七）：
+    maxlen 无界（lerobot 默认 100 会截断 200 轮跑的统计窗口）、保持 float64
+    （lerobot 的 float32 cast 可能让 .1f 打印差 0.1ms——本类与旧
+    np.percentile 路径逐字节等价：np.quantile(x, 0.95)≡np.percentile(x, 95)）。"""
+
+    def __init__(self):
+        self._buf = deque()   # 无界；perf_counter 差恒正，负值丢弃只是护栏
+
+    def add(self, value_ms):
+        if value_ms >= 0.0:
+            self._buf.append(value_ms)
+
+    def __len__(self):
+        return len(self._buf)
+
+    def max(self):
+        return max(self._buf) if self._buf else float("nan")
+
+    def percentile(self, q):
+        if not self._buf:
+            return float("nan")
+        return float(np.quantile(np.asarray(self._buf), q))
+
+    def p95(self):
+        return self.percentile(0.95)
+
+
+def pstats(tr):
+    """p50/p95/max 毫秒，一行（tr: LatencyTracker）。"""
+    return (f"p50 {tr.percentile(0.5):.1f} | p95 {tr.percentile(0.95):.1f} | "
+            f"max {tr.max():.1f} ms")
 
 
 def chunk_abs_block(chunk):
@@ -798,8 +828,9 @@ input(f"\n⚠ 将连续 {args.rounds} 轮 × 每轮 {n_steps} 步真实驱动双
       + "急停就绪后回车开始，循环期间随时按 q 退出...")
 WATCH.resume()
 
-infer_ms, grab_ms, round_ms, step_ms, track_err = [], [], [], [], []
-pace_hist = []                       # 配速 rad/s（追踪式，速度=导程÷(div×窗口)）
+infer_ms, grab_ms, round_ms, step_ms, track_err = (LatencyTracker(), LatencyTracker(),
+                                                   LatencyTracker(), LatencyTracker(), [])
+pace_hist = LatencyTracker()         # 配速 rad/s（追踪式，速度=导程÷(div×窗口)）
 cmd_hist = None
 aborted = False
 sustain_cmds = 0                     # stale 路径（--late-action stale）的深尾"续航"条数
@@ -865,7 +896,7 @@ def fresh_obs():
     st_raw = grip_state_cmd_override(
         state_from_joints(read_joints(robot, STATE_NAMES)))
     st_n = normalize_state(st_raw, ns)
-    grab_ms.append((time.perf_counter() - t_g) * 1000)
+    grab_ms.add((time.perf_counter() - t_g) * 1000)
     return obs, st_n, st_raw[ARM_SLICE]
 
 
@@ -880,7 +911,7 @@ for r in range(args.rounds):
     t_r = time.perf_counter()
     chunk = job.result()             # 上轮执行期间启动的推理——此刻早已就绪
     BASE_ARM = job.state_arm         # 新块 delta 基准 = 该块预测时刻臂位
-    infer_ms.append(job.dur_ms)
+    infer_ms.add(job.dur_ms)
     if hold_last:
         _sus = f"hold {hold_last} 窗（等推理：hold 最后目标单调收敛，不喂深尾）"
     elif sust_last:
@@ -931,7 +962,7 @@ for r in range(args.rounds):
             while time.perf_counter() < t_end:
                 time.sleep(0.05)          # 主线程小睡，GIL 让给推理线程
             tss = robot.check_trajectory_execution_status([])
-            step_ms.append((time.perf_counter() - t_s) * 1000)
+            step_ms.add((time.perf_counter() - t_s) * 1000)
             ach = read_joints(robot, ARM_NAMES)
             if final_p is not None:
                 track_err.append(float(np.max(np.abs(ach - final_p))) * 1000)
@@ -946,7 +977,7 @@ for r in range(args.rounds):
             if any(s.value != 2 for s in tss):   # ≠ COMPLETED
                 print("⛔ PVT 状态非 COMPLETED，停止循环")
                 aborted = True
-        round_ms.append((time.perf_counter() - t_r) * 1000)
+        round_ms.add((time.perf_counter() - t_r) * 1000)
         if round_ms[-1] > 1:
             print(f"  轮耗时 {round_ms[-1]:.0f} ms（重规划频率 {1000 / round_ms[-1]:.1f} Hz）")
         continue
@@ -1000,14 +1031,14 @@ for r in range(args.rounds):
                 ramp_left -= 1
             robot.set_joint_positions(tgt.tolist(), joint_names=ARM_NAMES,
                                       is_blocking=False, speed_rad_s=pace_v)
-            pace_hist.append(pace_v)
+            pace_hist.add(pace_v)
             if k == 0 and r < args.rounds - 1:
                 # 下一块推理藏进本指令执行期（观测取自滑行中途，即真实当前态）
                 job.start(*fresh_obs())
             while time.perf_counter() - t_s < args.pace:
                 time.sleep(0.02)          # 主线程小睡，GIL 让给推理线程
             st = "ControlStatus.SUCCESS(tracked)"
-        step_ms.append((time.perf_counter() - t_s) * 1000)
+        step_ms.add((time.perf_counter() - t_s) * 1000)
         ach = read_joints(robot, ARM_NAMES)
         err = float(np.max(np.abs(ach - tgt))) * 1000
         track_err.append(err)
@@ -1070,11 +1101,11 @@ for r in range(args.rounds):
                 pace_v = max(V_MIN, min(gap0 / (div_eff * args.pace), args.speed))
                 robot.set_joint_positions(tgt_h.tolist(), joint_names=ARM_NAMES,
                                           is_blocking=False, speed_rad_s=pace_v)
-                pace_hist.append(pace_v)
+                pace_hist.add(pace_v)
                 while (time.perf_counter() - t_s < args.pace
                        and not job.done()):
                     time.sleep(0.01)      # 轮询早退：推理一落地立即出窗
-                step_ms.append((time.perf_counter() - t_s) * 1000)
+                step_ms.add((time.perf_counter() - t_s) * 1000)
                 ach = read_joints(robot, ARM_NAMES)
                 err = float(np.max(np.abs(ach - tgt_h))) * 1000
                 track_err.append(err)
@@ -1094,7 +1125,7 @@ for r in range(args.rounds):
                 ramp_left = args.hold_ramp
                 ramp_fired += 1
             break                          # 推理就绪 → 正常换块（零深尾）
-    round_ms.append((time.perf_counter() - t_r) * 1000)
+    round_ms.add((time.perf_counter() - t_r) * 1000)
     if round_ms[-1] > 1:
         print(f"  轮耗时 {round_ms[-1]:.0f} ms（重规划频率 {1000 / round_ms[-1]:.1f} Hz）")
     sust_last = sustain_cmds - sust_before
@@ -1112,13 +1143,13 @@ exc = float(np.max(np.abs(fin - HOME))) * 1000
 print(f"\n== 汇总（{len(round_ms)} 轮 / {len(step_ms)} 步）==")
 print(f"总用时: {time.perf_counter() - t_loop0:.1f} s"
       f"（数据集单条任务 13s / 390 步参照）")
-if infer_ms:
+if len(infer_ms):
     print(f"推理: {pstats(infer_ms)}")
-if grab_ms:
+if len(grab_ms):
     print(f"取图+读关节: {pstats(grab_ms)}")
-if step_ms:
+if len(step_ms):
     print(f"单指令执行({spc} 步合步): {pstats(step_ms)}")
-if round_ms:
+if len(round_ms):
     print(f"整轮(重规划周期): {pstats(round_ms)}")
 if track_err:
     print(f"导程残差: mean {np.mean(track_err):.1f} | max {max(track_err):.1f} mrad"
@@ -1128,9 +1159,9 @@ if track_err:
           + (f"；包络护栏截断 {env_trunc} 轮" if ENV_LO is not None else "")
           + "：残差≈导程×(1-1/div) 属预期；"
           "≈1 到点，残差≈0 且臂停=到点干等推理）")
-if pace_hist:
-    qp = np.percentile(pace_hist, [50, 95])
-    print(f"配速: p50 {qp[0]:.3f} | p95 {qp[1]:.3f} | max {max(pace_hist):.3f} rad/s"
+if len(pace_hist):
+    print(f"配速: p50 {pace_hist.percentile(0.5):.3f} | "
+          f"p95 {pace_hist.percentile(0.95):.3f} | max {pace_hist.max():.3f} rad/s"
           f"（导程÷({args.pace_div:g}×窗口 {args.pace}s)，上限 {args.speed}，下限 {V_MIN}）")
     print("抖动判读：|Δcmd| 快速变号=抖动；持续同号=漂移（由护栏兜底）")
 if hold_windows:
