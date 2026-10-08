@@ -34,17 +34,22 @@ BUILTIN = {
         "speed": 0.15,        # rad/s
     },
     "loop": {
-        # 2026-10-04 工作点定案（RTC B 脚本当日 14 跑）：速度律 臂速÷原速=n÷(30×pace×div)
+        # 2026-10-07 工作点 v3 定案（前置 --nav-suspend；10-08 键名正规化，
+        # 旧名见 docs/lerobot-alignment.md）：速度律 臂速÷原速=n÷(30×pace×div)
         "rounds": 200,            # 轮。spc=20 时代预算 52-60 轮（9/30）；spc=25
-                                  # 实测落盒 34-46 轮；观察跑 60；q 停=R 落盒才停
-        "steps_per_round": 25,    # 步/轮（25/0.38/1.65=1.33× 原速；chunk 整除 2 轮/块）
-        "steps_per_cmd": 25,      # 步/条（合步不跨 chunk）
+                                  # 实测落盒 34-46 轮；v3 落盒 ~27 轮（t+10.0s）；
+                                  # 观察跑 60；q 停=R 落盒才停
+        "n_action_steps": 25,     # 步/轮（旧名 steps_per_round；25/0.35/1.5=1.59×
+                                  # 原速；chunk 整除 2 轮/块）
+        "steps_per_command": 25,  # 步/条（旧名 steps_per_cmd；合步不跨 chunk）
         "delta_max": 0.3,         # rad/步（典型步距 3-10 mrad，只兜快相位削顶）
         "speed": 1.0,             # rad/s；0.25 会削工作点快相位（9/30 实测）
-        "pace": 0.38,             # s；低于水位→RTC hold 兜底（纯墙钟零垃圾）；
-                                  # 0.35-0.43 墙钟相同（节奏钉在推理水位）=死 knob
-        "pace_div": 1.65,         # spc=25 下 1.45-1.65 任务时间零差（div 饱和），
-                                  # 取 1.65=臂最慢（1.33×）jerk 最小余量最大
+        "pace": 0.35,             # s；nav-suspend 下水位≈0.34-0.35（推理 329+取图
+                                  # +开销），hold 窗=0（两跑 76 轮）。0.34 以下勿入
+                                  # =贴水崖边，偶发抖动即回流 hold 窗
+        "pace_div": 1.5,          # v2 时代 div 饱和三档零差是"轮时间钉在水位"下的
+                                  # 结论；v3 pace 活了 div 才开始有意义。1.5=落盒
+                                  # t+10.0s 纪录，代价=导程残差 p50 79/max 283 mrad
         "near_div": 2,            # 近距阻尼：导程<near_gap 时改用此系数（单调收敛+
                                   # 滤放置犹豫摆幅；9/30 L 释放段真机验证）
         "near_gap": 0.06,         # 近距阻尼触发导程，rad（60 mrad）
@@ -57,7 +62,8 @@ BUILTIN = {
         "switch_dist": 0.06,      # rad
         "chunk_mode": "track",    # track / settle / traj（traj 已封存慎用）
         "traj_dt": 0.1,           # s/点（traj 模式）
-        "catch_timeout": 8.0,     # s；回放步末追平门超时（run_g1_replay 用）
+        "catch_timeout": 8.0,     # s；死配置（无消费方——replay 读 [replay].
+                                  # catch_timeout），留作历史遗留
     },
     "replay": {
         # run_g1_replay 专用（与 loop 解耦）：速度按 ep0 增量分布定标——
@@ -85,14 +91,45 @@ BUILTIN = {
     },
 }
 
+# 2026-10-08 命名正规化（对照表见 docs/lerobot-alignment.md）：[loop] 旧键名 → 新键名。
+# 命中旧键直接 SystemExit——三态回填（CLI > config > BUILTIN）会把缺键静默回落
+# 内置默认，配置类错误宁可启动报错不可静默换值。
+_RENAMED_LOOP_KEYS = {
+    "steps_per_round": "n_action_steps",
+    "steps_per_cmd": "steps_per_command",
+}
+_KNOWN_LOOP_KEYS = {
+    "rounds", "n_action_steps", "steps_per_command", "delta_max", "speed",
+    "pace", "pace_div", "near_div", "near_gap", "cache_frames",
+    "max_excursion", "settle", "settle_frac", "switch_dist", "chunk_mode",
+    "traj_dt", "catch_timeout",
+}
+
 
 def load(path=DEFAULT_PATH):
-    """读 toml；文件缺失返回 {}（apply 逐键回落 BUILTIN）。"""
+    """读 toml；文件缺失返回 {}（apply 逐键回落 BUILTIN）。
+
+    [loop] 内旧键名（steps_per_round/steps_per_cmd）命中即 SystemExit 并提示
+    新键名；未认键打印告警（tomllib 本身静默忽略未知键，见 config/README §7）。
+    """
     p = pathlib.Path(path)
     if not p.exists():
         return {}, p
     with open(p, "rb") as f:
-        return tomllib.load(f), p
+        data = tomllib.load(f)
+    loop = data.get("loop")
+    if isinstance(loop, dict):
+        for old, new in _RENAMED_LOOP_KEYS.items():
+            if old in loop:
+                raise SystemExit(
+                    f"[config] {p} [loop].{old} 已改名 {new}"
+                    f"（2026-10-08 命名正规化，见 docs/lerobot-alignment.md），"
+                    f"请更新 toml；旧键硬报错防静默回落内置默认")
+        unknown = set(loop) - _KNOWN_LOOP_KEYS
+        if unknown:
+            print(f"[config] ⚠ {p} [loop] 未认键（tomllib 静默忽略，请核对拼写）: "
+                  + ", ".join(sorted(unknown)))
+    return data, p
 
 
 def apply(args, mapping, path=DEFAULT_PATH):
@@ -100,6 +137,7 @@ def apply(args, mapping, path=DEFAULT_PATH):
 
     mapping: {args 的 dest: (toml 小节, 键)}。
     返回从 config 文件实际覆盖的 (dest, 值) 列表（内置默认兜底的不算）。
+    [loop] 旧键名在 load() 即硬报错（防静默回落），见 _RENAMED_LOOP_KEYS。
     """
     cfg, p = load(path)
     from_file = []
