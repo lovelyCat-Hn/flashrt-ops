@@ -16,7 +16,7 @@
 - [G1 微调数据集判读](galbot-pi05-g1-finetune-data.md) — pick_place_balence 16/23 维【右臂在前】(info.json 权威，记反会把臂甩背后)；③层 800ms 慢推理已破案(state 文本进 prompt，fixed 模式根治)；闭环 5 轮全绿，残留指令切换抖动待调
 - [G1 PVT 轨迹接口危险实录](galbot-g1-pvt-trajectory-hazard.md) — 零运动探针仍致剧烈抖动，traj 路线封存；提速加剧抖动(每点全停,冲击∝速度)，平滑走 track+合步
 - [G1 臂控制模式与安全护栏](galbot-arm-control-mode-safety.md) — 臂=刚性位置伺服(SDK 无阻抗切换入口)；臂端 fault 不回传恒 SUCCESS；压桌防护=包络护栏(d26f9ce；⚠10-07 修范畴错误：比对对象=BASE_ARM+delta 绝对构型，直接比 delta 必拦停)；Motion.init 脱机挂死 FK 死路；夹爪 0.5 m/s 疑超域致 fault
-- 基准报告在 `~/holy/BENCHMARKS.md`（对外汇报用；10-08 拆分后只留当前定档速览+10-07 现行章节，echo 机 09-21~09-24 旧数据+已推翻结论在 `~/holy/BENCHMARKS_ARCHIVE.md` 顶部有标注）；操作手册在 `~/holy/USAGE.md`（装机+日常使用，随 DEPLOY.md 构成三件套文档）
+- 基准数据在 `~/holy/BENCHMARKS.md`（**论文级数据报表：零判读，只收数据表+条件+复现命令**；写作规范=`.claude/skills/bench-report/SKILL.md`，探针输出必须先落盘 evidence/；§三有 10-06/07 逐层 K/V cos 消融表，原始件 evidence/20261006-07_quant_kv_ablation/；09-21~24 旧数据在 BENCHMARKS_ARCHIVE.md）；操作手册在 `~/holy/USAGE.md`（装机+日常使用，随 DEPLOY.md 构成三件套文档）
 - [安装类命令用户亲自执行](galbot-user-runs-install-commands.md) — conda/pip/apt 安装发命令清单给用户跑;我只做只读检查和判读
 - [本机 GitHub 连接](galbot-github-remote-setup.md) — SSH 账号 lovelyCat-Hn 可用；ghproxy 镜像会卡死 fetch 已移除勿加回；push 仅限 SSH；上游 flashrt-project 无写权限
 - [G1 CUDA graph 段错误修复](galbot-g1-cuda-graph-instantiate-fix.md) — L4T r35.6 iGPU 旧式 Instantiate 必崩走 WithFlags；本机 run_* 四脚本 9/30 解封默认开图（env 门控，回退=前缀 PI05_NO_GRAPH=1），闭环 60 轮已验（p50 380ms）；bench 收益仅 ~3% 勿期待翻倍

@@ -52,5 +52,5 @@
 
 - `~/holy/DEPLOY.md` — 新机部署指南（纯环境包配方 v3，7.5G 不含 models）
 - `~/holy/USAGE.md` — 操作手册（装机 + 日常使用）
-- `~/holy/BENCHMARKS.md` — 基准报告（对外汇报用；**2026-10-08 拆分**：只留当前定档速览+10-07 现行章节——延迟阶梯/v3 工作点/W8A16/nav-suspend/归因闭合；echo 机 09-21~09-24 早期数据与已推翻结论（定档 eager、INT8 延迟档、cache_frames=2）整体移入 `BENCHMARKS_ARCHIVE.md`，其顶部有 ⚠ 标注防误引）
-- `~/holy/scripts/` — 2026-10-04 分层：`inference/` 直接入口（run_g1_loop_rtc=闭环定案入口 / run_g1_loop / run_g1_inference / g1_config.py 等，共享 config/g1.toml）、`g1/` 整备标定、`dataset/` 数据集工具、`eval/` 精度评估、`test/` 性能诊断、`probes/` 探针封存（g1_traj_probe / int8 三件套）；`config/README.md` = g1.toml 导读
+- `~/holy/BENCHMARKS.md` — **基准数据报表**（**定位=论文级数据报表：只收数据表+测量条件+复现命令，零判读**；判读一律进记忆库。写作规范=**`.claude/skills/bench-report/SKILL.md`**：探针 stdout 必须当场落盘 `evidence/YYYYMMDD_主题/`、表格自足/单位进表头/口径注脚、新数据先落盘再进表）。2026-10-08 起：速览表置顶+§一延迟+§二模块耗时+**§三量化消融（含 10-06/07 逐层 K/V cos 表 int8/rot8、chan8/chan8all 按通道、dec8/w8a16 sanity，原始件在 `evidence/20261006-07_quant_kv_ablation/`）**+§四 W8A16+§五导航搁置+§六SDK 遥测+§七闭环工作点+§八复现索引；echo 机 09-21~09-24 旧数据与已推翻结论在 `BENCHMARKS_ARCHIVE.md`（顶部 ⚠ 标注）
+- `~/holy/scripts/` — 2026-10-04 分层：`inference/` 直接入口（run_g1_loop_rtc=闭环定案入口 / run_g1_loop / run_g1_inference / g1_config.py 等，共享 config/g1.toml）、`g1/` 整备标定、`dataset/` 数据集工具、`eval/` 精度评估、`test/` 性能诊断、`probes/` 探针（g1_traj_probe / int8 三件套 / rot_equivalence / module_timing（10-08 从 transcript 抢救回）/ sdkfree）；`config/README.md` = g1.toml 导读
