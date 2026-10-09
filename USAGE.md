@@ -158,14 +158,15 @@ v3 的 A/B 孪生：删配速律家族（pace/div/合步/hold 全套），改为
 ~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_native.py --exec --nav-suspend \
     --rounds 2 --fps 15 --speed 0.5
 
-# Part D 真机三态 A/B（各 60 轮）
+# Part D 真机三态 A/B（各 60 轮；native 侧用 10-09 定案工作点 6拍/2窗）
 # ① 基线 = v3 配速律（上方 3.6 原命令）
 ~/holy/run.sh ~/holy/scripts/inference/run_g1_loop.py --exec --nav-suspend --rounds 60
-# ② native 裸跑（预期 ≈1.0× 原速；星饿 0 窗；tick 过冲 p95<10ms）
-~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_native.py --exec --nav-suspend --rounds 60
-# ③ native+RTC 前缀引导（对比换块接缝尖峰 |Δcmd| 与残差）
+# ② native 裸跑（≈1.0× 原速；星饿 0 窗；tick 过冲 p95<10ms；接缝对照主指标）
 ~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_native.py --exec --nav-suspend \
-    --rounds 60 --rtc-horizon 10
+    --rounds 60 --cmd-every 6 --arrive-div 2
+# ③ native+RTC 前缀引导（同 ② + 引导；预期接缝 < 块内均值）
+~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_native.py --exec --nav-suspend \
+    --rounds 60 --cmd-every 6 --arrive-div 2 --rtc-horizon 10
 ```
 
 与 v3 的关键语义差（判读前必读）：
@@ -175,16 +176,25 @@ v3 的 A/B 孪生：删配速律家族（pace/div/合步/hold 全套），改为
 - **`--speed 2.0` 是天花板不是配速**：不读 config `[loop].speed`（那是 v3 配速律参数）；
   实际速度=每拍 Δaction/33ms，默认即数据集原速
 - **`--arrive-div 2.0`（默认）**：速度=导程÷(窗口拍数×tick×此值)——窗内永不到点，
-  伺服不刹停（v3 半程覆盖思想的逐拍版）；1.0=窗末到点（10-09 真机实证启停锯齿，勿回）
+  伺服不刹停（v3 半程覆盖思想的逐拍版）；1.0=窗末到点（10-09 真机实证启停锯齿，勿回）。
+  div 与 N（cmd-every）耦合：速度上限 v_max=限幅÷(N×tick×div)，平衡滞后≈限幅×
+  div/k（k=伺服实际覆盖率≈1-2，实测不确定）；**div4@N3 实测锯齿消但滞后爬顶限幅
+  300**（151516），N 变窗变时 div 要反向调保 v_max
 - **`--const-speed 0`（默认）=判案实验关**；>0 时每条指令速度恒定（仍受 `--speed`
   截断），把速度从"导程→速度"反馈环里拿出来——lerobot 固件 Profile_Velocity
   固定档的等价物（SDK `speed_rad_s` 本义就是速度上限，见 g1 `__init__.pyi`）。
-  10-09 诊断工具：143546 实测导程 0.3-0.5s 锯齿（24↔253 mrad）疑似导程-速度
-  闭环振荡；若恒速顺了=锯齿是配速律抖出来的，照旧=激励在指令节奏
-- **`--cmd-every 3`（默认）**：合拍下发，每 3 拍一条位置指令（目标=块内第 k+2 行
-  绝对位），伺服整窗跑连续轮廓——10-09 两跑实证逐拍指令的 30Hz 重规划激励是
-  持续抖振主源，速度律改不掉；合拍=v3 合步家族的细粒度版。消费/换块/水位语义
-  不变（仍 1 行/拍，夹爪仍逐拍）；1=逐拍指令旧行为
+  **10-09 判案结果：证伪**——恒速 1.0 使小导程段 20-80ms 到点+急停循环，
+  抖感加剧（150621）；v∝gap 配速律正是防到点机制，方向是"推离到点边界"
+  而非拆环
+- **`--cmd-every 3`（默认）**：合拍下发，每 N 拍一条位置指令（目标=块内第 k+N-1 行
+  绝对位），伺服整窗跑连续轮廓——逐拍指令的 30Hz 重规划激励是持续抖振主源，
+  速度律改不掉；合拍=v3 合步家族的细粒度版。消费/换块/水位语义
+  不变（仍 1 行/拍，夹爪仍逐拍）；1=逐拍指令旧行为。
+  **10-09 五跑定案（真机）**：抖感随指令沿频率单调（30Hz≫10Hz>5Hz），
+  **exec 推荐工作点 `--cmd-every 6 --arrive-div 2`**（5Hz 沿、v_max 0.75、
+  滞后 mean 95/顶 294，快段顶限幅属预期；152355 五块含快慢段体感不抖，
+  残差与 v3 同档）；默认 3 只因与 div2.0 对称，单独 3/2.0 会骑到点边界
+  锯齿 hunting（142939/143546 实测 24↔253 mrad）
 - **`--n-action-steps` 只定换块时机**（预取水位阈值），不是消费配额——整块换入弃尾
 - **`--rtc-horizon 0`（默认）=RTC 关**；>0 时换块把旧块未消费尾段重锚后作引导前缀
   传引擎（消接缝尖峰；机制与消融数据见 BENCHMARKS §八）。前缀窗口**右移
