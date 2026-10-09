@@ -620,6 +620,10 @@ class LatencyTracker:
     def __len__(self):
         return len(self._buf)
 
+    def __getitem__(self, i):
+        return self._buf[i]          # exec 轮内打印用 step_ms[-1]/round_ms[-1]
+                                     # （10-08 对齐重构漏配，10-09 首次 exec 实证崩）
+
     def max(self):
         return max(self._buf) if self._buf else float("nan")
 
