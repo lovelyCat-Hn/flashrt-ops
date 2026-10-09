@@ -85,6 +85,12 @@ ap.add_argument("--arrive-div", type=float, default=2.0,
                 help="到达窗口系数：速度=导程÷(窗口拍数×tick×此值)。>1 时窗内永不到点，"
                      "伺服不刹停（v3 半程覆盖思想的逐拍版）；1.0=窗末到点"
                      "（10-09 真机实证启停锯齿，勿回）")
+ap.add_argument("--const-speed", type=float, default=0.0,
+                help="常数速度判案实验（默认 0=关，走导程配速律）：>0 时每条指令"
+                     "速度恒为该值（仍受 --speed 天花板截断），不随导程波动——把"
+                     "速度从间隙反馈环里拿出来（=lerobot 固件 Profile_Velocity "
+                     "固定档的等价物，SDK speed_rad_s 本义就是速度上限）。若顺了"
+                     "=块内锯齿是导程-速度闭环振荡激励的；若照旧=激励在指令节奏")
 ap.add_argument("--cmd-every", type=int, default=3,
                 help="合拍下发：每 N 拍发一条位置指令，目标=块内第 k+N-1 行绝对位，"
                      "速度=导程÷(N×tick×arrive_div)——伺服整窗跑连续轮廓，消 30Hz"
@@ -853,6 +859,16 @@ def swap_envelope_check():
     return False
 
 
+def pace_v(gap0: float) -> float:
+    """下发速度：--const-speed >0 时恒速（判案实验，lerobot 固件 Profile_Velocity
+    固定档的等价物）；否则导程配速律 导程÷(合拍窗×tick×arrive_div)。
+    两者同受 --speed 天花板截断；V_MIN 仅作用于配速律分支（驻停缓爬）。"""
+    if args.const_speed > 0:
+        return min(args.const_speed, args.speed)
+    return max(V_MIN, min(gap0 / (args.cmd_every * TICK * args.arrive_div),
+                          args.speed))
+
+
 if not args.do_exec:
     print(f"\n== [干跑] 首块前 5 拍（tick {TICK * 1000:.1f} ms，逐拍限幅 "
           f"±{args.delta_max} rad）未下发任何命令 ==")
@@ -862,8 +878,7 @@ if not args.do_exec:
             j = min(tk + args.cmd_every - 1, len(chunk) - 1)
             tgt = plan_step(j, cur)
             gap0 = float(np.max(np.abs(tgt - cur)))
-            v = max(V_MIN, min(gap0 / (args.cmd_every * TICK * args.arrive_div),
-                               args.speed))
+            v = pace_v(gap0)
             drift = float(np.max(np.abs(tgt - HOME)))
             print(f"  拍{tk}: 下发行{j}（合拍 {args.cmd_every}）限幅后 {np.round(tgt, 3).tolist()}"
                   f"\n        导程 {gap0 * 1000:.1f} mrad → 速度 {v:.3f} rad/s"
@@ -892,7 +907,9 @@ if args.do_exec:
     input(f"\n⚠ 将连续驱动双臂 {args.rounds} 块 × 至多 {len(chunk)} 拍"
           f"（tick {TICK * 1000:.1f} ms，合拍 {args.cmd_every} 拍/条，"
           f"逐拍限幅 ±{args.delta_max} rad，速度天花板 {args.speed} rad/s，"
-          f"到达窗口 {args.arrive_div:g} 窗，漂移护栏 ±{args.max_excursion} rad"
+          + (f"常数速度 {args.const_speed:g} rad/s，"
+             if args.const_speed > 0 else f"到达窗口 {args.arrive_div:g} 窗，")
+          + f"漂移护栏 ±{args.max_excursion} rad"
           + ("，夹爪下发开启）。\n" if GRIP else ")。\n")
           + "急停就绪后回车开始，循环期间随时按 q 退出...")
 WATCH.resume()
@@ -1012,10 +1029,10 @@ while not aborted:
         v = 0.0
         if is_send:
             if gap0 >= GAP_EPS:
-                # 速度=导程÷(窗口拍数×tick×arrive_div)：窗内不到点，伺服整窗连续
-                # 轮廓；上限 --speed 兜底模型瞬发大步，下限 V_MIN 驻停缓爬
-                v = max(V_MIN, min(gap0 / (args.cmd_every * TICK * args.arrive_div),
-                                   args.speed))
+                # 速度见 pace_v()：默认导程配速律（窗内不到点，伺服整窗连续轮廓，
+                # 上限 --speed 兜底模型瞬发大步，下限 V_MIN 驻停缓爬）；
+                # --const-speed >0 时恒速判案（速度退出反馈环）
+                v = pace_v(gap0)
                 if args.do_exec:
                     st = robot.set_joint_positions(tgt.tolist(), joint_names=ARM_NAMES,
                                                    is_blocking=False, speed_rad_s=v)
