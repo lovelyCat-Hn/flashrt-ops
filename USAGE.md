@@ -204,6 +204,40 @@ v3 的 A/B 孪生：删配速律家族（pace/div/合步/hold 全套），改为
 - 遥测新增：tick_ms/tick_jit、星饿窗、**接缝尖峰**（换块后首拍 |Δcmd| vs 块内均值）
 - 日志落 `logs/loop_native_<时间戳>.log`；其余护栏（包络/漂移/夹爪/--grip-state-cmd）与 v3 全同
 
+### 3.8 轨迹流执行器（run_g1_loop_traj，2026-10-09 新增）
+
+native 的发令侧替换版（推理链路/护栏/水位换块/星饿/接缝遥测/RTC 全同母本）：
+每行（30Hz row-tick）不再发一条位置指令，而是换块时一次性把「当前实际位+链式
+限幅行目标」样条插值成 **8 帧/行（≈240Hz）**，row-tick 内按 (tick−6ms) 预算
+匀速突发下发 `set_joint_commands`（time_from_start=0，标准关节只消费 position
+——SDK 契约 "suitable for high-frequency control usage"）。指令阶跃幅值≈
+行差/8（<2 mrad 量级）=降到伺服分辨率以下消指令沿激励，这是同事
+infer_policy 的真机在役路线（插值器移植件 `g1_traj_interp.py`：
+linear/cubic/quintic，默认 cubic）。
+
+```bash
+# 冒烟首跑（先 2 块看遥测：突发预算内=丢拍≈0；SDK 单帧调用超预算会持续丢拍→降 --frames-per-row）
+~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_traj.py --exec --nav-suspend --rounds 2
+# 60 轮（与 3.7 的 native 6/2 工作点 A/B 对照）
+~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_traj.py --exec --nav-suspend --rounds 60
+```
+
+与 native 的关键语义差（判读前必读）：
+- **块内开环、块间重锚**：帧在换块瞬间一次性插好，行内不再读关节重规划——
+  与 infer_policy 同节奏；块内滞后靠下一块链式限幅从实际位重新出发校正。
+  残差（导程）语义与 native 同表头，量级预期≈native 6/2 工作点
+- **无速度概念**：速度=帧间距/帧周期，由样条与行差涌现；删 --speed/
+  --arrive-div/--cmd-every/--const-speed 全家，新增 --frames-per-row（默认 8，
+  SDK 单帧调用须 <(tick−预留)÷N，持续丢拍就降 N）/--burst-reserve-ms（默认 6）/
+  --interp（cubic）/--ema-alpha（0=关，行目标低通的执行侧兜底杠杆）
+- **换块拍多 ~11ms**（cubic 插值构建）→ 每块至多 1 次丢拍重锚，属预期；
+  帧突发绝不追发（tick 绝对截止铁律同 native）
+- **PVT 封存边界澄清**：10-04 封的是 execute_joint_trajectory 整轨规划 API；
+  本脚本走的 set_joint_commands 实时流是另一条从未试过的路线，且是同事
+  真机在役同款
+- 遥测：接缝尖峰/残差/丢拍/星饿同 native 表头；打印列「N帧@240Hz」=该拍突发
+- 日志落 `logs/loop_traj_<时间戳>.log`
+
 ## 4. 与 GalbotSDK 联用（同进程，已验证）
 
 ```python
