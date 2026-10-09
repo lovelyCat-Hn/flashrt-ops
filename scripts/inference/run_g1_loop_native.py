@@ -631,6 +631,8 @@ def send_grip(robot, chunk_row):
     """
     if GRIP is None:
         return None
+    if not args.do_exec:
+        return "dry（不下发）"
     parts = []
     for name, dim in GRIP["names"]:
         p = float(np.clip(chunk_row[dim], 0.0, 100.0))
@@ -854,20 +856,17 @@ if not args.do_exec:
             w = GRIP["wmin"] + p / 100.0 * (GRIP["wmax"] - GRIP["wmin"])
             desc.append(f"{name[0].upper()} {p:.1f}%→{w * 1000:.0f}mm")
         print(f"  夹爪目标: {'  '.join(desc)}")
-    print("\n[干跑] 未下发任何命令。加 --exec 真实执行。")
-    WATCH.restore()
-    if NAV is not None:
-        NAV.resume()
-    robot.request_shutdown(); robot.wait_for_shutdown(); robot.destroy()
-    os._exit(0)
+    print("\n[干跑] 前 5 拍未下发。继续无下发彩排至 --rounds 块"
+          "（覆盖水位预取→换块弃尾→出口全路径；逐拍节奏见循环打印）\n")
 
 # ── ③ 固定节拍循环（绝对截止时序；水位预取；换块弃尾）──
 WATCH.pause()
-input(f"\n⚠ 将连续驱动双臂 {args.rounds} 块 × 至多 {len(chunk)} 拍"
-      f"（tick {TICK * 1000:.1f} ms，逐拍限幅 ±{args.delta_max} rad，"
-      f"速度天花板 {args.speed} rad/s，漂移护栏 ±{args.max_excursion} rad"
-      + ("，夹爪下发开启）。\n" if GRIP else ")。\n")
-      + "急停就绪后回车开始，循环期间随时按 q 退出...")
+if args.do_exec:
+    input(f"\n⚠ 将连续驱动双臂 {args.rounds} 块 × 至多 {len(chunk)} 拍"
+          f"（tick {TICK * 1000:.1f} ms，逐拍限幅 ±{args.delta_max} rad，"
+          f"速度天花板 {args.speed} rad/s，漂移护栏 ±{args.max_excursion} rad"
+          + ("，夹爪下发开启）。\n" if GRIP else ")。\n")
+          + "急停就绪后回车开始，循环期间随时按 q 退出...")
 WATCH.resume()
 
 round_ms = LatencyTracker()          # 块耗时（换块到换块，对齐 v3 轮耗时口径）
@@ -972,12 +971,15 @@ while not aborted:
             # 速度由 Δaction/tick 涌现：导程÷tick（1 步/拍 ≈ 数据集原速），
             # 上限 --speed 兜底模型瞬发大步，下限 V_MIN 驻停缓爬
             v = max(V_MIN, min(gap0 / TICK, args.speed))
-            st = robot.set_joint_positions(tgt.tolist(), joint_names=ARM_NAMES,
-                                           is_blocking=False, speed_rad_s=v)
-            if not str(st).startswith("ControlStatus.SUCCESS"):
-                print(f"⛔ 下发非 SUCCESS（{st}），停止循环")
-                aborted = True
-                break
+            if args.do_exec:
+                st = robot.set_joint_positions(tgt.tolist(), joint_names=ARM_NAMES,
+                                               is_blocking=False, speed_rad_s=v)
+                if not str(st).startswith("ControlStatus.SUCCESS"):
+                    print(f"⛔ 下发非 SUCCESS（{st}），停止循环")
+                    aborted = True
+                    break
+            else:
+                st = "dry"   # 干跑彩排：打印节奏与遥测，绝不下发
         else:
             skip_sends += 1
             st = "held（导程≈0 免发）"
@@ -998,6 +1000,7 @@ while not aborted:
     # ── 预取：到水位且无在飞推理 → 带前缀启动下块 ──
     if job is None and n_swapped < args.rounds and k >= _w:
         _obs, _st_n, _st_arm = fresh_obs()
+        job = _PredictJob(model, args.prompt)
         job.start(_obs, _st_n, _st_arm, rtc_prefix=_rtc_prefix(_st_arm))
 
     tick_ms.add((time.perf_counter() - t_tick) * 1000)
@@ -1009,7 +1012,7 @@ if _starve_t0 is not None:
     starve_windows += 1
     starve_total += _d
     starve_worst = max(starve_worst, _d)
-if GRIP:
+if GRIP and args.do_exec:
     time.sleep(8.0)   # 夹爪反馈滞后 ~6.3s（2026-09-23 实测），留足再读终态
     for name, _ in GRIP["names"]:
         gs = robot.get_gripper_state(getattr(G1JointGroup, name))
