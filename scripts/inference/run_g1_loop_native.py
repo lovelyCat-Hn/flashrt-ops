@@ -82,10 +82,15 @@ ap.add_argument("--speed", type=float, default=2.0,
                      "——那是 v3 配速律的参数；本脚本速度由 Δaction/tick 涌现，"
                      "该上限只在模型瞬发大步时兜底）")
 ap.add_argument("--arrive-div", type=float, default=2.0,
-                help="到达窗口系数：速度=导程÷(tick×此值)。>1 时拍内永不到点，"
-                     "伺服不逐拍刹停（v3 半程覆盖的逐拍版；稳态滞后≈每拍增量"
-                     "×div/(div-1)，div=2 时≈2 拍增量）；1.0=旧行为本拍到点"
-                     "（30Hz 启停锯齿=抖动源，10-09 真机实证，勿回）")
+                help="到达窗口系数：速度=导程÷(窗口拍数×tick×此值)。>1 时窗内永不到点，"
+                     "伺服不刹停（v3 半程覆盖思想的逐拍版）；1.0=窗末到点"
+                     "（10-09 真机实证启停锯齿，勿回）")
+ap.add_argument("--cmd-every", type=int, default=3,
+                help="合拍下发：每 N 拍发一条位置指令，目标=块内第 k+N-1 行绝对位，"
+                     "速度=导程÷(N×tick×arrive_div)——伺服整窗跑连续轮廓，消 30Hz"
+                     " 逐拍重规划激励（10-09 两跑实证逐拍指令=持续抖振主源，速度律"
+                     "改不掉；合拍=v3 合步家族的细粒度版）。消费/换块/水位语义不变"
+                     "（仍 1 行/拍，夹爪仍逐拍）；1=逐拍指令旧行为")
 ap.add_argument("--starve-limit", type=float, default=2.0,
                 help="星饿安全停机阈值 s：块耗尽且推理未归超过该时长即停循环"
                      "（默认 2.0s=正常推理余量 ~6×；星饿期不下发=伺服保持）")
@@ -841,14 +846,19 @@ if not args.do_exec:
           f"±{args.delta_max} rad）未下发任何命令 ==")
     for tk in range(5):
         cur = read_joints(robot, ARM_NAMES)
-        tgt = plan_step(tk, cur)
-        gap0 = float(np.max(np.abs(tgt - cur)))
-        v = max(V_MIN, min(gap0 / (TICK * args.arrive_div), args.speed))
-        drift = float(np.max(np.abs(tgt - HOME)))
-        print(f"  拍{tk}: 限幅后 {np.round(tgt, 3).tolist()}"
-              f"\n        导程 {gap0 * 1000:.1f} mrad → 速度 {v:.3f} rad/s"
-              f" | 离起始位峰值 {drift * 1000:.0f} mrad"
-              f"（护栏 {args.max_excursion * 1000:.0f}）")
+        if tk % args.cmd_every == 0:
+            j = min(tk + args.cmd_every - 1, len(chunk) - 1)
+            tgt = plan_step(j, cur)
+            gap0 = float(np.max(np.abs(tgt - cur)))
+            v = max(V_MIN, min(gap0 / (args.cmd_every * TICK * args.arrive_div),
+                               args.speed))
+            drift = float(np.max(np.abs(tgt - HOME)))
+            print(f"  拍{tk}: 下发行{j}（合拍 {args.cmd_every}）限幅后 {np.round(tgt, 3).tolist()}"
+                  f"\n        导程 {gap0 * 1000:.1f} mrad → 速度 {v:.3f} rad/s"
+                  f" | 离起始位峰值 {drift * 1000:.0f} mrad"
+                  f"（护栏 {args.max_excursion * 1000:.0f}）")
+        else:
+            print(f"  拍{tk}: ·静默（合拍中，伺服续行）")
     if ENV_LO is not None:
         _v = env_first_violation(chunk_abs_block(chunk))
         _m = ("全块通过" if _v is None else
@@ -868,9 +878,9 @@ if not args.do_exec:
 WATCH.pause()
 if args.do_exec:
     input(f"\n⚠ 将连续驱动双臂 {args.rounds} 块 × 至多 {len(chunk)} 拍"
-          f"（tick {TICK * 1000:.1f} ms，逐拍限幅 ±{args.delta_max} rad，"
-          f"速度天花板 {args.speed} rad/s，到达窗口 {args.arrive_div:g} 拍，"
-          f"漂移护栏 ±{args.max_excursion} rad"
+          f"（tick {TICK * 1000:.1f} ms，合拍 {args.cmd_every} 拍/条，"
+          f"逐拍限幅 ±{args.delta_max} rad，速度天花板 {args.speed} rad/s，"
+          f"到达窗口 {args.arrive_div:g} 窗，漂移护栏 ±{args.max_excursion} rad"
           + ("，夹爪下发开启）。\n" if GRIP else ")。\n")
           + "急停就绪后回车开始，循环期间随时按 q 退出...")
 WATCH.resume()
@@ -956,48 +966,67 @@ while not aborted:
                   "（机械臂留在原地）")
             aborted = True
     else:
-        # ── 常规拍：读关节 → 限幅目标 → 夹爪 → 速度涌现下发 ──
+        # ── 常规拍：读关节 → 合拍下发（每 N 拍一条指令）→ 夹爪逐拍 ──
         cur = read_joints(robot, ARM_NAMES)
-        tgt = plan_step(k, cur, args.delta_max)
-        drift = float(np.max(np.abs(tgt - HOME)))
-        if drift > args.max_excursion:
-            print(f"⛔ 漂移护栏：关节最大偏离 {drift * 1000:.0f} mrad > "
-                  f"{args.max_excursion * 1000:.0f}，停止循环（机械臂留在原地）")
-            aborted = True
-            break
-        cmd_delta = (tgt - last_tgt) if last_tgt is not None else np.zeros_like(tgt)
-        d_mrad = float(np.max(np.abs(cmd_delta))) * 1000
-        if seam_first is None:
-            seam_first = d_mrad          # 接缝尖峰：换块首拍 |Δcmd|
-        else:
-            seam_rest.append(d_mrad)
-        gp = send_grip(robot, chunk[k])
-        gap0 = float(np.max(np.abs(tgt - cur)))
-        if gap0 >= GAP_EPS:
-            # 速度由 Δaction/tick 涌现：导程÷(tick×arrive_div)。arrive_div>1 =
-            # 拍内不到点伺服不刹停（v3 半程覆盖的逐拍版；10-09 真机实证 1.0 的
-            # 逐拍到点=30Hz 启停锯齿抖动主源）；上限 --speed 兜底瞬发大步
-            v = max(V_MIN, min(gap0 / (TICK * args.arrive_div), args.speed))
-            if args.do_exec:
-                st = robot.set_joint_positions(tgt.tolist(), joint_names=ARM_NAMES,
-                                               is_blocking=False, speed_rad_s=v)
-                if not str(st).startswith("ControlStatus.SUCCESS"):
-                    print(f"⛔ 下发非 SUCCESS（{st}），停止循环")
-                    aborted = True
-                    break
+        is_send = (k % args.cmd_every == 0)
+        if is_send:
+            # 下发拍：目标=块内第 j 行绝对位（本条指令覆盖到第 j 行）
+            j = min(k + args.cmd_every - 1, len(chunk) - 1)
+            tgt = plan_step(j, cur, args.delta_max)
+            cmd_delta = (tgt - last_tgt) if last_tgt is not None else np.zeros_like(tgt)
+            d_mrad = float(np.max(np.abs(cmd_delta))) * 1000
+            if seam_first is None:
+                seam_first = d_mrad          # 接缝尖峰：换块首发 |Δcmd|
             else:
-                st = "dry"   # 干跑彩排：打印节奏与遥测，绝不下发
+                seam_rest.append(d_mrad)
+            gp = send_grip(robot, chunk[k])
+            gap0 = float(np.max(np.abs(tgt - cur)))
         else:
-            skip_sends += 1
-            st = "held（导程≈0 免发）"
-            v = 0.0
-        last_tgt = tgt.copy()
+            # 静默拍：位置不下发（伺服续行当前轮廓=整窗连续运动）；夹爪仍逐拍
+            tgt = None
+            gp = send_grip(robot, chunk[k])
+            d_mrad = 0.0
+            gap0 = (float(np.max(np.abs(last_tgt - cur)))
+                    if last_tgt is not None else 0.0)
+            st = "伺服续行"
+        guard_tgt = tgt if tgt is not None else last_tgt
+        if guard_tgt is not None:
+            drift = float(np.max(np.abs(guard_tgt - HOME)))
+            if drift > args.max_excursion:
+                print(f"⛔ 漂移护栏：关节最大偏离 {drift * 1000:.0f} mrad > "
+                      f"{args.max_excursion * 1000:.0f}，停止循环（机械臂留在原地）")
+                aborted = True
+                break
+        v = 0.0
+        if is_send:
+            if gap0 >= GAP_EPS:
+                # 速度=导程÷(窗口拍数×tick×arrive_div)：窗内不到点，伺服整窗连续
+                # 轮廓；上限 --speed 兜底模型瞬发大步，下限 V_MIN 驻停缓爬
+                v = max(V_MIN, min(gap0 / (args.cmd_every * TICK * args.arrive_div),
+                                   args.speed))
+                if args.do_exec:
+                    st = robot.set_joint_positions(tgt.tolist(), joint_names=ARM_NAMES,
+                                                   is_blocking=False, speed_rad_s=v)
+                    if not str(st).startswith("ControlStatus.SUCCESS"):
+                        print(f"⛔ 下发非 SUCCESS（{st}），停止循环")
+                        aborted = True
+                        break
+                else:
+                    st = "dry"   # 干跑彩排：打印节奏与遥测，绝不下发
+            else:
+                skip_sends += 1
+                st = "held（导程≈0 免发）"
+                v = 0.0
+            last_tgt = tgt.copy()
         k += 1
         ach = read_joints(robot, ARM_NAMES)
-        err = float(np.max(np.abs(ach - tgt))) * 1000
+        _ref = tgt if tgt is not None else last_tgt
+        err = (float(np.max(np.abs(ach - _ref))) * 1000) if _ref is not None else 0.0
         track_err.append(err)
-        print(f"  拍{k - 1}: |Δcmd| {d_mrad:5.1f} mrad | 导程 {gap0 * 1000:5.1f}"
-              f" → {v:.2f} rad/s | 残差 {err:4.1f} mrad | {gp if gp else st}")
+        spd_s = f"{v:.2f} rad/s" if is_send else "— 静默 —"
+        print(f"  拍{k - 1}{'·' if not is_send else ''}: |Δcmd| {d_mrad:5.1f} mrad"
+              f" | 导程 {gap0 * 1000:5.1f} → {spd_s}"
+              f" | 残差 {err:4.1f} mrad | {gp if gp else st}")
 
     # ── 出口：最后一块消费到水位（或包络截短后耗尽）──
     _w = min(WMARK, len(chunk))
