@@ -106,6 +106,10 @@ ap.add_argument("--rtc-horizon", type=int, default=0,
                      "0=关（默认）。前缀=旧块未消费尾段重锚进新块坐标系")
 ap.add_argument("--rtc-max-w", type=float, default=10.0,
                 help="RTC 最大引导权重（lerobot max_guidance_weight 默认 10）")
+ap.add_argument("--tfs-ms", type=float, default=0.0,
+                help="每帧 time_from_start_s 毫秒数：0=现行为（尽快到达，默认）；"
+                     ">0=给伺服逐帧到达时限（≈帧间隔 4.2ms@30fps——标准关节 tfs "
+                     "语义 SDK 未文档化，纯实验卡：若被消费则压跟踪滞后 τ，被忽略则无副作用")
 ap.add_argument("--cache-frames", type=int, default=None,
                 help="K/V 时序复用周期：1=每帧全量（默认，无损）；config [loop].cache_frames")
 ap.add_argument("--max-excursion", type=float, default=None,
@@ -205,7 +209,8 @@ print(f"[loop-traj] tick {TICK * 1000:.1f} ms（{args.fps} Hz）| 轨迹流 "
       f" | EMA α={args.ema_alpha:g}"
       f" | 水位 {args.n_action_steps} 步换块弃尾 | 星饿上限 {args.starve_limit}s"
       + (f" | RTC 引导 horizon {args.rtc_horizon}（max_w {args.rtc_max_w}）"
-         if args.rtc_horizon > 0 else " | RTC 关"))
+         if args.rtc_horizon > 0 else " | RTC 关")
+      + (f" | 帧到达时限 {args.tfs_ms:g} ms" if args.tfs_ms > 0 else ""))
 
 
 # ── 导航栈 SIGSTOP 搁置（--nav-suspend 开启，默认关）──
@@ -1068,7 +1073,7 @@ while not aborted:
                         _c.position = float(_fr[_ji])   # 标准关节只消费 position
                         _cmds.append(_c)
                     _st = robot.set_joint_commands(_cmds, joint_names=ARM_NAMES,
-                                                   time_from_start_s=0.0)
+                                                   time_from_start_s=args.tfs_ms / 1000.0)
                     if not str(_st).startswith("ControlStatus.SUCCESS"):
                         st = _st
                         break
