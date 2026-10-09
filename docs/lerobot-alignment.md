@@ -110,3 +110,38 @@ lerobot RTC 本体无此参数。
   直接 SystemExit 并提示新键名；未认键打印告警——堵三态回填（CLI>config>BUILTIN）静默回落。
 - BUILTIN 镜像已同步 v3（0.35/1.5）；`[loop].catch_timeout` 为死配置（无消费方，
   replay 读的是 `[replay].catch_timeout`），留作历史遗留注记。
+
+## 九、附记（2026-10-09）：native 固定节拍执行器 + 引导式 RTC 落地
+
+**`scripts/inference/run_g1_loop_native.py`**（v3 `run_g1_loop.py` 的 A/B 孪生，
+调度出处 robot_client.py L477-489 固定节拍 + L410-413 水位换块，机制参照非逐行移植）：
+
+| native 参数 | lerobot 对应 | 语义差 |
+|---|---|---|
+| `--fps 30`（tick=1/fps） | `environment_dt`（configs.py:86-89） | 同义；>40 拒绝（tick 低于取图+SDK 硬开销必丢拍） |
+| `--n-action-steps`（预取水位阈值） | `chunk_size_threshold`（configs.py:137，0.5×chunk） | v3 里是消费配额；native 里只定换块时机，整块换入弃尾 |
+| `--speed 2.0` | 无（lerobot 无执行速度概念） | 安全天花板；native 速度由 Δaction/tick 涌现 ≈1.0× 数据集原速，不读 `[loop].speed`（那是 v3 配速律参数） |
+| `--starve-limit 2.0` | 无（lerobot 服务端排队天然不星饿） | 块耗尽推理未归=不下发（刚性伺服保持），超限安全停机 |
+| `--rtc-horizon 10` / `--rtc-max-w 10` | `execution_horizon` / `max_guidance_weight`（configuration_rtc.py:48/40） | 0=关（默认，严格 opt-in） |
+| `--delta-max`（每 tick 限幅） | 无 | 逐拍限幅（v3 同款护栏，单位从每指令变每 tick） |
+
+时序铁律：绝对截止 `next_t += TICK`，落后超 1 拍重锚绝不连发（追发=抖动源）——
+lerobot `sleep(max(0, dt−elapsed))` 同款语义。
+
+**引导层落地（§四-2 的五条旧理由逐条销案）**：
+
+1. ~~CUDA graph 冲突~~ → 消解：引导=elementwise 内核+定址缓冲（SDE 模板先例），
+   常量构造期烘焙、每调用仅 prefix/enable 流上上传，图内两态通用（FlashRT 79581a3a）。
+2. ~~autograd 穿整网~~ → 消解：lerobot 实现本身退化（clone.detach 后才
+   requires_grad_，Jacobian≡I，correction==err），纯 elementwise 无需反传。
+3. ~~delay≈1 轮收益趋零~~ → 部分成立改为成立：v3 hold 窗 0 无接缝可校，但 native
+   水位换块的预测基准滞后 ~10 tick（0.33s），接缝跳变真实存在（=v3 挂账的
+   "残留指令切换抖动"）；消融实测接缝 p50 57.2→20.7 mrad（BENCHMARKS §八）。
+4. ~~ckpt 非 RTC 训练~~ → 绕开：只做 guided（推理时 inpainting，任何 ckpt 可用），
+   不做 trained。
+5. ~~新超参回归风险~~ → 全取 lerobot 默认（horizon 10/max_w 10/LINEAR），
+   敏感性归真机三态 A/B。
+
+引擎侧契约：`rtc=False` 默认不分配引导缓冲不走引导分支（结构红线，单测断言
+bufs 键缺席）；`rtc=True` + `rtc_prefix=None` 与 off 差异仅剩构造间 GEMM
+autotune 噪声（同构造内位稳定）；质量/延迟数据见 `BENCHMARKS.md` §八。

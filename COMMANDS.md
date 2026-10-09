@@ -86,6 +86,23 @@ execute/loop 脚本已自动加回预测时刻臂位再执行，无需手工换�
 =臂恒在途，恒归零=在停走）；相邻步指令增量 |Δcmd|（抖动代理，快速变号=抖动）。
 旧残留"指令切换瞬间一次抖动"已按回放 v4 方案对齐（半程配速），待真机复验。
 
+### ④′ native 固定节拍对照（run_g1_loop_native，2026-10-09 新增）
+
+```bash
+# 冒烟: 15fps + 0.5× 天花板，1-2 块
+~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_native.py --exec --nav-suspend \
+    --rounds 2 --fps 15 --speed 0.5
+# 60 轮裸跑（≈1.0× 数据集原速） / +RTC 引导（消换块接缝）
+~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_native.py --exec --nav-suspend --rounds 60
+~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_native.py --exec --nav-suspend \
+    --rounds 60 --rtc-horizon 10
+```
+
+- 固定节拍 tick=1/30s 消 1 条 action，无 pace/合步/hold 家族；星饿（块耗尽推理
+  未归）=不下发冻结，超 2s 停机；`--speed` 是天花板非配速
+- `--rtc-horizon 10` 开推理侧前缀引导（默认 0=关）；消融数据 BENCHMARKS §八，
+  术语对照 docs/lerobot-alignment.md §九；护栏与 ④ 全同
+
 ### ⑤ 数据集影子回放（观测吃数据集，动作出真机）
 
 ```bash

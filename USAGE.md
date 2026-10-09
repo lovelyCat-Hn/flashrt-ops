@@ -146,6 +146,40 @@ R 回闭 51，全程 35.9s → **双臂预算 52-60 轮**（≈数据集时间�
 - **全文日志自动落盘** `logs/loop_<时间戳>.log`（--log-file 可改路径），判读直接发文件免复制
 - 异常：Ctrl-C / 急停；graph 异常加前缀 `PI05_NO_GRAPH=1` 回退 eager
 
+### 3.7 native 固定节拍执行器（run_g1_loop_native，2026-10-09 新增）
+
+v3 的 A/B 孪生：删配速律家族（pace/div/合步/hold 全套），改为 lerobot 式固定节拍
+——tick=1/30s 消费 1 条 action，速度由 Δaction/tick 涌现 ≈**1.0× 数据集原速**；
+消费到水位（n_action_steps=25/50）触发新推理，新块落地**整块换入弃尾**。
+参数命名与语义对照 lerobot：docs/lerobot-alignment.md §九。
+
+```bash
+# 冒烟首跑（15fps + 0.5× 速度天花板，1-2 块看节奏再上 30fps）
+~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_native.py --exec --nav-suspend \
+    --rounds 2 --fps 15 --speed 0.5
+
+# Part D 真机三态 A/B（各 60 轮）
+# ① 基线 = v3 配速律（上方 3.6 原命令）
+~/holy/run.sh ~/holy/scripts/inference/run_g1_loop.py --exec --nav-suspend --rounds 60
+# ② native 裸跑（预期 ≈1.0× 原速；星饿 0 窗；tick 过冲 p95<10ms）
+~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_native.py --exec --nav-suspend --rounds 60
+# ③ native+RTC 前缀引导（对比换块接缝尖峰 |Δcmd| 与残差）
+~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_native.py --exec --nav-suspend \
+    --rounds 60 --rtc-horizon 10
+```
+
+与 v3 的关键语义差（判读前必读）：
+- **tick 绝对截止**：睡到 `next_t += TICK`，落后超 1 拍重锚绝不连发（追发=抖动源）
+- **星饿=不下发**（刚性伺服保持），超 `--starve-limit 2.0s` 安全停机——与 v3
+  hold 兜底（单调收敛）不同，是"冻结"不是"收敛"
+- **`--speed 2.0` 是天花板不是配速**：不读 config `[loop].speed`（那是 v3 配速律参数）；
+  实际速度=每拍 Δaction/33ms，默认即数据集原速
+- **`--n-action-steps` 只定换块时机**（预取水位阈值），不是消费配额——整块换入弃尾
+- **`--rtc-horizon 0`（默认）=RTC 关**；>0 时换块把旧块未消费尾段重锚后作引导前缀
+  传引擎（消接缝尖峰；机制与消融数据见 BENCHMARKS §八）
+- 遥测新增：tick_ms/tick_jit、星饿窗、**接缝尖峰**（换块后首拍 |Δcmd| vs 块内均值）
+- 日志落 `logs/loop_native_<时间戳>.log`；其余护栏（包络/漂移/夹爪/--grip-state-cmd）与 v3 全同
+
 ## 4. 与 GalbotSDK 联用（同进程，已验证）
 
 ```python
