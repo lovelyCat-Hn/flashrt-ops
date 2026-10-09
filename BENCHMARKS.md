@@ -8,7 +8,7 @@
 > （rtx_sm87 手写 kernel + 8f08ca85 W8A16）+ torch 2.4.0a0 JP5 自编 wheel
 > **任务形态**：pi05_g1_place_deploy（G1 双臂 place，3 视角，action 16 维，horizon=50）
 
-## 〇、定档速览（2026-10-08）
+## 〇、定档速览（2026-10-09）
 
 **表 0-1 部署定档一览**
 
@@ -17,6 +17,7 @@
 | 推理精度档 | bf16 | 在用 | §三 |
 | 解码器 kernel | W8A16 weight-only（`FVK_PI05_RTX_W8A16_DECODER=1`） | 可选，默认关 | §三/§四 |
 | INT8 W8A8（编码器/全/旋转/按通道） | — | 拒收 | §三 |
+| 引导式 RTC（推理侧前缀引导，`rtc=True`） | horizon 10 / max_w 10 | 可选，默认关，采用候选 | §八 |
 | CUDA graph | 开（本机默认） | 在用 | ARCHIVE#WithFlags |
 | cache_frames | 1 | 2 已判死 | ARCHIVE 标注#4 |
 | 闭环执行器 | run_g1_loop.py + `--nav-suspend` | 在用 | §五/§七 |
@@ -330,7 +331,41 @@ v4 追踪式（速度=导程÷(div×pace)，每窗按比例走导程）为自研
 
 ⚠ v3 与护栏（包络 guard 6891103 修后在场）均为**空爪排练**定案，持物物理 place 复验未做。
 
-## 八、复现索引
+## 八、RTC 引导消融（2026-10-09，FlashRT 79581a3a）
+
+引导式 RTC（lerobot policies/rtc guided 移植，rtc=False 默认关）首次质量/延迟
+探针：同一 rtc=True 引擎实例（horizon 10，max_w 10）内 off（`rtc_prefix=None`，
+enable=0 短路）与 guided 同噪声对照。换块模拟：块 A 消费 25 步后换块 B，接缝
+=|B[0]−A[24]|（臂维 0-6+8-14 max，未归一化数据空间 mrad）；guided 的 B 以
+A[25:] 重锚（合成 BASE 漂移 0.01 rad）为前缀。
+
+**表 8-1 接缝跳变（主指标，n=12）**　条件：only_pick ckpt、bf16、无图、
+cache_frames=1、合成观测（随机图×3+1px 平移扰动）、种子 20261009+
+
+| 口径 | p50 | mean | guided 更小样本 |
+|---|---:|---:|---:|
+| off（无前缀） | 57.2 | 70.7 | — |
+| **guided（h=10）** | **20.7** | **19.1** | **12/12** |
+
+**表 8-2 引导幅度与传播（n=12，同噪声同构造）**
+
+| 量 | mean | min/max | 备注 |
+|---|---:|---|---|
+| cos 头段 行<10（臂维） | 0.8159 | 0.6250 / 0.9588 | 引导有意改向，非质量门槛 |
+| 尾段传播 行≥10 max \|Δ\| | 8568.5 | 1560.0 / 22793.9 mrad | 无直接修正，attention 传播 |
+| 引导区移动（行<10 逐位变） | 12/12 | — | 硬门槛 PASS |
+| 延迟 off p50/p95 | 382.8 / 387.3 ms | — | predict 含 fixed 管线操作 |
+| 延迟 guided p50/p95 | 379.3 / 383.1 ms | — | 图内 elementwise ≈零开销 |
+
+⚠ 口径注脚：① 合成随机观测下前缀与 B 的天然预测不相关，引导幅度（cos、
+尾段传播、夹爪维 max |Δ| 93.3）代表机制上限而非部署幅度——自洽前缀的同构
+造引擎级对照（tests/test_pi05_rtc_guided.py，头 Δ0.90/尾 Δ0.13 归一化单位）
+低一个量级；真机幅度与任务收益由真机三态 A/B 定。② 接缝指标方向受机制保证
+（引导把 B[0] 拉向前缀首行=A[25] 邻行），本表证明机制生效，不等于任务收益。
+③ 夹爪 0.8 哨兵线是量化消融语义（同模型不同精度），对引导消融不适用（引导
+本就改写计划）。④ 位级断言只在同构造内成立（构造间 autotune 噪声 max≈0.35）。
+
+## 九、复现索引
 
 | 数据 | 命令 |
 |---|---|
@@ -341,4 +376,5 @@ v4 追踪式（速度=导程÷(div×pace)，每窗按比例走导程）为自研
 | 表 3-7 位点消融 | `~/holy/run.sh ~/holy/scripts/probes/int8_site_ablation.py --configs bf16,enc8,no_l0-8,no_l9-17,no_attn,no_ffn` |
 | 表 5-x 导航搁置 | `kill -STOP <7 进程>` + 同遥测；sdkfree：`~/holy/run.sh ~/holy/scripts/probes/sdkfree_infer_probe.py` |
 | 表 7-x 闭环 | `~/holy/scripts/inference/run_g1_loop.py --nav-suspend [--exec] --n-action-steps 25 --steps-per-command 25 --pace 0.35 --pace-div 1.5`（⚠ `--exec` 驱臂） |
-| 原始输出 | `evidence/20261006-07_quant_kv_ablation/`（quant）；闭环日志 `logs/loop_*.log` |
+| 表 8-x RTC 引导消融 | `~/miniforge3/envs/flash_pyrt311/bin/python ~/holy/scripts/eval/rtc_ablation.py 12 --out ~/holy/evidence/20261009_rtc_guided_ablation` |
+| 原始输出 | `evidence/20261006-07_quant_kv_ablation/`（quant）；`evidence/20261009_rtc_guided_ablation/`（RTC）；闭环日志 `logs/loop_*.log` |
