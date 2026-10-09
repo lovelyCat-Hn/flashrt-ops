@@ -107,9 +107,11 @@ ap.add_argument("--rtc-horizon", type=int, default=0,
 ap.add_argument("--rtc-max-w", type=float, default=10.0,
                 help="RTC 最大引导权重（lerobot max_guidance_weight 默认 10）")
 ap.add_argument("--tfs-ms", type=float, default=0.0,
-                help="每帧 time_from_start_s 毫秒数：0=现行为（尽快到达，默认）；"
-                     ">0=给伺服逐帧到达时限（≈帧间隔 4.2ms@30fps——标准关节 tfs "
-                     "语义 SDK 未文档化，纯实验卡：若被消费则压跟踪滞后 τ，被忽略则无副作用")
+                help="每帧 time_from_start_s 毫秒数：0=尽快到达（官方语义 fastest "
+                     "arrival，官方 100Hz 流式示例同值，默认）；>0=期望到达时限"
+                     "（expected arrival time，galbot_robot.hpp L148）——≈帧间隔 "
+                     "4.2ms@30fps 即限速到帧节奏；标准关节只消费 position，tfs 是"
+                     "唯一配速输入")
 ap.add_argument("--cache-frames", type=int, default=None,
                 help="K/V 时序复用周期：1=每帧全量（默认，无损）；config [loop].cache_frames")
 ap.add_argument("--max-excursion", type=float, default=None,
