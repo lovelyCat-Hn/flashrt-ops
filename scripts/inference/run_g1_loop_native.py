@@ -730,10 +730,22 @@ def _rtc_prefix(new_base):
     会解码到数据集均值）；块耗尽/RTC 关时返回 None（引擎侧 enable=0 短路）。
     须在 job.start 前调用（chunk/BASE_ARM 还属旧块，new_base=本次取关节读数，
     与 job 即将存下的 state_arm 同源）。
+
+    ⚠ 10-09 修正：前缀窗口右移 inference_delay 拍。前缀快照在抓帧时刻（拍 25），
+    而引导的新块要到换块（拍 ~35=推理 330ms/33ms≈10 拍后）才落地执行；期间旧块
+    尾段照常下发，臂已物理走过前缀描述的区域——不右移则每次换块都引导新块
+    "倒退"回已走过的 ~10 拍（141706 实证：接缝 251 mrad≈方向反转，与 RTC-off
+    无异）。此即 lerobot rtc 的 inference_delay 语义（补偿快照→落地延迟），
+    此前误读为换块时机而设 0。延迟拍数=推理 p50÷tick，动态估计。
     """
-    if not args.rtc_horizon or chunk is None or k >= len(chunk):
+    if not args.rtc_horizon or chunk is None:
         return None
-    left = chunk[k:]
+    _p50 = infer_ms.percentile(0.5) if len(infer_ms) else 340.0
+    delay = max(0, min(int(round(_p50 / (TICK * 1000.0))), WMARK))
+    j0 = k + delay
+    if j0 >= len(chunk):
+        return None                      # 延迟把旧块尾段吃尽 → 该块免引导
+    left = chunk[j0:]
     pf = np.empty_like(left)
     pf[:, :7] = left[:, :7] + BASE_ARM[None, :7] - new_base[None, :7]
     pf[:, 7] = left[:, 7]
