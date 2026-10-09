@@ -81,6 +81,11 @@ ap.add_argument("--speed", type=float, default=2.0,
                 help="伺服速度安全天花板 rad/s（默认 2.0；不读 config [loop].speed"
                      "——那是 v3 配速律的参数；本脚本速度由 Δaction/tick 涌现，"
                      "该上限只在模型瞬发大步时兜底）")
+ap.add_argument("--arrive-div", type=float, default=2.0,
+                help="到达窗口系数：速度=导程÷(tick×此值)。>1 时拍内永不到点，"
+                     "伺服不逐拍刹停（v3 半程覆盖的逐拍版；稳态滞后≈每拍增量"
+                     "×div/(div-1)，div=2 时≈2 拍增量）；1.0=旧行为本拍到点"
+                     "（30Hz 启停锯齿=抖动源，10-09 真机实证，勿回）")
 ap.add_argument("--starve-limit", type=float, default=2.0,
                 help="星饿安全停机阈值 s：块耗尽且推理未归超过该时长即停循环"
                      "（默认 2.0s=正常推理余量 ~6×；星饿期不下发=伺服保持）")
@@ -838,7 +843,7 @@ if not args.do_exec:
         cur = read_joints(robot, ARM_NAMES)
         tgt = plan_step(tk, cur)
         gap0 = float(np.max(np.abs(tgt - cur)))
-        v = max(V_MIN, min(gap0 / TICK, args.speed))
+        v = max(V_MIN, min(gap0 / (TICK * args.arrive_div), args.speed))
         drift = float(np.max(np.abs(tgt - HOME)))
         print(f"  拍{tk}: 限幅后 {np.round(tgt, 3).tolist()}"
               f"\n        导程 {gap0 * 1000:.1f} mrad → 速度 {v:.3f} rad/s"
@@ -864,7 +869,8 @@ WATCH.pause()
 if args.do_exec:
     input(f"\n⚠ 将连续驱动双臂 {args.rounds} 块 × 至多 {len(chunk)} 拍"
           f"（tick {TICK * 1000:.1f} ms，逐拍限幅 ±{args.delta_max} rad，"
-          f"速度天花板 {args.speed} rad/s，漂移护栏 ±{args.max_excursion} rad"
+          f"速度天花板 {args.speed} rad/s，到达窗口 {args.arrive_div:g} 拍，"
+          f"漂移护栏 ±{args.max_excursion} rad"
           + ("，夹爪下发开启）。\n" if GRIP else ")。\n")
           + "急停就绪后回车开始，循环期间随时按 q 退出...")
 WATCH.resume()
@@ -968,9 +974,10 @@ while not aborted:
         gp = send_grip(robot, chunk[k])
         gap0 = float(np.max(np.abs(tgt - cur)))
         if gap0 >= GAP_EPS:
-            # 速度由 Δaction/tick 涌现：导程÷tick（1 步/拍 ≈ 数据集原速），
-            # 上限 --speed 兜底模型瞬发大步，下限 V_MIN 驻停缓爬
-            v = max(V_MIN, min(gap0 / TICK, args.speed))
+            # 速度由 Δaction/tick 涌现：导程÷(tick×arrive_div)。arrive_div>1 =
+            # 拍内不到点伺服不刹停（v3 半程覆盖的逐拍版；10-09 真机实证 1.0 的
+            # 逐拍到点=30Hz 启停锯齿抖动主源）；上限 --speed 兜底瞬发大步
+            v = max(V_MIN, min(gap0 / (TICK * args.arrive_div), args.speed))
             if args.do_exec:
                 st = robot.set_joint_positions(tgt.tolist(), joint_names=ARM_NAMES,
                                                is_blocking=False, speed_rad_s=v)
