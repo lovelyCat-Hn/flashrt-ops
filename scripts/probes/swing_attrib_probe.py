@@ -506,16 +506,19 @@ class QuitWatcher:
                     print("\n⛔ 收到中断信号 —— 立即退出"
                           "（已下发目标可能仍在限速执行）")
                     self.restore()
+                    _flush_wave()
                     _teardown()
                     os._exit(130)
                 if sys.stdin.read(1) in ("q", "Q"):
                     print("\n⛔ 按下 q —— 立即退出"
                           "（已下发目标可能仍在限速执行）")
                     self.restore()
+                    _flush_wave()
                     _teardown()
                     os._exit(2)
             except Exception:
                 self.restore()
+                _flush_wave()
                 _teardown()
                 os._exit(3)
 
@@ -641,6 +644,52 @@ def _fatal_hook(t, v, tb):
     print(f"\n⛔ 异常退出: {t.__name__}: {v}")
     _teardown()
     os._exit(1)
+
+
+# ── 波形冲账：正常结束与 q/信号急退共用（急退不丢已录数据）──
+_WAVE = None
+
+
+def _flush_wave():
+    wv = globals().get("_WAVE")
+    if not wv or not wv["cmd_t_l"]:
+        return
+    try:
+        wave_dir = pathlib.Path(_log_path).with_suffix("")
+        wave_dir.mkdir(parents=True, exist_ok=True)
+        npz_path = str(wave_dir / "waveform.npz")
+        meta = {"source": args.source, "driven_joints": DRIVEN,
+                "fps": args.fps, "frames_per_row": PER, "interp": args.interp,
+                "delta_max": args.delta_max, "ema_alpha": args.ema_alpha,
+                "tfs_ms": args.tfs_ms,
+                "burst_reserve_ms": args.burst_reserve_ms,
+                "rows_per_block": args.rows_per_block,
+                "swap_gap_ms": args.swap_gap_ms,
+                "wave": {"freq": args.wave_freq, "amp": args.wave_amp,
+                         "cycles": args.wave_cycles, "hold": args.wave_hold},
+                "arm_names": ARM_NAMES,
+                "start_pos": wv["start_pos"].tolist()}
+        rows_all = (np.vstack(wv["rows_all_l"]) if wv["rows_all_l"]
+                    else np.zeros((0, 14), np.float32))
+        frames_all = (np.vstack(wv["frames_all_l"]) if wv["frames_all_l"]
+                      else np.zeros((0, 14), np.float32))
+        chunk_abs_all = (np.vstack(CHUNK_ABS) if args.source == "chunks"
+                         else rows_all.copy())
+        np.savez(npz_path,
+                 cmd_t=np.asarray(wv["cmd_t_l"], dtype=np.float64),
+                 cmd=np.asarray(wv["cmd_l"], dtype=np.float32),
+                 cmd_row=np.asarray(wv["cmd_row_l"], dtype=np.int64),
+                 fb_t=np.asarray(wv["fb_t_l"], dtype=np.float64),
+                 fb=np.asarray(wv["fb_l"], dtype=np.float32),
+                 rows_all=rows_all, frames_all=frames_all,
+                 chunk_abs_all=chunk_abs_all,
+                 swap_t=np.asarray(wv["swap_t_l"], dtype=np.float64),
+                 meta=np.array(json.dumps(meta)))
+        print(f"[波形] {npz_path}（指令帧 {len(wv['cmd_t_l'])} / "
+              f"回读 {len(wv['fb_l'])}）")
+        analyze_wave(npz_path)
+    except Exception as e:
+        print(f"⚠ 波形落盘/归因失败: {e}")
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -777,6 +826,11 @@ def main():
     n_skip = 0
     n_env_clip = 0
     rows_all_l, frames_all_l = [], []
+    globals()["_WAVE"] = dict(cmd_t_l=cmd_t_l, cmd_l=cmd_l,
+                              cmd_row_l=cmd_row_l, fb_t_l=fb_t_l, fb_l=fb_l,
+                              rows_all_l=rows_all_l,
+                              frames_all_l=frames_all_l, swap_t_l=swap_t_l,
+                              start_pos=start_pos)
     for bi in range(n_blocks):
         cur = read_joints()
         rows = build_rows(cur, BLOCKS[bi])
@@ -849,36 +903,11 @@ def main():
 
     rows_all = np.vstack(rows_all_l)
     frames_all = np.vstack(frames_all_l)
-    chunk_abs_all = (np.vstack(CHUNK_ABS) if args.source == "chunks"
-                     else rows_all.copy())
     print(f"\n== 回放完成 == 块 {n_blocks} | 免发 {n_skip} | 包络钳位帧 "
           f"{n_env_clip} | 总耗时 {time.perf_counter() - t0:.1f} s")
 
-    # ── 波形落盘 + 自动归因分析 ──
-    wave_dir = pathlib.Path(_log_path).with_suffix("")
-    wave_dir.mkdir(parents=True, exist_ok=True)
-    npz_path = str(wave_dir / "waveform.npz")
-    meta = {"source": args.source, "driven_joints": DRIVEN,
-            "fps": args.fps, "frames_per_row": PER, "interp": args.interp,
-            "delta_max": args.delta_max, "ema_alpha": args.ema_alpha,
-            "tfs_ms": args.tfs_ms, "burst_reserve_ms": args.burst_reserve_ms,
-            "rows_per_block": args.rows_per_block,
-            "swap_gap_ms": args.swap_gap_ms,
-            "wave": {"freq": args.wave_freq, "amp": args.wave_amp,
-                     "cycles": args.wave_cycles, "hold": args.wave_hold},
-            "arm_names": ARM_NAMES, "start_pos": start_pos.tolist()}
-    np.savez(npz_path,
-             cmd_t=np.asarray(cmd_t_l, dtype=np.float64),
-             cmd=np.asarray(cmd_l, dtype=np.float32),
-             cmd_row=np.asarray(cmd_row_l, dtype=np.int64),
-             fb_t=np.asarray(fb_t_l, dtype=np.float64),
-             fb=np.asarray(fb_l, dtype=np.float32),
-             rows_all=rows_all, frames_all=frames_all,
-             chunk_abs_all=chunk_abs_all,
-             swap_t=np.asarray(swap_t_l, dtype=np.float64),
-             meta=np.array(json.dumps(meta)))
-    print(f"[波形] {npz_path}（指令帧 {len(cmd_t_l)} / 回读 {len(fb_t_l)}）")
-    analyze_wave(npz_path)
+    # ── 波形落盘 + 自动归因分析（q/信号急退走同款 _flush_wave）──
+    _flush_wave()
     _teardown()
 
 
