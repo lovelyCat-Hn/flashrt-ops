@@ -614,12 +614,16 @@ class NavSuspend:
 
 
 def _teardown():
+    # 顺序：导航栈恢复 + 终端还原先于 SDK 关闭——SDK 关闭可能挂死被看门狗
+    # 强杀，先做不可等的事（强杀后导航栈冻结/终端无回显才是真事故）
     _nav = globals().get("_NAV")
     if _nav is not None:
         try:
             _nav.resume()
         except Exception:
             pass
+    if WATCH is not None:
+        WATCH.restore()
     rob = globals().get("robot")
     if rob is not None:
         try:
@@ -628,8 +632,6 @@ def _teardown():
             rob.destroy()
         except Exception:
             pass
-    if WATCH is not None:
-        WATCH.restore()
     if _log_fh is not None:
         try:
             _log_fh.close()
@@ -704,6 +706,25 @@ def _emergency_teardown():
             _nav.resume()
         except Exception:
             pass
+
+
+def _arm_hard_exit(delay_s=20.0):
+    """独立进程看门狗：delay_s 后 SIGKILL 本进程（正常退出则打空无害）。
+
+    threading.Timer 不行——SDK 关闭挂死时残留线程握死 GIL，任何 Python
+    线程（含定时器回调）都无法再执行（swing_20261010_150624 实录：15s
+    Timer 4 分钟不响，主线程卡在 wait_for_shutdown 轮询 sleep）。子进程
+    SIGKILL 不经过 GIL，必定生效。
+    """
+    subprocess.Popen(
+        [sys.executable, "-c",
+         "import os, sys, time\n"
+         "time.sleep(float(sys.argv[2]))\n"
+         "try: os.kill(int(sys.argv[1]), 9)\n"
+         "except OSError: pass\n",
+         str(os.getpid()), str(delay_s)],
+        start_new_session=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -922,9 +943,9 @@ def main():
 
     # ── 波形落盘 + 自动归因分析（q/信号急退走同款 _flush_wave）──
     _flush_wave()
-    # 优雅关闭看门狗：SDK shutdown 若挂死，15s 后硬退保终端（os._exit 全杀）
-    threading.Timer(15.0, lambda: os._exit(0)).start()
+    _arm_hard_exit(20.0)   # 看门狗先行：SDK 关闭挂死则 20s 后强杀保终端
     _teardown()
+    os._exit(0)   # 不走解释器关闭（SDK 残留线程段错误坑，traj 同款）
 
 
 if args.analyze is not None:
