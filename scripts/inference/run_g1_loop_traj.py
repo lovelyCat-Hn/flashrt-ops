@@ -175,8 +175,8 @@ pathlib.Path(_log_path).parent.mkdir(parents=True, exist_ok=True)
 # chunk 落盘目录（--dump-chunks）：与日志同时间戳，包络截断前的纯模型输出
 _dump_dir = None
 if args.dump_chunks:
-    _dump_dir = pathlib.Path(_log_path).with_name(
-        _log_path.stem.replace("loop_traj", "chunks_traj"))
+    _lp = pathlib.Path(_log_path)
+    _dump_dir = _lp.with_name(_lp.stem.replace("loop_traj", "chunks_traj"))
     _dump_dir.mkdir(parents=True, exist_ok=True)
 
 
