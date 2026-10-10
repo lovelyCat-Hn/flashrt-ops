@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 24ded4cc-d86c-4589-8234-2f1634018dc7
-  modified: 2026-09-24T05:48:24.955Z
+  modified: 2026-10-08T06:18:53.406Z
 ---
 
 **G1 真机数据集判读（2026-09-21，echo 机 `~/datasets/pick_place_balence/`，zip 857M 解压 870M）**
@@ -88,4 +88,10 @@ metadata:
 
 **【2026-09-28 loop 也适配 horizon（f762def）】**：run_g1_loop 加 `--horizon`（env 前端导入前自动设；n_steps 上限跟 horizon）。loop 本就有推理重叠，无需改。**⚠ 跨机坑：env 覆盖依赖 FlashRT 侧补丁（本机 FlashRT 本地 2522a304，上游无写权限不会传播）——另一台机 pull 后跑 `--horizon 50` 会因其 FlashRT 无此补丁仍建 10 块而 shape 崩；需先同步 pi05_rtx/pi05_rtx_fp16 的 CHUNK_SIZE env 化两文件**。
 
+**【2026-09-30 only_place 时间线（101 轨运动探针，本机）】**：左臂启动 0.9s → 左爪释放 3.7s → 右臂启动 7.2s（=L 释放后 +3.4s，p90 +4.2s）→ 全程 13.5s ≈ native 20 轮@spc20；**双臂严格串行（0/101 并行）**，右爪变化 ~9.5s 段。state 布局同法再证【右臂在前】：块 0:7=右臂（7.9s 启动）、8:15=左臂（1.2s）、dim7=右爪（9.5s 变化）、dim15=左爪（4.1s 变化≈释放帧）、起点双爪 33=持物语义——USAGE.md 曾误写 l_arm 在前已纠（9/30）。工作点轮数预算与 q 停修正见 [[galbot-g1-loop-pace-tuning]]。
+
 **【2026-09-28 horizon+中断修复补齐两个 smoke 入口（holy aa2a7ce）】**：run_g1_inference/run_g1_execute 也加上 `--horizon`（env 自动设）+ QuitWatcher 直通管道——至此 6 个真机入口全覆盖。execute 的 QuitWatcher 类体与 dataset_execute 逐字节一致（input() 确认处 pause/resume）；inference 退出提示改"只读不下发运动"，步率/实时性窗口硬编码 10 全改随 horizon。**推理重叠（_PredictJob）刻意不进这两个 smoke**：单发同步才有测量意义。至此 smoke 工具链闭环：inference（只读测延迟）→ execute（半环限幅执行）→ dataset_execute/loop（闭环）。
+
+**【2026-10-08 新坑：训练框架版本会改 stats 取样位置，换 ckpt 必查 action stats 量级】**：only_pick（0930 job）action stats=绝对角量级（臂维区间中点最大 1.749 rad），前两代（0914 place / 0923 旧 pick）均 delta 量级（≤0.11）；而三份 processor JSON 逐字节一致、本机旧训练集原始 action 列两代都是绝对角——即 stats 从「relative 转换后」变成「转换前的原始列」。targets 仍 delta（只读探针首步臂 14 维毫弧度级增量实证，evidence/20261008_onlypick_semantics_probe/）；归一化是仿射、训练/部署两端同 stats 自洽→部署链路无感。**方法论**：① 换新训练 ckpt 第一步=action stats 逐维对照前代（臂维区间中点 >0.5 rad 即绝对角嫌疑，delta/绝对角两类 stats 不可混装）；② 判定用只读探针看首步量级——delta=毫弧度增量、随当前位姿变化；绝对=钉死 stats 区间与位姿无关；③ out_proj bias 判别无效（该 bias 冻结不训练，两代逐位相同）；④ 工具 `scripts/g1/extract_normalizer_stats.py`（零依赖直提 unnormalizer safetensors，系统 py3.10 可跑）。
+
+**【2026-10-10 重大：only_pick 视觉-臂接地微弱实测（视觉依赖度探针），固定点伸手机制坐实，训练侧排查清单】**：真机 pick 行为=臂伸固定点位不看物件（用户观察+同事 lerobot 配方在哪都能抓的对照）。探针（scripts/probes/vision_dependence_probe.py，只读零运动，同状态同 prompt 只改图）：全黑图臂维仅挪 32-42 mrad（噪声基线 10-12）=视觉对臂贡献微弱；换视图≈噪声=槽位不敏感；**爪维挪 10.9 个百分点=爪相位是视觉驱动**（所以爪时序历来对、臂落点历来错；place 固定角落目标不需视觉伺服故被掩盖）。probe_saw_A1.png 喂图三帧实时正确=部署喂图/映射/bf16 全链无罪。**训练侧排查序（0930 job / only_pick ckpt）**：① dataloader 图像列→特征槽映射（静默喂错图/喂黑图会让模型学会无视视觉——签名与本例一致，且该框架已有 stats 取样挪位前科）② 视觉塔 freeze 配置与训练步数/LR ③ 对照组=同事 lerobot 模型跑同探针（预期健康模型 (真图,黑图) 差异大幅发散）。数据侧自查：本地旧集 pick_place_balence 场景单一（199 集同工位同托盘远位）——记忆型策略也能拟合，视觉接地是否被数据多样性喂出来存疑；新集 pick_place_929/all_combin 若真是组合多样性则应更有利，查明训练是否真吃到。证据：evidence/20261010_pick_aim_diff/（探针结果+场景 diff+分布扫描）。
