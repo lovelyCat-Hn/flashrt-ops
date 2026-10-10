@@ -409,6 +409,8 @@ if not args.do_exec:
     cur = np.zeros(14, dtype=np.float32)
     for bi, tgt in enumerate(BLOCKS):
         rows = build_rows(cur, tgt)
+        rows = rows[: (min(args.rows_per_block, len(rows))
+                       if args.rows_per_block > 0 else len(rows))]
         d = np.abs(np.diff(np.vstack([cur[None], rows]), axis=0))
         lead0 = float(np.max(np.abs(rows[0] - cur))) * 1000
         print(f"[干跑] 块{bi+1}: 行{len(rows)} |Δcmd| mean {d[1:].mean()*1000:.1f} "
