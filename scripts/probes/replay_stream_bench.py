@@ -456,6 +456,7 @@ t0 = time.perf_counter()
 n_env_clip = 0
 n_skip = 0
 last_tgt = None    # 跨块延续（闭环同口径）：块首拍 |Δcmd| 才能暴露换块跳变
+_prev_ach = None   # 上拍实际关节（|Δact| 臂动量遥测）
 for bi, tgt_blk in enumerate(BLOCKS):
     cur = read_joints()
     rows = build_rows(cur, tgt_blk)
@@ -514,10 +515,15 @@ for bi, tgt_blk in enumerate(BLOCKS):
                      if args.mode == "stream" else f"1令@{args.fps}Hz")
         last_tgt = tgt.copy()
         ach = read_joints()
+        if _prev_ach is not None:
+            act = float(np.max(np.abs(ach - _prev_ach))) * 1000   # 臂实际动量：0=伺服僵住（SUCCESS 但不动）
+        else:
+            act = 0.0
+        _prev_ach = ach
         err = float(np.max(np.abs(ach - tgt))) * 1000
         print(f"  拍{kk}: |Δcmd| {d_mrad:5.1f} mrad"
               f" | 导程 {gap0*1000:5.1f} → {_fr_s}"
-              f" | 残差 {err:4.1f} mrad | replay")
+              f" | 动 {act:4.1f} 残差 {err:4.1f} mrad | replay")
     print(f"── 块 {bi+1} 完成，耗时 {1000*(time.perf_counter()-t_blk):.0f} ms ──")
     if bi < n_blocks - 1 and args.swap_gap_ms > 0:
         time.sleep(args.swap_gap_ms / 1000.0)
