@@ -19,7 +19,8 @@ A/B 维度：
 
 安全：包络钳位（joint_envelope.json；stream 钳帧 direct 钳行，同主脚本帧级钳位）、
 漂移护栏（偏离起始位超限停）、q/Ctrl-C 随退（主脚本同款 QuitWatcher）、
-起始慢速就位（set_joint_positions 0.2 rad/s 官方低频路径）。纯执行无推理。
+起始慢速就位（set_joint_positions 0.2 rad/s 官方低频路径）、
+--nav-suspend 导航栈搁置（同主脚本，默认关）。纯执行无推理。
 
 用法：
   ~/holy/run.sh ~/holy/scripts/probes/replay_stream_bench.py \
@@ -34,6 +35,7 @@ import os
 import pathlib
 import select
 import signal
+import subprocess
 import sys
 import termios
 import threading
@@ -87,6 +89,8 @@ ap.add_argument("--envelope", type=str,
                 help="包络护栏 json（臂 14 维钳位）")
 ap.add_argument("--max-excursion", type=float, default=3.0,
                 help="偏离起始位护栏 rad（任一关节超限即停）")
+ap.add_argument("--nav-suspend", action="store_true",
+                help="循环期 SIGSTOP 冻结导航栈七进程（同 run_g1_loop_traj；默认关）")
 args = ap.parse_args()
 
 TICK = 1.0 / args.fps
@@ -186,7 +190,104 @@ robot = None
 WATCH = QuitWatcher()
 
 
+# ── 导航栈 SIGSTOP 搁置（--nav-suspend，run_g1_loop_traj 同款移植）──
+# A/B 对比要求与闭环跑同背景条件：导航栈停/不停会改变 tick 服务负载。
+NAV_SUSPEND_NAMES = (
+    "localization_server", "galbot_fusion_main", "service_navigation_plan",
+    "galbot_vtn", "surround_cameras_capture", "swallows", "service_lidar_capture",
+)
+_NAV_GUARD_SRC = """
+import os, sys, time, signal
+signal.signal(signal.SIGINT, signal.SIG_IGN)
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+ppid = os.getppid()
+pids = [int(x) for x in sys.argv[1].split(',') if x]
+while True:                      # 父进程（本脚本）消失才往下走
+    time.sleep(0.3)
+    try:
+        os.kill(ppid, 0)
+    except OSError:
+        break
+for p in pids:
+    try:
+        os.kill(p, signal.SIGCONT)   # 最后一道网：主进程任何死法都恢复导航栈
+    except OSError:
+        pass
+"""
+
+
+class NavSuspend:
+    """只认领自己 STOP 的 pid（resume 只 CONT 这些），对别人冻结的不碰。"""
+
+    def __init__(self):
+        self.stopped = {}                     # pid -> name
+        self._guard = None
+
+    def _find_pids(self):
+        found = {}
+        for pid in os.listdir("/proc"):
+            if not pid.isdigit():
+                continue
+            try:
+                with open(f"/proc/{pid}/cmdline", "rb") as f:
+                    arg0 = f.read().split(b"\x00")[0].decode("utf-8", "replace")
+            except OSError:
+                continue
+            base = os.path.basename(arg0)
+            if base in NAV_SUSPEND_NAMES:
+                found[int(pid)] = base
+        return found
+
+    def suspend(self):
+        cands = self._find_pids()
+        missing = [n for n in NAV_SUSPEND_NAMES if n not in cands.values()]
+        if missing:
+            print(f"[nav-suspend] ⚠ 未找到（跳过）: {missing}")
+        self._guard = subprocess.Popen(
+            [sys.executable, "-c", _NAV_GUARD_SRC,
+             ",".join(str(p) for p in sorted(cands))],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for pid, name in sorted(cands.items()):
+            try:
+                with open(f"/proc/{pid}/stat") as f:
+                    if f.read().split()[2] == "T":   # 已冻结（非我们所停）：不碰
+                        continue
+            except (OSError, IndexError):
+                continue
+            try:
+                os.kill(pid, signal.SIGSTOP)
+                self.stopped[pid] = name
+            except OSError as e:
+                print(f"[nav-suspend] ⚠ STOP {name}({pid}) 失败: {e}")
+        print(f"[nav-suspend] 已冻结 {len(self.stopped)} 进程: "
+              + ", ".join(f"{n}({p})" for p, n in sorted(self.stopped.items()))
+              + f" | 守护网 pid={self._guard.pid}")
+        print("[nav-suspend] ⚠ 冻结期底盘勿动（localization 位姿停更）；"
+              "相机 capture 不在冻结集，取图不受影响")
+
+    def resume(self):
+        if not self.stopped:
+            return
+        for pid in sorted(self.stopped):
+            try:
+                os.kill(pid, signal.SIGCONT)
+            except OSError:
+                pass
+        print(f"[nav-suspend] 已恢复 {len(self.stopped)} 进程"
+              "（CONT 幂等；守护网发现主进程退出后自退）")
+        self.stopped.clear()
+
+
+NAV = None   # suspend 后指向 NavSuspend 实例；_teardown 统一 resume
+
+
 def _teardown():
+    if globals().get("NAV") is not None:
+        try:
+            NAV.resume()
+        except Exception:
+            pass
     rob = globals().get("robot")
     if rob is not None:
         try:
@@ -328,6 +429,10 @@ if not robot.init():
 time.sleep(2)
 _cst = robot.start_controller("all")
 print(f"start_controller('all') → {_cst}")
+
+if args.nav_suspend:
+    NAV = NavSuspend()
+    NAV.suspend()
 
 start_pos = read_joints()
 print(f"起始位: {[round(float(v), 3) for v in start_pos]}")
