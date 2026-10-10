@@ -506,20 +506,17 @@ class QuitWatcher:
                     print("\n⛔ 收到中断信号 —— 立即退出"
                           "（已下发目标可能仍在限速执行）")
                     self.restore()
-                    _flush_wave()
-                    _teardown()
+                    _emergency_teardown()
                     os._exit(130)
                 if sys.stdin.read(1) in ("q", "Q"):
                     print("\n⛔ 按下 q —— 立即退出"
                           "（已下发目标可能仍在限速执行）")
                     self.restore()
-                    _flush_wave()
-                    _teardown()
+                    _emergency_teardown()
                     os._exit(2)
             except Exception:
                 self.restore()
-                _flush_wave()
-                _teardown()
+                _emergency_teardown()
                 os._exit(3)
 
 
@@ -690,6 +687,23 @@ def _flush_wave():
         analyze_wave(npz_path)
     except Exception as e:
         print(f"⚠ 波形落盘/归因失败: {e}")
+
+
+def _emergency_teardown():
+    """q/信号急退清理：波形冲账 + 导航栈恢复。
+
+    不做 SDK 优雅关闭——request_shutdown/wait_for_shutdown 从监听线程调
+    会被 SDK 残留线程挂死（20261010_145554 pid 92729 实录，47 线程全
+    futex，SIGTERM 都进不去，SIGKILL 才清掉）；traj 脚本同款教训：
+    急退路径直接 os._exit。
+    """
+    _flush_wave()
+    _nav = globals().get("_NAV")
+    if _nav is not None:
+        try:
+            _nav.resume()
+        except Exception:
+            pass
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -908,6 +922,8 @@ def main():
 
     # ── 波形落盘 + 自动归因分析（q/信号急退走同款 _flush_wave）──
     _flush_wave()
+    # 优雅关闭看门狗：SDK shutdown 若挂死，15s 后硬退保终端（os._exit 全杀）
+    threading.Timer(15.0, lambda: os._exit(0)).start()
     _teardown()
 
 
