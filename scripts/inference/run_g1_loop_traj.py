@@ -112,6 +112,10 @@ ap.add_argument("--tfs-ms", type=float, default=0.0,
                      "（expected arrival time，galbot_robot.hpp L148）——≈帧间隔 "
                      "4.2ms@30fps 即限速到帧节奏；标准关节只消费 position，tfs 是"
                      "唯一配速输入")
+ap.add_argument("--dump-chunks", action="store_true",
+                help="每块推理落地时把原始 chunk（50,16）+BASE_ARM 落盘到 "
+                     "logs/chunks_traj_<ts>/（供离线增量分析与回放台复喂；"
+                     "包络截断前落盘=纯模型输出）")
 ap.add_argument("--cache-frames", type=int, default=None,
                 help="K/V 时序复用周期：1=每帧全量（默认，无损）；config [loop].cache_frames")
 ap.add_argument("--max-excursion", type=float, default=None,
@@ -168,6 +172,23 @@ _log_path = args.log_file or str(
     pathlib.Path(__file__).resolve().parents[2] / "logs" /
     time.strftime("loop_traj_%Y%m%d_%H%M%S.log"))
 pathlib.Path(_log_path).parent.mkdir(parents=True, exist_ok=True)
+# chunk 落盘目录（--dump-chunks）：与日志同时间戳，包络截断前的纯模型输出
+_dump_dir = None
+if args.dump_chunks:
+    _dump_dir = pathlib.Path(_log_path).with_name(
+        _log_path.stem.replace("loop_traj", "chunks_traj"))
+    _dump_dir.mkdir(parents=True, exist_ok=True)
+
+
+def _dump_chunk(chunk_arr, base_arm, idx, infer_ms_val):
+    """原始模型输出落盘（包络截断前）：chunk(50,16)+BASE_ARM(14)+元数据。"""
+    if _dump_dir is None:
+        return
+    np.savez(str(_dump_dir / f"chunk_{idx:03d}.npz"),
+             chunk=np.asarray(chunk_arr, dtype=np.float32),
+             base_arm=np.asarray(base_arm, dtype=np.float32),
+             block=idx, infer_ms=np.float64(infer_ms_val),
+             fps=np.int64(args.fps))
 
 
 class _Tee:
@@ -879,9 +900,11 @@ grab_ms = LatencyTracker()
 job = _PredictJob(model, args.prompt)
 job.start(*fresh_obs())              # 首块
 chunk = job.result()
-infer_ms.add(job.dur_ms)
+_dur0 = job.dur_ms
+infer_ms.add(_dur0)
 BASE_ARM = job.state_arm
 job = None
+_dump_chunk(chunk, BASE_ARM, 1, _dur0)
 
 
 def swap_envelope_check():
@@ -1006,10 +1029,12 @@ while not aborted:
     # ── 换块：推理落地 → 整块换入弃尾（lerobot 水位语义）──
     if job is not None and job.done():
         chunk = job.result()
-        infer_ms.add(job.dur_ms)
+        _dur = job.dur_ms
+        infer_ms.add(_dur)
         BASE_ARM = job.state_arm
         job = None
         n_swapped += 1
+        _dump_chunk(chunk, BASE_ARM, n_swapped, _dur)   # n_swapped 初值=1（首块计入）→ 块2 起 idx 连号不覆盖
         prev_block_ticks = k          # 上块消费拍数（重置前捕获，表头用）
         k = 0
         seam_flush()
