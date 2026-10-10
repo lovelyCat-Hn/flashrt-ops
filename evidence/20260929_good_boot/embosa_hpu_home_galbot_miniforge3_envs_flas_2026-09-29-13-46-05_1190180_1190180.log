@@ -1,0 +1,795 @@
+[2026-09-29 13:46:05.076 thread:1190180 info init.cc:218]:EmbOSA runtime version: V9.1.2
+[2026-09-29 13:46:05.076 thread:1190180 info init.h:15]:EmbOSA build version: V9.1.2
+[2026-09-29 13:46:05.077 thread:1190180 info dds_participant.cc:138]:set participant discovery callback.
+[2026-09-29 13:46:05.077 thread:1190180 info dds_participant.cc:163]:Local Interface IPs:
+[2026-09-29 13:46:05.077 thread:1190180 info dds_participant.cc:165]:192.168.100.88
+[2026-09-29 13:46:05.077 thread:1190180 info dds_participant.cc:168]:Peer List IPs:
+[2026-09-29 13:46:05.077 thread:1190180 info dds_participant.cc:170]:192.168.100.66
+[2026-09-29 13:46:05.102 thread:1190202 info topology_manager.cc:150]:discovery participant name:galbot-echo+4397_embosa_0
+[2026-09-29 13:46:05.104 thread:1190201 info topology_manager.cc:150]:discovery participant name:galbot-echo+4403_embosa_0
+[2026-09-29 13:46:05.106 thread:1190201 info topology_manager.cc:150]:discovery participant name:galbot-echo+4410_embosa_0
+[2026-09-29 13:46:05.108 thread:1190202 info topology_manager.cc:150]:discovery participant name:galbot-echo+4402_embosa_0
+[2026-09-29 13:46:05.112 thread:1190180 info dds_node_factory.cpp:344]:Successfully created DataWriter for topic: embosa_node_change_broadcast
+[2026-09-29 13:46:05.112 thread:1190201 info topology_manager.cc:150]:discovery participant name:galbot-echo+4401_embosa_0
+[2026-09-29 13:46:05.112 thread:1190180 info threadpool.cpp:20]:hardware concurrency count: 12
+[2026-09-29 13:46:05.113 thread:1190180 info dds_node_factory.cpp:420]:Topic already exists: embosa_node_change_broadcast
+[2026-09-29 13:46:05.115 thread:1190201 info topology_manager.cc:150]:discovery participant name:galbot-echo+4407_embosa_0
+[2026-09-29 13:46:05.118 thread:1190180 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 1, current match count: 1
+[2026-09-29 13:46:05.118 thread:1190180 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 1, current match count: 1
+[2026-09-29 13:46:05.119 thread:1190201 info topology_manager.cc:150]:discovery participant name:galbot-echo+4398_embosa_0
+[2026-09-29 13:46:05.122 thread:1190201 info topology_manager.cc:150]:discovery participant name:galbot-echo+5489_embosa_0
+[2026-09-29 13:46:05.125 thread:1190201 info topology_manager.cc:150]:discovery participant name:galbot-echo+4408_embosa_0
+[2026-09-29 13:46:05.128 thread:1190201 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 2, current match count: 2
+[2026-09-29 13:46:05.129 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 2, current match count: 2
+[2026-09-29 13:46:05.129 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 3, current match count: 3
+[2026-09-29 13:46:05.129 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 4, current match count: 4
+[2026-09-29 13:46:05.131 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 5, current match count: 5
+[2026-09-29 13:46:05.131 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: embosa_node_change_broadcast
+[2026-09-29 13:46:05.139 thread:1190201 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 3, current match count: 3
+[2026-09-29 13:46:05.139 thread:1190201 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 4, current match count: 4
+[2026-09-29 13:46:05.141 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 6, current match count: 6
+[2026-09-29 13:46:05.141 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 7, current match count: 7
+[2026-09-29 13:46:05.141 thread:1190201 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 5, current match count: 5
+[2026-09-29 13:46:05.142 thread:1190202 info topology_manager.cc:150]:discovery participant name:galbot-xcu+3945_embosa_0
+[2026-09-29 13:46:05.145 thread:1190202 info topology_manager.cc:150]:discovery participant name:galbot-xcu+4379_embosa_0
+[2026-09-29 13:46:05.153 thread:1190180 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 1, current match count: 1
+[2026-09-29 13:46:05.154 thread:1190180 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 2, current match count: 2
+[2026-09-29 13:46:05.154 thread:1190180 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 3, current match count: 3
+[2026-09-29 13:46:05.154 thread:1190180 info dds_node_factory.cpp:344]:Successfully created DataWriter for topic: embosa_channel_change_broadcast
+[2026-09-29 13:46:05.154 thread:1190180 info dds_node_factory.cpp:420]:Topic already exists: embosa_channel_change_broadcast
+[2026-09-29 13:46:05.156 thread:1190202 info topology_manager.cc:150]:discovery participant name:galbot-xcu+3652_embosa_0
+[2026-09-29 13:46:05.163 thread:1190180 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 4, current match count: 4
+[2026-09-29 13:46:05.163 thread:1190180 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 1, current match count: 1
+[2026-09-29 13:46:05.163 thread:1190180 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 2, current match count: 2
+[2026-09-29 13:46:05.163 thread:1190180 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 3, current match count: 3
+[2026-09-29 13:46:05.163 thread:1190180 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 4, current match count: 4
+[2026-09-29 13:46:05.163 thread:1190180 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 5, current match count: 5
+[2026-09-29 13:46:05.163 thread:1190180 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 6, current match count: 6
+[2026-09-29 13:46:05.164 thread:1190180 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 7, current match count: 7
+[2026-09-29 13:46:05.164 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: embosa_channel_change_broadcast
+[2026-09-29 13:46:05.165 thread:1190202 info topology_manager.cc:150]:discovery participant name:galbot-xcu+4003_embosa_0
+[2026-09-29 13:46:05.169 thread:1190202 info topology_manager.cc:150]:discovery participant name:galbot-xcu+3651_embosa_0
+[2026-09-29 13:46:05.169 thread:1190180 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 1, current match count: 1
+[2026-09-29 13:46:05.175 thread:1190180 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 2, current match count: 2
+[2026-09-29 13:46:05.177 thread:1190180 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 3, current match count: 3
+[2026-09-29 13:46:05.178 thread:1190180 info dds_node_factory.cpp:344]:Successfully created DataWriter for topic: embosa_service_change_broadcast
+[2026-09-29 13:46:05.178 thread:1190180 info dds_node_factory.cpp:420]:Topic already exists: embosa_service_change_broadcast
+[2026-09-29 13:46:05.180 thread:1190180 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 4, current match count: 4
+[2026-09-29 13:46:05.181 thread:1190201 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 5, current match count: 5
+[2026-09-29 13:46:05.181 thread:1190201 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 5, current match count: 5
+[2026-09-29 13:46:05.183 thread:1190201 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 6, current match count: 6
+[2026-09-29 13:46:05.184 thread:1190180 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 1, current match count: 1
+[2026-09-29 13:46:05.184 thread:1190180 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 2, current match count: 2
+[2026-09-29 13:46:05.184 thread:1190180 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 3, current match count: 3
+[2026-09-29 13:46:05.184 thread:1190180 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 4, current match count: 4
+[2026-09-29 13:46:05.184 thread:1190180 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 5, current match count: 5
+[2026-09-29 13:46:05.184 thread:1190180 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 6, current match count: 6
+[2026-09-29 13:46:05.184 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: embosa_service_change_broadcast
+[2026-09-29 13:46:05.185 thread:1190180 info dds_participant.cc:99]:transport no support. Use default transport: DEFAULT_UDP_SHM_TRANSPORT.
+[2026-09-29 13:46:05.185 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 8, current match count: 8
+[2026-09-29 13:46:05.186 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 8, current match count: 8
+[2026-09-29 13:46:05.186 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 7, current match count: 7
+[2026-09-29 13:46:05.190 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 9, current match count: 9
+[2026-09-29 13:46:05.190 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 9, current match count: 9
+[2026-09-29 13:46:05.190 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 8, current match count: 8
+[2026-09-29 13:46:05.220 thread:1190202 info topology_manager.cc:150]:discovery participant name:galbot-xcu+3647_embosa_0
+[2026-09-29 13:46:05.230 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /front_head_camera/left_color/image_raw
+[2026-09-29 13:46:05.232 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 9, current match count: 9
+[2026-09-29 13:46:05.234 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.31.11.6c.3b.00.00.00.00_0.0.f.3: No such file or directory
+[2026-09-29 13:46:05.234 thread:1190197 error RTPS_READER:300]:DDS Failed to add Writer Proxy 01.0f.00.a4.31.11.6c.3b.00.00.00.00|0.0.f.3 to 0.0.7.4 with data sharing.
+[2026-09-29 13:46:05.235 thread:1190202 info topology_manager.cc:150]:discovery participant name:galbot-xcu+3653_embosa_0
+[2026-09-29 13:46:05.237 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.31.11.6c.3b.00.00.00.00_0.0.13.3: No such file or directory
+[2026-09-29 13:46:05.237 thread:1190197 error RTPS_READER:157]:DDS Failed to add Writer Proxy 01.0f.00.a4.31.11.6c.3b.00.00.00.00|0.0.13.3 to 0.0.8.4 with data sharing.
+[2026-09-29 13:46:05.238 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /front_head_camera/left_color/camera_info
+[2026-09-29 13:46:05.239 thread:1190180 info dds_participant.cc:99]:transport no support. Use default transport: DEFAULT_UDP_SHM_TRANSPORT.
+[2026-09-29 13:46:05.239 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 7, current match count: 7
+[2026-09-29 13:46:05.239 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 6, current match count: 6
+[2026-09-29 13:46:05.248 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 6, current match count: 6
+[2026-09-29 13:46:05.254 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 10, current match count: 10
+[2026-09-29 13:46:05.254 thread:1190201 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 7, current match count: 7
+[2026-09-29 13:46:05.254 thread:1190201 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 7, current match count: 7
+[2026-09-29 13:46:05.256 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 11, current match count: 11
+[2026-09-29 13:46:05.259 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.31.11.6c.3b.00.00.00.00_0.0.10.3: No such file or directory
+[2026-09-29 13:46:05.259 thread:1190197 error RTPS_READER:300]:DDS Failed to add Writer Proxy 01.0f.00.a4.31.11.6c.3b.00.00.00.00|0.0.10.3 to 0.0.9.4 with data sharing.
+[2026-09-29 13:46:05.259 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 10, current match count: 10
+[2026-09-29 13:46:05.260 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 10, current match count: 10
+[2026-09-29 13:46:05.260 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 8, current match count: 8
+[2026-09-29 13:46:05.260 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 8, current match count: 8
+[2026-09-29 13:46:05.260 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 8, current match count: 8
+[2026-09-29 13:46:05.262 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /front_head_camera/right_color/image_raw
+[2026-09-29 13:46:05.266 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.31.11.6c.3b.00.00.00.00_0.0.14.3: No such file or directory
+[2026-09-29 13:46:05.266 thread:1190197 error RTPS_READER:157]:DDS Failed to add Writer Proxy 01.0f.00.a4.31.11.6c.3b.00.00.00.00|0.0.14.3 to 0.0.a.4 with data sharing.
+[2026-09-29 13:46:05.267 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /front_head_camera/right_color/camera_info
+[2026-09-29 13:46:05.268 thread:1190180 info dds_participant.cc:99]:transport no support. Use default transport: DEFAULT_UDP_SHM_TRANSPORT.
+[2026-09-29 13:46:05.289 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 12, current match count: 12
+[2026-09-29 13:46:05.289 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 11, current match count: 11
+[2026-09-29 13:46:05.289 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 11, current match count: 11
+[2026-09-29 13:46:05.289 thread:1190202 info topology_manager.cc:150]:discovery participant name:galbot-xcu+3648_embosa_0
+[2026-09-29 13:46:05.292 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.3a.11.f7.c7.00.00.00.00_0.0.c.3: No such file or directory
+[2026-09-29 13:46:05.292 thread:1190197 error RTPS_READER:300]:DDS Failed to add Writer Proxy 01.0f.00.a4.3a.11.f7.c7.00.00.00.00|0.0.c.3 to 0.0.b.4 with data sharing.
+[2026-09-29 13:46:05.292 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /left_arm_camera/color/image_raw
+[2026-09-29 13:46:05.296 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 9, current match count: 9
+[2026-09-29 13:46:05.296 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 9, current match count: 9
+[2026-09-29 13:46:05.296 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 9, current match count: 9
+[2026-09-29 13:46:05.297 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.3a.11.f7.c7.00.00.00.00_0.0.10.3: No such file or directory
+[2026-09-29 13:46:05.297 thread:1190197 error RTPS_READER:157]:DDS Failed to add Writer Proxy 01.0f.00.a4.3a.11.f7.c7.00.00.00.00|0.0.10.3 to 0.0.c.4 with data sharing.
+[2026-09-29 13:46:05.298 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /left_arm_camera/color/camera_info
+[2026-09-29 13:46:05.299 thread:1190180 info dds_participant.cc:99]:transport no support. Use default transport: DEFAULT_UDP_SHM_TRANSPORT.
+[2026-09-29 13:46:05.316 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.3a.11.f7.c7.00.00.00.00_0.0.d.3: No such file or directory
+[2026-09-29 13:46:05.316 thread:1190197 error RTPS_READER:300]:DDS Failed to add Writer Proxy 01.0f.00.a4.3a.11.f7.c7.00.00.00.00|0.0.d.3 to 0.0.d.4 with data sharing.
+[2026-09-29 13:46:05.318 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /left_arm_camera/depth/image_raw
+[2026-09-29 13:46:05.326 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /left_arm_camera/depth/camera_info
+[2026-09-29 13:46:05.326 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.3a.11.f7.c7.00.00.00.00_0.0.11.3: No such file or directory
+[2026-09-29 13:46:05.326 thread:1190197 error RTPS_READER:157]:DDS Failed to add Writer Proxy 01.0f.00.a4.3a.11.f7.c7.00.00.00.00|0.0.11.3 to 0.0.e.4 with data sharing.
+[2026-09-29 13:46:05.329 thread:1190180 info dds_participant.cc:99]:transport no support. Use default transport: DEFAULT_UDP_SHM_TRANSPORT.
+[2026-09-29 13:46:05.330 thread:1190201 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 10, current match count: 10
+[2026-09-29 13:46:05.330 thread:1190201 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 10, current match count: 10
+[2026-09-29 13:46:05.330 thread:1190201 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 10, current match count: 10
+[2026-09-29 13:46:05.346 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.37.11.25.a3.00.00.00.00_0.0.c.3: No such file or directory
+[2026-09-29 13:46:05.346 thread:1190197 error RTPS_READER:300]:DDS Failed to add Writer Proxy 01.0f.00.a4.37.11.25.a3.00.00.00.00|0.0.c.3 to 0.0.f.4 with data sharing.
+[2026-09-29 13:46:05.348 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /right_arm_camera/color/image_raw
+[2026-09-29 13:46:05.352 thread:1190211 error channel_manager.cc:394]:newly added reader(belongs to node[relocalization_server|relocalization_server|5489])'s message type[embosa_plain_message_type] does not match the exsited reader(belongs to node[embosa_localization_node|localization_server|4403])'s message type[galbot.sensor_proto.PointCloud2].
+[2026-09-29 13:46:05.356 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.37.11.25.a3.00.00.00.00_0.0.10.3: No such file or directory
+[2026-09-29 13:46:05.356 thread:1190197 error RTPS_READER:157]:DDS Failed to add Writer Proxy 01.0f.00.a4.37.11.25.a3.00.00.00.00|0.0.10.3 to 0.0.10.4 with data sharing.
+[2026-09-29 13:46:05.356 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 13, current match count: 13
+[2026-09-29 13:46:05.356 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 12, current match count: 12
+[2026-09-29 13:46:05.356 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 12, current match count: 12
+[2026-09-29 13:46:05.357 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /right_arm_camera/color/camera_info
+[2026-09-29 13:46:05.358 thread:1190180 info dds_participant.cc:99]:transport no support. Use default transport: DEFAULT_UDP_SHM_TRANSPORT.
+[2026-09-29 13:46:05.365 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 11, current match count: 11
+[2026-09-29 13:46:05.365 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 11, current match count: 11
+[2026-09-29 13:46:05.365 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 11, current match count: 11
+[2026-09-29 13:46:05.376 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.37.11.25.a3.00.00.00.00_0.0.d.3: No such file or directory
+[2026-09-29 13:46:05.376 thread:1190197 error RTPS_READER:300]:DDS Failed to add Writer Proxy 01.0f.00.a4.37.11.25.a3.00.00.00.00|0.0.d.3 to 0.0.11.4 with data sharing.
+[2026-09-29 13:46:05.377 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /right_arm_camera/depth/image_raw
+[2026-09-29 13:46:05.380 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.37.11.25.a3.00.00.00.00_0.0.11.3: No such file or directory
+[2026-09-29 13:46:05.380 thread:1190197 error RTPS_READER:157]:DDS Failed to add Writer Proxy 01.0f.00.a4.37.11.25.a3.00.00.00.00|0.0.11.3 to 0.0.12.4 with data sharing.
+[2026-09-29 13:46:05.382 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /right_arm_camera/depth/camera_info
+[2026-09-29 13:46:05.382 thread:1190180 info dds_participant.cc:99]:transport no support. Use default transport: DEFAULT_UDP_SHM_TRANSPORT.
+[2026-09-29 13:46:05.386 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 12, current match count: 12
+[2026-09-29 13:46:05.386 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 12, current match count: 12
+[2026-09-29 13:46:05.387 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 12, current match count: 12
+[2026-09-29 13:46:05.398 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /left_front_surround/color/image_raw
+[2026-09-29 13:46:05.401 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.2d.11.63.43.00.00.00.00_0.0.a.3: No such file or directory
+[2026-09-29 13:46:05.401 thread:1190197 error RTPS_READER:300]:DDS Failed to add Writer Proxy 01.0f.00.a4.2d.11.63.43.00.00.00.00|0.0.a.3 to 0.0.13.4 with data sharing.
+[2026-09-29 13:46:05.401 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.2d.11.63.43.00.00.00.00_0.0.b.3: No such file or directory
+[2026-09-29 13:46:05.401 thread:1190197 error RTPS_READER:157]:DDS Failed to add Writer Proxy 01.0f.00.a4.2d.11.63.43.00.00.00.00|0.0.b.3 to 0.0.14.4 with data sharing.
+[2026-09-29 13:46:05.405 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /left_front_surround/color/camera_info
+[2026-09-29 13:46:05.406 thread:1190180 info dds_participant.cc:99]:transport no support. Use default transport: DEFAULT_UDP_SHM_TRANSPORT.
+[2026-09-29 13:46:05.414 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 14, current match count: 14
+[2026-09-29 13:46:05.414 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 13, current match count: 13
+[2026-09-29 13:46:05.414 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 13, current match count: 13
+[2026-09-29 13:46:05.419 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 13, current match count: 13
+[2026-09-29 13:46:05.420 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 13, current match count: 13
+[2026-09-29 13:46:05.420 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 13, current match count: 13
+[2026-09-29 13:46:05.420 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 15, current match count: 15
+[2026-09-29 13:46:05.420 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 14, current match count: 14
+[2026-09-29 13:46:05.420 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 14, current match count: 14
+[2026-09-29 13:46:05.422 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.2d.11.63.43.00.00.00.00_0.0.e.3: No such file or directory
+[2026-09-29 13:46:05.422 thread:1190197 error RTPS_READER:300]:DDS Failed to add Writer Proxy 01.0f.00.a4.2d.11.63.43.00.00.00.00|0.0.e.3 to 0.0.15.4 with data sharing.
+[2026-09-29 13:46:05.423 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /right_front_surround/color/image_raw
+[2026-09-29 13:46:05.428 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.2d.11.63.43.00.00.00.00_0.0.f.3: No such file or directory
+[2026-09-29 13:46:05.428 thread:1190197 error RTPS_READER:157]:DDS Failed to add Writer Proxy 01.0f.00.a4.2d.11.63.43.00.00.00.00|0.0.f.3 to 0.0.16.4 with data sharing.
+[2026-09-29 13:46:05.431 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /right_front_surround/color/camera_info
+[2026-09-29 13:46:05.432 thread:1190180 info dds_participant.cc:99]:transport no support. Use default transport: DEFAULT_UDP_SHM_TRANSPORT.
+[2026-09-29 13:46:05.433 thread:1190213 error channel_manager.cc:394]:newly added reader(belongs to node[gateway_server|gateway_service|3652])'s message type[embosa_plain_message_type] does not match the exsited reader(belongs to node[diagnose_demo_node|galbot_chassis_service|3945])'s message type[galbot.gateway_proto.BusinessFrame].
+[2026-09-29 13:46:05.445 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.2d.11.63.43.00.00.00.00_0.0.c.3: No such file or directory
+[2026-09-29 13:46:05.446 thread:1190197 error RTPS_READER:300]:DDS Failed to add Writer Proxy 01.0f.00.a4.2d.11.63.43.00.00.00.00|0.0.c.3 to 0.0.17.4 with data sharing.
+[2026-09-29 13:46:05.447 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /left_rear_surround/color/image_raw
+[2026-09-29 13:46:05.456 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.2d.11.63.43.00.00.00.00_0.0.d.3: No such file or directory
+[2026-09-29 13:46:05.456 thread:1190197 error RTPS_READER:157]:DDS Failed to add Writer Proxy 01.0f.00.a4.2d.11.63.43.00.00.00.00|0.0.d.3 to 0.0.18.4 with data sharing.
+[2026-09-29 13:46:05.458 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /left_rear_surround/color/camera_info
+[2026-09-29 13:46:05.458 thread:1190180 info dds_participant.cc:99]:transport no support. Use default transport: DEFAULT_UDP_SHM_TRANSPORT.
+[2026-09-29 13:46:05.474 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.2d.11.63.43.00.00.00.00_0.0.10.3: No such file or directory
+[2026-09-29 13:46:05.475 thread:1190197 error RTPS_READER:300]:DDS Failed to add Writer Proxy 01.0f.00.a4.2d.11.63.43.00.00.00.00|0.0.10.3 to 0.0.19.4 with data sharing.
+[2026-09-29 13:46:05.475 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /right_rear_surround/color/image_raw
+[2026-09-29 13:46:05.476 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 14, current match count: 14
+[2026-09-29 13:46:05.479 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 14, current match count: 14
+[2026-09-29 13:46:05.479 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 14, current match count: 14
+[2026-09-29 13:46:05.479 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 16, current match count: 16
+[2026-09-29 13:46:05.479 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 15, current match count: 15
+[2026-09-29 13:46:05.479 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 15, current match count: 15
+[2026-09-29 13:46:05.483 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.2d.11.63.43.00.00.00.00_0.0.11.3: No such file or directory
+[2026-09-29 13:46:05.483 thread:1190197 error RTPS_READER:157]:DDS Failed to add Writer Proxy 01.0f.00.a4.2d.11.63.43.00.00.00.00|0.0.11.3 to 0.0.1a.4 with data sharing.
+[2026-09-29 13:46:05.486 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /right_rear_surround/color/camera_info
+[2026-09-29 13:46:05.488 thread:1190180 info init.h:15]:EmbOSA build version: V9.1.2
+[2026-09-29 13:46:05.491 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.33.11.66.97.00.00.00.00_0.0.7.3: No such file or directory
+[2026-09-29 13:46:05.491 thread:1190197 error RTPS_READER:157]:DDS Failed to add Writer Proxy 01.0f.00.a4.33.11.66.97.00.00.00.00|0.0.7.3 to 0.0.1b.4 with data sharing.
+[2026-09-29 13:46:05.491 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.3a.11.f7.c7.00.00.00.00_0.0.a.3: No such file or directory
+[2026-09-29 13:46:05.491 thread:1190197 error RTPS_READER:157]:DDS Failed to add Writer Proxy 01.0f.00.a4.3a.11.f7.c7.00.00.00.00|0.0.a.3 to 0.0.1b.4 with data sharing.
+[2026-09-29 13:46:05.491 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.31.11.6c.3b.00.00.00.00_0.0.c.3: No such file or directory
+[2026-09-29 13:46:05.491 thread:1190197 error RTPS_READER:157]:DDS Failed to add Writer Proxy 01.0f.00.a4.31.11.6c.3b.00.00.00.00|0.0.c.3 to 0.0.1b.4 with data sharing.
+[2026-09-29 13:46:05.491 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.37.11.25.a3.00.00.00.00_0.0.a.3: No such file or directory
+[2026-09-29 13:46:05.491 thread:1190197 error RTPS_READER:157]:DDS Failed to add Writer Proxy 01.0f.00.a4.37.11.25.a3.00.00.00.00|0.0.a.3 to 0.0.1b.4 with data sharing.
+[2026-09-29 13:46:05.492 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /embosa_tf
+[2026-09-29 13:46:05.497 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /embosa_tf_static
+[2026-09-29 13:46:05.501 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /galbot/mission_manager/onboard_config
+[2026-09-29 13:46:05.504 thread:1190180 info dds_sub_listener.cc:511]:DDSSubListener matched. topic: bms, total match count: 1, current match count: 1
+[2026-09-29 13:46:05.505 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: bms
+[2026-09-29 13:46:05.506 thread:1190180 info init.h:15]:EmbOSA build version: V9.1.2
+[2026-09-29 13:46:05.509 thread:1190180 info dds_node_factory.cpp:344]:Successfully created DataWriter for topic: singorix/wbcs/target
+[2026-09-29 13:46:05.511 thread:1190180 info dds_participant.cc:99]:transport no support. Use default transport: DEFAULT_UDP_SHM_TRANSPORT.
+[2026-09-29 13:46:05.526 thread:1190180 info dds_node_factory.cpp:344]:Successfully created DataWriter for topic: singorix/wbcs/target_server__RPC__REQUEST
+[2026-09-29 13:46:05.526 thread:1190180 info dds_participant.cc:99]:transport no support. Use default transport: DEFAULT_UDP_SHM_TRANSPORT.
+[2026-09-29 13:46:05.540 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: singorix/wbcs/target_server__RPC__RESPONSE
+[2026-09-29 13:46:05.542 thread:1190180 info dds_participant.cc:99]:transport no support. Use default transport: DEFAULT_UDP_SHM_TRANSPORT.
+[2026-09-29 13:46:05.559 thread:1190180 info dds_node_factory.cpp:344]:Successfully created DataWriter for topic: singorix/wbcs/controller_server__RPC__REQUEST
+[2026-09-29 13:46:05.559 thread:1190180 info dds_participant.cc:99]:transport no support. Use default transport: DEFAULT_UDP_SHM_TRANSPORT.
+[2026-09-29 13:46:05.573 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: singorix/wbcs/controller_server__RPC__RESPONSE
+[2026-09-29 13:46:05.577 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: singorix/wbcs/error
+[2026-09-29 13:46:05.582 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: singorix/wbcs/wbc_info
+[2026-09-29 13:46:05.586 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: singorix/wbcs/sensor
+[2026-09-29 13:46:05.590 thread:1190180 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: /odom/base_link, total match count: 1, current match count: 1
+[2026-09-29 13:46:05.591 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /odom/base_link
+[2026-09-29 13:46:05.600 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 15, current match count: 15
+[2026-09-29 13:46:05.601 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 15, current match count: 15
+[2026-09-29 13:46:05.601 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 15, current match count: 15
+[2026-09-29 13:46:05.601 thread:1190202 info dds_client_pub_listener.cc:20]:DDSClientPubListener matched. topic: singorix/wbcs/controller_server__RPC__REQUEST, total match count: 1, current match count: 1
+[2026-09-29 13:46:05.601 thread:1190202 info dds_client_pub_listener.cc:20]:DDSClientPubListener matched. topic: singorix/wbcs/target_server__RPC__REQUEST, total match count: 1, current match count: 1
+[2026-09-29 13:46:05.601 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: singorix/wbcs/target, total match count: 1, current match count: 1
+[2026-09-29 13:46:05.615 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 17, current match count: 17
+[2026-09-29 13:46:05.616 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 16, current match count: 16
+[2026-09-29 13:46:05.616 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 16, current match count: 16
+[2026-09-29 13:46:05.616 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: singorix/wbcs/sensor, total match count: 1, current match count: 1
+[2026-09-29 13:46:05.616 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: singorix/wbcs/error, total match count: 1, current match count: 1
+[2026-09-29 13:46:05.616 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: singorix/wbcs/wbc_info, total match count: 1, current match count: 1
+[2026-09-29 13:46:05.616 thread:1190202 info dds_client_sub_serialization_listener.h:383]:DDSClientSubSerializationListener matched. topic: singorix/wbcs/controller_server__RPC__RESPONSE, total match count: 1, current match count: 1
+[2026-09-29 13:46:05.616 thread:1190202 info dds_client_sub_serialization_listener.h:383]:DDSClientSubSerializationListener matched. topic: singorix/wbcs/target_server__RPC__RESPONSE, total match count: 1, current match count: 1
+[2026-09-29 13:46:05.692 thread:1190180 info dds_serialization_dataclient.hpp:409]:Matched server, count: 1, topic: singorix/wbcs/target_server
+[2026-09-29 13:46:05.725 thread:1190202 info topology_manager.cc:150]:discovery participant name:galbot-xcu+3650_embosa_0
+[2026-09-29 13:46:05.792 thread:1190180 info dds_serialization_dataclient.hpp:409]:Matched server, count: 1, topic: singorix/wbcs/controller_server
+[2026-09-29 13:46:05.804 thread:1190202 info topology_manager.cc:150]:discovery participant name:galbot-xcu+3649_embosa_0
+[2026-09-29 13:46:05.807 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 16, current match count: 16
+[2026-09-29 13:46:05.807 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 16, current match count: 16
+[2026-09-29 13:46:05.807 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 16, current match count: 16
+[2026-09-29 13:46:05.807 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 18, current match count: 18
+[2026-09-29 13:46:05.808 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 17, current match count: 17
+[2026-09-29 13:46:05.808 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 17, current match count: 17
+[2026-09-29 13:46:05.886 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 19, current match count: 19
+[2026-09-29 13:46:05.886 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 18, current match count: 18
+[2026-09-29 13:46:05.886 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 18, current match count: 18
+[2026-09-29 13:46:05.887 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 17, current match count: 17
+[2026-09-29 13:46:05.887 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 17, current match count: 17
+[2026-09-29 13:46:05.887 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 17, current match count: 17
+[2026-09-29 13:46:05.893 thread:1190180 info init.h:15]:EmbOSA build version: V9.1.2
+[2026-09-29 13:46:05.896 thread:1190180 info dds_node_factory.cpp:526]:Successfully created DataReader for topic: /galbot/mic
+[2026-09-29 13:46:05.898 thread:1190180 info dds_node_factory.cpp:344]:Successfully created DataWriter for topic: /galbot/spk
+[2026-09-29 13:46:05.974 thread:1190220 error channel_manager.cc:394]:newly added writer(belongs to node[diagnose_process_node|diagnose|3649])'s message type[galbot.gateway_proto.BusinessFrame] does not match the exsited reader(belongs to node[gateway_server|gateway_service|3652])'s message type[embosa_plain_message_type].
+[2026-09-29 13:46:06.072 thread:1190202 info topology_manager.cc:150]:discovery participant name:galbot-echo+3977_embosa_0
+[2026-09-29 13:46:06.075 thread:1190202 info topology_manager.cc:150]:discovery participant name:galbot-echo+4406_embosa_0
+[2026-09-29 13:46:06.095 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 20, current match count: 20
+[2026-09-29 13:46:06.096 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 19, current match count: 19
+[2026-09-29 13:46:06.097 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 21, current match count: 21
+[2026-09-29 13:46:06.097 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 19, current match count: 19
+[2026-09-29 13:46:06.097 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 20, current match count: 20
+[2026-09-29 13:46:06.098 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 20, current match count: 20
+[2026-09-29 13:46:06.103 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 18, current match count: 18
+[2026-09-29 13:46:06.105 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 18, current match count: 18
+[2026-09-29 13:46:06.105 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 18, current match count: 18
+[2026-09-29 13:46:06.110 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 19, current match count: 19
+[2026-09-29 13:46:06.110 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 19, current match count: 19
+[2026-09-29 13:46:06.111 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 19, current match count: 19
+[2026-09-29 13:46:06.112 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 21, current match count: 21
+[2026-09-29 13:46:06.112 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 22, current match count: 22
+[2026-09-29 13:46:06.113 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 22, current match count: 22
+[2026-09-29 13:46:06.113 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 21, current match count: 21
+[2026-09-29 13:46:06.114 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 22, current match count: 22
+[2026-09-29 13:46:06.116 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 20, current match count: 20
+[2026-09-29 13:46:06.127 thread:1190201 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 20, current match count: 20
+[2026-09-29 13:46:06.128 thread:1190201 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 20, current match count: 20
+[2026-09-29 13:46:06.129 thread:1190201 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 21, current match count: 21
+[2026-09-29 13:46:06.129 thread:1190201 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 21, current match count: 21
+[2026-09-29 13:46:06.129 thread:1190201 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 21, current match count: 21
+[2026-09-29 13:46:06.138 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 22, current match count: 22
+[2026-09-29 13:46:06.143 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 22, current match count: 22
+[2026-09-29 13:46:06.144 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 22, current match count: 22
+[2026-09-29 13:46:06.162 thread:1190202 info topology_manager.cc:150]:discovery participant name:galbot-echo+4399_embosa_0
+[2026-09-29 13:46:06.191 thread:1190222 error channel_manager.cc:394]:newly added writer(belongs to node[/data/galbot/bin/service_lidar_capture|service_lidar_capture|4406])'s message type[galbot.sensor_proto.PointCloud2] does not match the exsited reader(belongs to node[relocalization_server|relocalization_server|5489])'s message type[embosa_plain_message_type].
+[2026-09-29 13:46:06.201 thread:1190213 error channel_manager.cc:380]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited writer(belongs to node[service_front_head_camera_sensor_capture|front_head_camera_capture|4401])'s message type[galbot.sensor_proto.CompressedImage].
+[2026-09-29 13:46:06.201 thread:1190213 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[sensor_sdk_node|python3.11|1190180])'s message type[galbot.sensor_proto.CompressedImage].
+[2026-09-29 13:46:06.202 thread:1190222 error channel_manager.cc:380]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited writer(belongs to node[service_front_head_camera_sensor_capture|front_head_camera_capture|4401])'s message type[galbot.sensor_proto.CompressedImage].
+[2026-09-29 13:46:06.203 thread:1190222 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[sensor_sdk_node|python3.11|1190180])'s message type[galbot.sensor_proto.CompressedImage].
+[2026-09-29 13:46:06.203 thread:1190216 error channel_manager.cc:380]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited writer(belongs to node[service_left_arm_camera_sensor_capture|left_arm_camera_capture|4410])'s message type[galbot.sensor_proto.CompressedImage].
+[2026-09-29 13:46:06.203 thread:1190216 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[sensor_sdk_node|python3.11|1190180])'s message type[galbot.sensor_proto.CompressedImage].
+[2026-09-29 13:46:06.204 thread:1190214 error channel_manager.cc:380]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited writer(belongs to node[service_right_arm_camera_sensor_capture|right_arm_camera_capture|4407])'s message type[galbot.sensor_proto.CompressedImage].
+[2026-09-29 13:46:06.204 thread:1190214 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[sensor_sdk_node|python3.11|1190180])'s message type[galbot.sensor_proto.CompressedImage].
+[2026-09-29 13:46:06.204 thread:1190218 error channel_manager.cc:380]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited writer(belongs to node[service_front_head_camera_sensor_capture|front_head_camera_capture|4401])'s message type[galbot.sensor_proto.CameraInfo].
+[2026-09-29 13:46:06.204 thread:1190218 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[sensor_sdk_node|python3.11|1190180])'s message type[galbot.sensor_proto.CameraInfo].
+[2026-09-29 13:46:06.204 thread:1190217 error channel_manager.cc:380]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited writer(belongs to node[service_front_head_camera_sensor_capture|front_head_camera_capture|4401])'s message type[galbot.sensor_proto.CameraInfo].
+[2026-09-29 13:46:06.204 thread:1190217 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[sensor_sdk_node|python3.11|1190180])'s message type[galbot.sensor_proto.CameraInfo].
+[2026-09-29 13:46:06.205 thread:1190211 error channel_manager.cc:380]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited writer(belongs to node[service_left_arm_camera_sensor_capture|left_arm_camera_capture|4410])'s message type[galbot.sensor_proto.CameraInfo].
+[2026-09-29 13:46:06.205 thread:1190211 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[sensor_sdk_node|python3.11|1190180])'s message type[galbot.sensor_proto.CameraInfo].
+[2026-09-29 13:46:06.205 thread:1190221 error channel_manager.cc:380]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited writer(belongs to node[service_right_arm_camera_sensor_capture|right_arm_camera_capture|4407])'s message type[galbot.sensor_proto.CameraInfo].
+[2026-09-29 13:46:06.205 thread:1190221 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[sensor_sdk_node|python3.11|1190180])'s message type[galbot.sensor_proto.CameraInfo].
+[2026-09-29 13:46:06.205 thread:1190220 error channel_manager.cc:380]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited writer(belongs to node[singorix_wbcs_main|singorix_wbcs_main|4379])'s message type[galbot.singorix_proto.SingoriXSensor].
+[2026-09-29 13:46:06.205 thread:1190220 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[wbc_sdk_node|python3.11|1190180])'s message type[galbot.singorix_proto.SingoriXSensor].
+[2026-09-29 13:46:06.206 thread:1190219 error channel_manager.cc:380]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited writer(belongs to node[singorix_wbcs_main|singorix_wbcs_main|4379])'s message type[galbot.singorix_proto.WBCInfo].
+[2026-09-29 13:46:06.206 thread:1190219 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[wbc_sdk_node|python3.11|1190180])'s message type[galbot.singorix_proto.WBCInfo].
+[2026-09-29 13:46:06.206 thread:1190212 error channel_manager.cc:380]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited writer(belongs to node[singorix_wbcs_main|singorix_wbcs_main|4379])'s message type[galbot.singorix_proto.SingoriXError].
+[2026-09-29 13:46:06.206 thread:1190212 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[wbc_sdk_node|python3.11|1190180])'s message type[galbot.singorix_proto.SingoriXError].
+[2026-09-29 13:46:06.207 thread:1190213 error channel_manager.cc:380]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited writer(belongs to node[service_front_head_camera_sensor_capture|front_head_camera_capture|4401])'s message type[galbot.tf2_proto.TF2Message].
+[2026-09-29 13:46:06.207 thread:1190213 error channel_manager.cc:380]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited writer(belongs to node[service_right_arm_camera_sensor_capture|right_arm_camera_capture|4407])'s message type[galbot.tf2_proto.TF2Message].
+[2026-09-29 13:46:06.207 thread:1190213 error channel_manager.cc:380]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited writer(belongs to node[embosa_localization_node|localization_server|4403])'s message type[galbot.tf2_proto.TF2Message].
+[2026-09-29 13:46:06.207 thread:1190213 error channel_manager.cc:380]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited writer(belongs to node[service_left_arm_camera_sensor_capture|left_arm_camera_capture|4410])'s message type[galbot.tf2_proto.TF2Message].
+[2026-09-29 13:46:06.207 thread:1190213 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[system_sdk_node|python3.11|1190180])'s message type[galbot.tf2_proto.TF2Message].
+[2026-09-29 13:46:06.207 thread:1190213 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[/galbot_perception|Perception_Algorithm_Service|4402])'s message type[galbot.tf2_proto.TF2Message].
+[2026-09-29 13:46:06.207 thread:1190213 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[embosa_localization_node|localization_server|4403])'s message type[galbot.tf2_proto.TF2Message].
+[2026-09-29 13:46:06.207 thread:1190215 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[system_sdk_node|python3.11|1190180])'s message type[galbot.tf2_proto.TF2Message].
+[2026-09-29 13:46:06.207 thread:1190215 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[/galbot_perception|Perception_Algorithm_Service|4402])'s message type[galbot.tf2_proto.TF2Message].
+[2026-09-29 13:46:06.207 thread:1190215 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[embosa_localization_node|localization_server|4403])'s message type[galbot.tf2_proto.TF2Message].
+[2026-09-29 13:46:06.207 thread:1190222 error channel_manager.cc:380]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited writer(belongs to node[/data/galbot/bin/service_lidar_capture|service_lidar_capture|4406])'s message type[galbot.sensor_proto.PointCloud2].
+[2026-09-29 13:46:06.207 thread:1190222 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[relocalization_server|relocalization_server|5489])'s message type[embosa_plain_message_type].
+[2026-09-29 13:46:06.207 thread:1190222 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[embosa_localization_node|localization_server|4403])'s message type[galbot.sensor_proto.PointCloud2].
+[2026-09-29 13:46:06.207 thread:1190216 error channel_manager.cc:380]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited writer(belongs to node[/data/galbot/bin/service_lidar_capture|service_lidar_capture|4406])'s message type[galbot.sensor_proto.ImuSensor].
+[2026-09-29 13:46:06.207 thread:1190216 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[embosa_localization_node|localization_server|4403])'s message type[galbot.sensor_proto.ImuSensor].
+[2026-09-29 13:46:06.208 thread:1190214 error channel_manager.cc:380]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited writer(belongs to node[/data/galbot/bin/service_lidar_capture|service_lidar_capture|4406])'s message type[galbot.core_proto.StringValue].
+[2026-09-29 13:46:06.208 thread:1190218 error channel_manager.cc:380]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited writer(belongs to node[/galbot_perception|Perception_Algorithm_Service|4402])'s message type[galbot.perception_proto.DetectionResult].
+[2026-09-29 13:46:06.210 thread:1190221 error channel_manager.cc:380]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited writer(belongs to node[embosa_localization_node|localization_server|4403])'s message type[galbot.sensor_proto.PointCloud2].
+[2026-09-29 13:46:06.210 thread:1190220 error channel_manager.cc:380]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited writer(belongs to node[embosa_localization_node|localization_server|4403])'s message type[galbot.core_proto.FloatValue].
+[2026-09-29 13:46:06.211 thread:1190213 error channel_manager.cc:380]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited writer(belongs to node[embosa_localization_node|localization_server|4403])'s message type[galbot.spatial_proto.PoseMsg].
+[2026-09-29 13:46:06.211 thread:1190213 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[singorix_wbcs_main|singorix_wbcs_main|4379])'s message type[galbot.spatial_proto.PoseMsg].
+[2026-09-29 13:46:06.211 thread:1190215 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[embosa_localization_node|localization_server|4403])'s message type[galbot.spatial_proto.PoseMsg].
+[2026-09-29 13:46:06.212 thread:1190216 error channel_manager.cc:380]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited writer(belongs to node[embosa_localization_node|localization_server|4403])'s message type[galbot.spatial_proto.PoseMsg].
+[2026-09-29 13:46:06.212 thread:1190218 error channel_manager.cc:380]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited writer(belongs to node[embosa_test_rpc_client_node|galbot_chassis_service|3945])'s message type[galbot.navigation_proto.Odometry].
+[2026-09-29 13:46:06.212 thread:1190218 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[wbc_sdk_node|python3.11|1190180])'s message type[galbot.navigation_proto.Odometry].
+[2026-09-29 13:46:06.212 thread:1190218 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[embosa_localization_node|localization_server|4403])'s message type[galbot.navigation_proto.Odometry].
+[2026-09-29 13:46:06.213 thread:1190220 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[diagnose_process_node|diagnose|3649])'s message type[galbot.system_proto.mission_manager_proto.MissionManagerMessage].
+[2026-09-29 13:46:06.214 thread:1190212 error channel_manager.cc:394]:newly added reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE] does not match the exsited reader(belongs to node[system_sdk_node|python3.11|1190180])'s message type[galbot.system_proto.mission_manager_proto.OnboardConfig].
+[2026-09-29 13:46:06.215 thread:1190218 error channel_manager.cc:394]:newly added writer(belongs to node[galbot_fusion|galbot_fusion_main|4398])'s message type[galbot.perception_proto.TsdfGrid] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:46:06.219 thread:1190212 error channel_manager.cc:394]:newly added reader(belongs to node[galbot_fusion|galbot_fusion_main|4398])'s message type[galbot.spatial_proto.PoseMsg] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:46:06.221 thread:1190213 error channel_manager.cc:394]:newly added reader(belongs to node[galbot_fusion|galbot_fusion_main|4398])'s message type[galbot.sensor_proto.PointCloud2] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:46:06.221 thread:1190213 error channel_manager.cc:394]:newly added reader(belongs to node[galbot_fusion|galbot_fusion_main|4398])'s message type[galbot.sensor_proto.PointCloud2] does not match the exsited reader(belongs to node[relocalization_server|relocalization_server|5489])'s message type[embosa_plain_message_type].
+[2026-09-29 13:46:06.224 thread:1190202 info topology_manager.cc:150]:discovery participant name:galbot-echo+3980_embosa_0
+[2026-09-29 13:46:06.226 thread:1190221 error channel_manager.cc:394]:newly added reader(belongs to node[galbot_fusion|galbot_fusion_main|4398])'s message type[galbot.tf2_proto.TF2Message] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:46:06.227 thread:1190220 error channel_manager.cc:394]:newly added reader(belongs to node[galbot_fusion|galbot_fusion_main|4398])'s message type[galbot.tf2_proto.TF2Message] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:46:06.279 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 23, current match count: 23
+[2026-09-29 13:46:06.280 thread:1190202 info topology_manager.cc:150]:discovery participant name:galbot-echo+4400_embosa_0
+[2026-09-29 13:46:06.303 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 23, current match count: 23
+[2026-09-29 13:46:06.309 thread:1190201 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 23, current match count: 23
+[2026-09-29 13:46:06.326 thread:1190202 info topology_manager.cc:150]:discovery participant name:galbot-xcu+3655_embosa_0
+[2026-09-29 13:46:06.339 thread:1190202 info topology_manager.cc:150]:discovery participant name:galbot-echo+4052_embosa_0
+[2026-09-29 13:46:06.343 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 23, current match count: 23
+[2026-09-29 13:46:06.344 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 23, current match count: 23
+[2026-09-29 13:46:06.344 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 23, current match count: 23
+[2026-09-29 13:46:06.344 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.2f.11.1d.be.00.00.00.00_0.0.7.3: No such file or directory
+[2026-09-29 13:46:06.344 thread:1190197 error RTPS_READER:157]:DDS Failed to add Writer Proxy 01.0f.00.a4.2f.11.1d.be.00.00.00.00|0.0.7.3 to 0.0.1c.4 with data sharing.
+[2026-09-29 13:46:06.357 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 24, current match count: 24
+[2026-09-29 13:46:06.358 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 24, current match count: 24
+[2026-09-29 13:46:06.359 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 24, current match count: 24
+[2026-09-29 13:46:06.361 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 24, current match count: 24
+[2026-09-29 13:46:06.361 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 24, current match count: 24
+[2026-09-29 13:46:06.362 thread:1190201 info topology_manager.cc:150]:discovery participant name:galbot-echo+4051_embosa_0
+[2026-09-29 13:46:06.364 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 24, current match count: 24
+[2026-09-29 13:46:06.365 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.30.11.2e.c0.00.00.00.00_0.0.8.3: No such file or directory
+[2026-09-29 13:46:06.365 thread:1190197 error RTPS_READER:157]:DDS Failed to add Writer Proxy 01.0f.00.a4.30.11.2e.c0.00.00.00.00|0.0.8.3 to 0.0.1b.4 with data sharing.
+[2026-09-29 13:46:06.365 thread:1190197 error HISTORY_DATASHARING_PAYLOADPOOL:102]:DDS Failed to open segment fast_datasharing_01.0f.00.a4.30.11.2e.c0.00.00.00.00_0.0.9.3: No such file or directory
+[2026-09-29 13:46:06.365 thread:1190197 error RTPS_READER:157]:DDS Failed to add Writer Proxy 01.0f.00.a4.30.11.2e.c0.00.00.00.00|0.0.9.3 to 0.0.1c.4 with data sharing.
+[2026-09-29 13:46:06.424 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 25, current match count: 25
+[2026-09-29 13:46:06.424 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 25, current match count: 25
+[2026-09-29 13:46:06.426 thread:1190202 info topology_manager.cc:150]:discovery participant name:galbot-echo+4061_embosa_0
+[2026-09-29 13:46:06.429 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 25, current match count: 25
+[2026-09-29 13:46:06.439 thread:1190220 error channel_manager.cc:394]:newly added writer(belongs to node[embosa_eyehand_calib_publish|eyehand_calib_publish|4399])'s message type[galbot.tf2_proto.TF2Message] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:46:06.443 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 26, current match count: 26
+[2026-09-29 13:46:06.443 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 26, current match count: 26
+[2026-09-29 13:46:06.444 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 26, current match count: 26
+[2026-09-29 13:46:06.445 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 25, current match count: 25
+[2026-09-29 13:46:06.445 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 25, current match count: 25
+[2026-09-29 13:46:06.446 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 25, current match count: 25
+[2026-09-29 13:46:06.446 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 26, current match count: 26
+[2026-09-29 13:46:06.447 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 27, current match count: 27
+[2026-09-29 13:46:06.448 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 26, current match count: 26
+[2026-09-29 13:46:06.449 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 26, current match count: 26
+[2026-09-29 13:46:06.452 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 27, current match count: 27
+[2026-09-29 13:46:06.455 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 27, current match count: 27
+[2026-09-29 13:46:06.457 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 27, current match count: 27
+[2026-09-29 13:46:06.458 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 27, current match count: 27
+[2026-09-29 13:46:06.459 thread:1190213 error channel_manager.cc:394]:newly added writer(belongs to node[robot_state_publisher|robot_state_publish|4400])'s message type[galbot.core_proto.StringValue] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:46:06.462 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 27, current match count: 27
+[2026-09-29 13:46:06.467 thread:1190216 error channel_manager.cc:394]:newly added writer(belongs to node[robot_state_publisher|robot_state_publish|4400])'s message type[galbot.tf2_proto.TF2Message] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:46:06.468 thread:1190216 error channel_manager.cc:394]:newly added writer(belongs to node[robot_state_publisher|robot_state_publish|4400])'s message type[galbot.tf2_proto.TF2Message] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:46:06.468 thread:1190216 error channel_manager.cc:394]:newly added reader(belongs to node[robot_state_publisher|robot_state_publish|4400])'s message type[galbot.singorix_proto.SingoriXSensor] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:46:06.469 thread:1190204 warning dds_sub_serialization_listener.h:520]:DDSSubSerializationListener: data used time 376 ms, over sub threshold 50 ms, topic: singorix/wbcs/wbc_info, index: 904150
+[2026-09-29 13:46:06.501 thread:1190201 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 28, current match count: 28
+[2026-09-29 13:46:06.503 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 28, current match count: 28
+[2026-09-29 13:46:06.527 thread:1190201 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 28, current match count: 28
+[2026-09-29 13:46:06.533 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 28, current match count: 28
+[2026-09-29 13:46:06.534 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 28, current match count: 28
+[2026-09-29 13:46:06.534 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 28, current match count: 28
+[2026-09-29 13:46:06.566 thread:1190211 error channel_manager.cc:394]:newly added reader(belongs to node[hpu_context_node|hpu_launcher|3980])'s message type[galbot.system_proto.mission_manager_proto.MissionManagerMessage] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:46:06.568 thread:1190212 error channel_manager.cc:394]:newly added reader(belongs to node[manage_node|hpu_launcher|3980])'s message type[galbot.perception_proto.DetectionResult] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:46:06.570 thread:1190213 error channel_manager.cc:394]:newly added reader(belongs to node[data_backflow|data_backflow_service|4051])'s message type[galbot.system_proto.mission_manager_proto.MissionManagerMessage] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:46:06.601 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 29, current match count: 29
+[2026-09-29 13:46:06.601 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 29, current match count: 29
+[2026-09-29 13:46:06.601 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 29, current match count: 29
+[2026-09-29 13:46:06.601 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 29, current match count: 29
+[2026-09-29 13:46:06.601 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 29, current match count: 29
+[2026-09-29 13:46:06.601 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 29, current match count: 29
+[2026-09-29 13:46:06.602 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: /galbot/mission_manager/onboard_config, total match count: 1, current match count: 1
+[2026-09-29 13:46:06.647 thread:1190213 error channel_manager.cc:394]:newly added writer(belongs to node[vtn_mic_node|galbot_vtn|4061])'s message type[galbot.Audio] does not match the exsited reader(belongs to node[audio_transceiver_node|python3.11|1190180])'s message type[galbot.sensor_proto.Audio].
+[2026-09-29 13:46:06.687 thread:1190213 error channel_manager.cc:394]:newly added writer(belongs to node[version_node|devinfo_server|3655])'s message type[galbot.system_proto.mission_manager_proto.OnboardConfig] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:46:06.839 thread:1190202 info topology_manager.cc:150]:discovery participant name:galbot-echo+4404_embosa_0
+[2026-09-29 13:46:06.906 thread:1190202 info topology_manager.cc:150]:discovery participant name:galbot-echo+4409_embosa_0
+[2026-09-29 13:46:06.940 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 30, current match count: 30
+[2026-09-29 13:46:06.940 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 30, current match count: 30
+[2026-09-29 13:46:06.941 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 30, current match count: 30
+[2026-09-29 13:46:06.943 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 30, current match count: 30
+[2026-09-29 13:46:06.944 thread:1190201 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 30, current match count: 30
+[2026-09-29 13:46:06.945 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 30, current match count: 30
+[2026-09-29 13:46:06.982 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 31, current match count: 31
+[2026-09-29 13:46:06.983 thread:1190201 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 31, current match count: 31
+[2026-09-29 13:46:06.984 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 31, current match count: 31
+[2026-09-29 13:46:06.997 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 31, current match count: 31
+[2026-09-29 13:46:06.998 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 31, current match count: 31
+[2026-09-29 13:46:07.000 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 31, current match count: 31
+[2026-09-29 13:46:07.025 thread:1190216 error channel_manager.cc:394]:newly added reader(belongs to node[aphropm_pns|service_navigation_plan|4404])'s message type[galbot.singorix_proto.SingoriXSensor] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:46:07.025 thread:1190218 error channel_manager.cc:394]:newly added reader(belongs to node[aphropm_pns|service_navigation_plan|4404])'s message type[galbot.singorix_proto.SingoriXError] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:46:07.026 thread:1190218 error channel_manager.cc:394]:newly added reader(belongs to node[aphropm_pns|service_navigation_plan|4404])'s message type[galbot.singorix_proto.WBCInfo] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:46:07.028 thread:1190215 error channel_manager.cc:394]:newly added reader(belongs to node[aphropm_pns|service_navigation_plan|4404])'s message type[galbot.spatial_proto.PoseMsg] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:46:07.029 thread:1190218 error channel_manager.cc:394]:newly added writer(belongs to node[aphropm_pns|service_navigation_plan|4404])'s message type[galbot.navigation_proto.Path] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:46:07.032 thread:1190213 error channel_manager.cc:394]:newly added writer(belongs to node[aphropm_pns|service_navigation_plan|4404])'s message type[galbot.gateway_proto.BusinessFrame] does not match the exsited reader(belongs to node[gateway_server|gateway_service|3652])'s message type[embosa_plain_message_type].
+[2026-09-29 13:46:07.082 thread:1190220 error channel_manager.cc:394]:newly added reader(belongs to node[motion_planning_service_node|service_motion_plan|4409])'s message type[galbot.singorix_proto.SingoriXSensor] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:46:07.082 thread:1190213 error channel_manager.cc:394]:newly added reader(belongs to node[motion_planning_service_node|service_motion_plan|4409])'s message type[galbot.singorix_proto.SingoriXError] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:46:07.083 thread:1190215 error channel_manager.cc:394]:newly added reader(belongs to node[motion_planning_service_node|service_motion_plan|4409])'s message type[galbot.spatial_proto.PoseMsg] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:46:07.807 thread:1190202 info topology_manager.cc:150]:discovery participant name:galbot-xcu+3595_embosa_0
+[2026-09-29 13:46:07.923 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_node_change_broadcast, total match count: 32, current match count: 32
+[2026-09-29 13:46:07.923 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_channel_change_broadcast, total match count: 32, current match count: 32
+[2026-09-29 13:46:07.923 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: embosa_service_change_broadcast, total match count: 32, current match count: 32
+[2026-09-29 13:46:07.932 thread:1190202 info dds_sub_serialization_listener.h:573]:DDSSubSerializationListener matched. topic: /galbot/mission_manager/onboard_config, total match count: 2, current match count: 2
+[2026-09-29 13:46:07.939 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_node_change_broadcast, total match count: 32, current match count: 32
+[2026-09-29 13:46:07.939 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_channel_change_broadcast, total match count: 32, current match count: 32
+[2026-09-29 13:46:07.940 thread:1190202 info dds_pub_listener.cc:19]:DDSPubListener matched. topic: embosa_service_change_broadcast, total match count: 32, current match count: 32
+[2026-09-29 13:46:08.012 thread:1190220 error channel_manager.cc:394]:newly added writer(belongs to node[context_mission_mode|mission_manager|3595])'s message type[galbot.system_proto.mission_manager_proto.MissionManagerMessage] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:46:08.017 thread:1190215 error channel_manager.cc:394]:newly added reader(belongs to node[context_mission_mode|mission_manager|3595])'s message type[galbot.spatial_proto.PoseMsg] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:46:08.017 thread:1190215 error channel_manager.cc:394]:newly added writer(belongs to node[context_mission_mode|mission_manager|3595])'s message type[galbot.system_proto.mission_manager_proto.OnboardConfig] does not match the exsited reader(belongs to node[Sensor#0|swallows|4408])'s message type[N6galbot6embosa7MessageE].
+[2026-09-29 13:47:04.064 thread:1190180 info state.cc:29]:AsyncShutdown invoked.
+[2026-09-29 13:47:04.064 thread:1190196 info init.cc:68]:Embosa shutdown signal received, processing shutdown.
+[2026-09-29 13:47:04.064 thread:1190196 info init.cc:74]:Embosa exit callback not set.
+[2026-09-29 13:47:04.064 thread:1190196 info init.cc:85]:Embosa exit done callback not set.
+[2026-09-29 13:47:04.064 thread:1190196 info init.cc:88]:Embosa enters shuttingdown state.
+[2026-09-29 13:47:04.064 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.069 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.070 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.070 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.078 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.079 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.080 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.081 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.085 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.086 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.089 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.094 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.096 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.097 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.100 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.100 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.101 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.110 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.110 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.111 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.111 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.117 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.119 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.120 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.125 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.125 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.126 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.130 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.135 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.135 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.140 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.141 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.142 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.142 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.149 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.150 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.150 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.158 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.159 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.160 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.160 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.164 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.165 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.170 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.173 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.174 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.175 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.180 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.182 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.183 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.190 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.190 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.191 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.191 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.195 thread:1190204 info dds_sub_listener.cc:248]:DDSSubListener: embosa state is shutdown, topic: bms
+[2026-09-29 13:47:04.198 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.198 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.201 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.206 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.207 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.208 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.210 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.214 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.215 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.220 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.222 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.223 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.224 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.230 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.230 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.231 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.240 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.242 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.245 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.246 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.246 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.246 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.250 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.253 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.254 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.254 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.260 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.262 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.263 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.270 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.270 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.272 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.273 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.277 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.277 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.280 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.286 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.287 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.289 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.289 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.293 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.296 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.301 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.302 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.303 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.304 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.309 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.309 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.310 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.318 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.319 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.320 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.321 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.325 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.325 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.330 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.335 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.336 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.336 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.340 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.344 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.350 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.350 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.352 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.353 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.354 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.358 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.359 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.360 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.366 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.367 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.367 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.371 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.374 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.379 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.381 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.381 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.383 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.384 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.390 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.391 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.392 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.398 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.400 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.401 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.401 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.405 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.406 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.410 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.414 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.415 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.416 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.421 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.422 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.423 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.431 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.434 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.440 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.442 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.444 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.446 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.447 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.448 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.450 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.451 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.451 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.455 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.456 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.460 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.463 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.465 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.466 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.471 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.471 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.473 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.479 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.480 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.481 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.483 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.487 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.493 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.495 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.500 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.501 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.504 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.504 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.506 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.506 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.510 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.511 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.513 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.514 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.518 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.518 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.520 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.525 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.526 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.528 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.530 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.535 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.535 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.540 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.542 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.543 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.544 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.550 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.550 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.550 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.560 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.560 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.563 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.564 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.565 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.566 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.570 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.576 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.578 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.579 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.580 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.582 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.583 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.589 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.590 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.591 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.592 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.598 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.599 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.600 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.605 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.607 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.610 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.616 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.617 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.618 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.621 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.622 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.624 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.624 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.631 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.631 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.632 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.636 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.640 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.640 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.642 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.646 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.648 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.650 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.653 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.656 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.658 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.660 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.665 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.665 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.671 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.671 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.676 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.677 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.680 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.680 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.681 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.688 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.690 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.692 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /galbot/mission_manager/onboard_config
+[2026-09-29 13:47:04.696 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.700 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.700 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.704 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.704 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.710 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.710 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.711 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.712 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.717 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.718 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.720 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.725 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.726 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.727 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.730 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.734 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.734 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.740 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.741 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.743 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.744 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.749 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.750 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.750 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.759 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.760 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.761 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.763 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.764 thread:1190180 info init.cc:228]:Embosa exit.
+[2026-09-29 13:47:04.764 thread:1190180 info dds_node_factory.cpp:49]:Clearing all writers from writer_map_
+[2026-09-29 13:47:04.765 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.766 thread:1190180 info dds_node_factory.cpp:1179]:DeleteWriterUnlock: Writer and associated resources successfully removed
+[2026-09-29 13:47:04.768 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.771 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.775 thread:1190180 info dds_node_factory.cpp:1179]:DeleteWriterUnlock: Writer and associated resources successfully removed
+[2026-09-29 13:47:04.776 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.779 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/wbc_info
+[2026-09-29 13:47:04.780 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: /odom/base_link
+[2026-09-29 13:47:04.781 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.783 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/sensor
+[2026-09-29 13:47:04.784 thread:1190180 info dds_node_factory.cpp:1179]:DeleteWriterUnlock: Writer and associated resources successfully removed
+[2026-09-29 13:47:04.784 thread:1190204 info dds_sub_serialization_listener.h:354]:DDSSubSerializationListener: embosa state is shutdown, topic: singorix/wbcs/error
+[2026-09-29 13:47:04.785 thread:1190180 info dds_node_factory.cpp:1179]:DeleteWriterUnlock: Writer and associated resources successfully removed
+[2026-09-29 13:47:04.786 thread:1190180 info dds_sub_serialization_listener.h:565]:DDSSubSerializationListener: embosa state is shutdown, topic: embosa_service_change_broadcast
+[2026-09-29 13:47:04.786 thread:1190180 info dds_node_factory.cpp:1179]:DeleteWriterUnlock: Writer and associated resources successfully removed
+[2026-09-29 13:47:04.787 thread:1190180 info dds_sub_serialization_listener.h:565]:DDSSubSerializationListener: embosa state is shutdown, topic: embosa_channel_change_broadcast
+[2026-09-29 13:47:04.787 thread:1190180 info dds_node_factory.cpp:1179]:DeleteWriterUnlock: Writer and associated resources successfully removed
+[2026-09-29 13:47:04.788 thread:1190180 info dds_sub_serialization_listener.h:565]:DDSSubSerializationListener: embosa state is shutdown, topic: embosa_node_change_broadcast
+[2026-09-29 13:47:04.788 thread:1190180 info dds_node_factory.cpp:1179]:DeleteWriterUnlock: Writer and associated resources successfully removed
+[2026-09-29 13:47:04.788 thread:1190180 info dds_node_factory.cpp:75]:All writers cleared successfully
+[2026-09-29 13:47:04.788 thread:1190180 info dds_node_factory.cpp:81]:Clearing all readers from reader_map_
+[2026-09-29 13:47:04.789 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.790 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.791 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.792 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.793 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.794 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.796 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.797 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.797 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.799 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.801 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.802 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.804 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.806 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.808 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.810 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.811 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.819 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.820 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.822 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.823 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.824 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.826 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.828 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.829 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.830 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.832 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.834 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.836 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.838 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.839 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.840 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.842 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.844 thread:1190180 info dds_node_factory.cpp:1322]:DeleteReaderUnlock: Reader and associated resources successfully removed
+[2026-09-29 13:47:04.844 thread:1190180 info dds_node_factory.cpp:107]:All readers cleared successfully
+[2026-09-29 13:47:04.854 thread:1190180 info threadpool.cpp:99]:threadpool release

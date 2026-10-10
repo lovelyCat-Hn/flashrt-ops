@@ -1,0 +1,22 @@
+[2026-09-29 16:20:24.118 thread:96267 info galbot_robot_g1.cpp:23]:GalbotRobotG1 init 1.8.1
+[2026-09-29 16:20:24.215 thread:96267 info sensor_base.cpp:339]:wbc_node create success
+[2026-09-29 16:20:24.284 thread:96267 info sensor_base.cpp:526]:create robot_sensor_reader /left_arm_camera/color/image_raw success.
+[2026-09-29 16:20:24.299 thread:96267 info sensor_base.cpp:536]:create robot_sensor_reader /left_arm_camera/color/camera_info success.
+[2026-09-29 16:20:24.299 thread:96267 info sensor_base.cpp:703]:sensor interface init success
+[2026-09-29 16:20:24.322 thread:96267 info system_base.cpp:57]:create onboard_config_reader success
+[2026-09-29 16:20:24.328 thread:96267 info system_base.cpp:66]:create bms_info_reader success
+[2026-09-29 16:20:24.328 thread:96267 info system_base.cpp:68]:SystemBase init success
+[2026-09-29 16:20:24.328 thread:96267 info system_base.cpp:72]:SystemBase::init
+[2026-09-29 16:20:24.335 thread:96267 info wbc_base.cpp:42]:create wbcs_target_writer singorix/wbcs/target success.
+[2026-09-29 16:20:24.380 thread:96267 info wbc_base.cpp:50]:create wbcs_target_client singorix/wbcs/target_server success.
+[2026-09-29 16:20:24.414 thread:96267 info wbc_base.cpp:58]:create wbcs_controller_client singorix/wbcs/controller_server success.
+[2026-09-29 16:20:24.418 thread:96267 info wbc_base.cpp:80]:create robot_error_reader singorix/wbcs/error success.
+[2026-09-29 16:20:24.425 thread:96267 info wbc_base.cpp:87]:create wbc_info_reader singorix/wbcs/wbc_info success.
+[2026-09-29 16:20:24.431 thread:96267 info wbc_base.cpp:94]:create robot_sensor_reader singorix/wbcs/sensor success.
+[2026-09-29 16:20:24.436 thread:96267 info wbc_base.cpp:101]:create odom_reader /odom/base_link success.
+[2026-09-29 16:20:24.436 thread:96267 info wbc_base.cpp:103]:wbc interface init success
+[2026-09-29 16:20:25.042 thread:96267 info audio_base.cpp:117]:create audio reader success.
+[2026-09-29 16:20:25.046 thread:96267 info audio_base.cpp:125]:create audio writer success.
+[2026-09-29 16:20:25.046 thread:96267 info audio_base.cpp:300]:audio_pb->type(): spk_volume_set audio_pb->format(): json audio_pb->data().size(): 15
+[2026-09-29 16:20:25.046 thread:96267 info audio_base.cpp:131]:audio transceiver init success
+[2026-09-29 16:20:29.243 thread:96267 info sensor_base.cpp:814]:get_rgb_data success

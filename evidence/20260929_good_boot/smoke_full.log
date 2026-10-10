@@ -1,0 +1,32 @@
+A new version 1.10.0 is available. Visit https://github.com/GalaxyGeneralRobotics/GalbotSDK/releases for upgrade instructions
+GPU does not advertise FP8 support: disabling FP8 paths for the Pi0.5 RTX pipeline.
+  autotune: tested 6 algos, best=4 (86.96 us)
+  autotune: tested 7 algos, best=1 (198.502 us)
+  autotune: tested 7 algos, best=4 (75.6512 us)
+  autotune: tested 7 algos, best=0 (314.134 us)
+  autotune: tested 8 algos, best=7 (320.781 us)
+  autotune: tested 7 algos, best=1 (124.016 us)
+  autotune: tested 8 algos, best=2 (356.71 us)
+  autotune: tested 8 algos, best=1 (260.771 us)
+  autotune: tested 6 algos, best=3 (2751.15 us)
+  autotune: tested 6 algos, best=3 (2920.52 us)
+  autotune: tested 8 algos, best=5 (2375.34 us)
+  autotune: tested 6 algos, best=3 (5.904 us)
+  autotune: tested 5 algos, best=4 (30.6496 us)
+  autotune: tested 7 algos, best=4 (24.8224 us)
+  autotune: tested 7 algos, best=0 (58.8096 us)
+  autotune: tested 7 algos, best=4 (57.568 us)
+  autotune: tested 7 algos, best=3 (62.1696 us)
+  autotune: tested 1 algos, best=0 (11.9904 us)
+[config] /home/galbot/holy/config/g1.toml（优先级 CLI>config>内置）覆盖: ckpt, prompt, tier='bf16', ctrl_hz=30.0
+tier=bf16 views=3 action_dim=16 ckpt=pi05_g1_place_deploy
+state 原始: [-1.2660000324249268, 1.3309999704360962, 0.7160000205039978, 2.1510000228881836, -0.03799999877810478, 0.3019999861717224, 0.09000000357627869, 41.42300033569336, 1.218999981880188, -1.3730000257492065, -0.5180000066757202, -2.055999994277954, 0.17100000381469727, -0.4129999876022339, -0.2029999941587448, 41.42300033569336, 0.5809999704360962, 1.4320000410079956, 0.9020000100135803, -0.0010000000474974513, 0.0, -0.061000000685453415, 0.33000001311302185]
+load: 8.6s | norm_mode=q01_q99 | state 归一化 [-1,1] 外 7 维: ['dim16', 'dim17', 'dim18', 'dim19', 'dim20', 'dim21', 'dim22']
+[① 纯推理 ×2] mean 380.8 | p50 380.8 | min 378.5 | max 383.1 ms
+[② 取图+读关节+解码 ×3] mean 9.0 | p50 9.3 | min 8.4 | max 9.5 ms
+[③ 端到端节拍 ×3] mean 388.5 | p50 389.5 | min 386.3 | max 389.6 ms | 动作步率 25.7 步/秒（每轮出 10 步）
+[实时性] 控制窗口 = 10 步 ÷ 30.0Hz = 333 ms → ❌ 推理落后 47 ms（降控制频率/减视角/修 graph）
+[基线对照] echo 机 bf16/3视角 负载纯推理 304.0 ms → 本次 慢 76.3 ms
+[动作示例] 首步(16 维): [0.0, -0.0020000000949949026, -0.0020000000949949026, -0.004000000189989805, -0.006000000052154064, 0.004000000189989805, -0.0010000000474974513, -0.0, -0.0, -0.009999999776482582, -0.010999999940395355, 0.0010000000474974513, 0.004999999888241291, -0.009999999776482582, -0.004000000189989805, -0.781000018119812]
+（仅打印，未执行。夹爪维应在 0~100；关节维应与 state 同量级）
+SDK 已关闭

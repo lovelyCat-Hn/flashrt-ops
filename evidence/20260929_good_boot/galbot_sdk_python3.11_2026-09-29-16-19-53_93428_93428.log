@@ -1,0 +1,22 @@
+[2026-09-29 16:19:53.910 thread:93428 info galbot_robot_g1.cpp:23]:GalbotRobotG1 init 1.8.1
+[2026-09-29 16:19:53.973 thread:93428 info sensor_base.cpp:339]:wbc_node create success
+[2026-09-29 16:19:53.973 thread:93428 info sensor_base.cpp:703]:sensor interface init success
+[2026-09-29 16:19:54.002 thread:93428 info system_base.cpp:57]:create onboard_config_reader success
+[2026-09-29 16:19:54.006 thread:93428 info system_base.cpp:66]:create bms_info_reader success
+[2026-09-29 16:19:54.006 thread:93428 info system_base.cpp:68]:SystemBase init success
+[2026-09-29 16:19:54.006 thread:93428 info system_base.cpp:72]:SystemBase::init
+[2026-09-29 16:19:54.015 thread:93428 info wbc_base.cpp:42]:create wbcs_target_writer singorix/wbcs/target success.
+[2026-09-29 16:19:54.073 thread:93428 info wbc_base.cpp:50]:create wbcs_target_client singorix/wbcs/target_server success.
+[2026-09-29 16:19:54.172 thread:93428 info wbc_base.cpp:58]:create wbcs_controller_client singorix/wbcs/controller_server success.
+[2026-09-29 16:19:54.199 thread:93428 info wbc_base.cpp:80]:create robot_error_reader singorix/wbcs/error success.
+[2026-09-29 16:19:54.223 thread:93428 info wbc_base.cpp:87]:create wbc_info_reader singorix/wbcs/wbc_info success.
+[2026-09-29 16:19:54.238 thread:93428 info wbc_base.cpp:94]:create robot_sensor_reader singorix/wbcs/sensor success.
+[2026-09-29 16:19:54.243 thread:93428 info wbc_base.cpp:101]:create odom_reader /odom/base_link success.
+[2026-09-29 16:19:54.244 thread:93428 info wbc_base.cpp:103]:wbc interface init success
+[2026-09-29 16:19:54.560 thread:93428 info audio_base.cpp:117]:create audio reader success.
+[2026-09-29 16:19:54.562 thread:93428 info audio_base.cpp:125]:create audio writer success.
+[2026-09-29 16:19:54.563 thread:93428 info audio_base.cpp:300]:audio_pb->type(): spk_volume_set audio_pb->format(): json audio_pb->data().size(): 15
+[2026-09-29 16:19:54.563 thread:93428 info audio_base.cpp:131]:audio transceiver init success
+[2026-09-29 16:19:54.563 thread:93428 error joint_state_module.cpp:211]:[get_joint_state] joint name not found: left_arm_joint1
+[2026-09-29 16:19:54.563 thread:93428 info system_base.cpp:99]:SystemBase::request_shutdown
+[2026-09-29 16:19:54.563 thread:93428 info system_base.cpp:87]:SystemBase::destroy

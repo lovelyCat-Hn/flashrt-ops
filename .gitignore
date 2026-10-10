@@ -19,3 +19,7 @@ g1_joint_test_src/__pycache__/
 
 # 闭环运行日志（loop_*.log）
 logs/
+
+# 外部克隆仓库（各自独立 git，勿入库）
+ActQuant/
+realtime-vla/

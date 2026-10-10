@@ -1,0 +1,282 @@
+[2026-09-29 15:43:31.977 thread:41960 info statistics.cc:167]:
++-------------------------------------------------------+---------------+---------------------------------------------------------+-------------------------+-------------------------+
+| Topic                                                 | Peer Hostname | Peer Node Name                                          | Create Time             | Match Time              |
++-------------------------------------------------------+---------------+---------------------------------------------------------+-------------------------+-------------------------+
+| reader_sub:/galbot/mic                                |               |                                                         | 2026-09-29 15:43:27.671 | unmatch                 |
+| reader_sub:/front_head_camera/right_color/image_raw   |               |                                                         | 2026-09-29 15:43:27.005 | unmatch                 |
+| reader_sub:singorix/wbcs/sensor                       | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.431 | 2026-09-29 15:43:27.436 |
+| reader_sub:/front_head_camera/right_color/camera_info |               |                                                         | 2026-09-29 15:43:27.036 | unmatch                 |
+| reader_sub:/left_arm_camera/color/image_raw           |               |                                                         | 2026-09-29 15:43:27.062 | unmatch                 |
+| reader_sub:/left_arm_camera/color/camera_info         |               |                                                         | 2026-09-29 15:43:27.100 | unmatch                 |
+| reader_sub:/right_arm_camera/color/image_raw          |               |                                                         | 2026-09-29 15:43:27.125 | unmatch                 |
+| reader_sub:/embosa_tf_static                          |               |                                                         | 2026-09-29 15:43:27.200 | unmatch                 |
+| reader_sub:/galbot/mission_manager/onboard_config     | galbot-xcu    | context_mission_mode|mission_manager|3528               | 2026-09-29 15:43:27.225 | 2026-09-29 15:43:27.424 |
+|                                                       | galbot-xcu    | version_node|devinfo_server|3587                        |                         |                         |
+| reader_sub:/embosa_tf                                 |               |                                                         | 2026-09-29 15:43:27.193 | unmatch                 |
+| reader_sub:/odom/base_link                            | galbot-xcu    | embosa_test_rpc_client_node|galbot_chassis_service|3964 | 2026-09-29 15:43:27.444 | 2026-09-29 15:43:27.450 |
+| reader_sub:singorix/wbcs/error                        | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.377 | 2026-09-29 15:43:27.391 |
+| reader_sub:/right_arm_camera/color/camera_info        |               |                                                         | 2026-09-29 15:43:27.182 | unmatch                 |
+| reader_sub:bms                                        | galbot-xcu    | embosa_bms_sub_node|galbot_chassis_service|3964         | 2026-09-29 15:43:27.234 | 2026-09-29 15:43:27.237 |
+| reader_sub:singorix/wbcs/wbc_info                     | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.401 | 2026-09-29 15:43:27.406 |
+| client_sub:singorix/wbcs/controller_server            | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.324 | 2026-09-29 15:43:27.369 |
+| client_sub:singorix/wbcs/target_server                | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.275 | 2026-09-29 15:43:27.319 |
++-------------------------------------------------------+---------------+---------------------------------------------------------+-------------------------+-------------------------+
+
+[2026-09-29 15:43:31.977 thread:41960 info statistics.cc:245]:
++-------------------------------------------------------+------------------+------------------+------------------+------------+------------+--------+--------------+
+| Topic                                                 | Latency Avg (us) | Latency Max (us) | Latency Min (us) | Loss Count | Recv Count | Hz     | Bandwidth    |
++-------------------------------------------------------+------------------+------------------+------------------+------------+------------+--------+--------------+
+| reader_sub:/galbot/mic                                | unknown          | unknown          | unknown          | 0          | 0          | 0.000  | 0.000 KB/s   |
+| reader_sub:/front_head_camera/right_color/image_raw   | unknown          | unknown          | unknown          | 0          | 0          | 0.000  | 0.000 KB/s   |
+| reader_sub:singorix/wbcs/sensor                       | 2516             | 60608            | 440              | 3          | 498        | 99.600 | 197.606 KB/s |
+| reader_sub:/front_head_camera/right_color/camera_info | unknown          | unknown          | unknown          | 0          | 0          | 0.000  | 0.000 KB/s   |
+| reader_sub:/left_arm_camera/color/image_raw           | unknown          | unknown          | unknown          | 0          | 0          | 0.000  | 0.000 KB/s   |
+| reader_sub:/left_arm_camera/color/camera_info         | unknown          | unknown          | unknown          | 0          | 0          | 0.000  | 0.000 KB/s   |
+| reader_sub:/right_arm_camera/color/image_raw          | unknown          | unknown          | unknown          | 0          | 0          | 0.000  | 0.000 KB/s   |
+| reader_sub:/embosa_tf_static                          | unknown          | unknown          | unknown          | 0          | 0          | 0.000  | 0.000 KB/s   |
+| reader_sub:/galbot/mission_manager/onboard_config     | 1493             | 4079             | 412              | 0          | 4          | 0.800  | 0.035 KB/s   |
+| reader_sub:/embosa_tf                                 | unknown          | unknown          | unknown          | 0          | 0          | 0.000  | 0.000 KB/s   |
+| reader_sub:/odom/base_link                            | 2358             | 66764            | 384              | 3          | 448        | 89.600 | 9.856 KB/s   |
+| reader_sub:singorix/wbcs/error                        | 2182             | 66931            | 318              | 3          | 497        | 99.400 | 1.491 KB/s   |
+| reader_sub:/right_arm_camera/color/camera_info        | unknown          | unknown          | unknown          | 0          | 0          | 0.000  | 0.000 KB/s   |
+| reader_sub:bms                                        | 1064             | 1226             | 735              | 0          | 5          | 1.000  | 1.045 KB/s   |
+| reader_sub:singorix/wbcs/wbc_info                     | 2402             | 55588            | 458              | 1          | 249        | 49.800 | 313.142 KB/s |
+| client_sub:singorix/wbcs/controller_server            | unknown          | unknown          | unknown          | 0          | 0          | 0.000  | 0.000 KB/s   |
+| client_sub:singorix/wbcs/target_server                | unknown          | unknown          | unknown          | 0          | 0          | 0.000  | 0.000 KB/s   |
++-------------------------------------------------------+------------------+------------------+------------------+------------+------------+--------+--------------+
+
+[2026-09-29 15:43:36.982 thread:41960 info statistics.cc:167]:
++-------------------------------------------------------+---------------+---------------------------------------------------------+-------------------------+-------------------------+
+| Topic                                                 | Peer Hostname | Peer Node Name                                          | Create Time             | Match Time              |
++-------------------------------------------------------+---------------+---------------------------------------------------------+-------------------------+-------------------------+
+| reader_sub:/galbot/mic                                |               |                                                         | 2026-09-29 15:43:27.671 | unmatch                 |
+| reader_sub:/front_head_camera/right_color/image_raw   |               |                                                         | 2026-09-29 15:43:27.005 | unmatch                 |
+| reader_sub:singorix/wbcs/sensor                       | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.431 | 2026-09-29 15:43:27.436 |
+| reader_sub:/front_head_camera/right_color/camera_info |               |                                                         | 2026-09-29 15:43:27.036 | unmatch                 |
+| reader_sub:/left_arm_camera/color/image_raw           |               |                                                         | 2026-09-29 15:43:27.062 | unmatch                 |
+| reader_sub:/left_arm_camera/color/camera_info         |               |                                                         | 2026-09-29 15:43:27.100 | unmatch                 |
+| reader_sub:/right_arm_camera/color/image_raw          |               |                                                         | 2026-09-29 15:43:27.125 | unmatch                 |
+| reader_sub:/embosa_tf_static                          |               |                                                         | 2026-09-29 15:43:27.200 | unmatch                 |
+| reader_sub:/galbot/mission_manager/onboard_config     | galbot-xcu    | context_mission_mode|mission_manager|3528               | 2026-09-29 15:43:27.225 | 2026-09-29 15:43:27.424 |
+|                                                       | galbot-xcu    | version_node|devinfo_server|3587                        |                         |                         |
+| reader_sub:/embosa_tf                                 |               |                                                         | 2026-09-29 15:43:27.193 | unmatch                 |
+| reader_sub:/odom/base_link                            | galbot-xcu    | embosa_test_rpc_client_node|galbot_chassis_service|3964 | 2026-09-29 15:43:27.444 | 2026-09-29 15:43:27.450 |
+| reader_sub:singorix/wbcs/error                        | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.377 | 2026-09-29 15:43:27.391 |
+| reader_sub:/right_arm_camera/color/camera_info        |               |                                                         | 2026-09-29 15:43:27.182 | unmatch                 |
+| reader_sub:bms                                        | galbot-xcu    | embosa_bms_sub_node|galbot_chassis_service|3964         | 2026-09-29 15:43:27.234 | 2026-09-29 15:43:27.237 |
+| reader_sub:singorix/wbcs/wbc_info                     | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.401 | 2026-09-29 15:43:27.406 |
+| client_sub:singorix/wbcs/controller_server            | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.324 | 2026-09-29 15:43:27.369 |
+| client_sub:singorix/wbcs/target_server                | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.275 | 2026-09-29 15:43:27.319 |
++-------------------------------------------------------+---------------+---------------------------------------------------------+-------------------------+-------------------------+
+
+[2026-09-29 15:43:36.983 thread:41960 info statistics.cc:245]:
++-------------------------------------------------------+------------------+------------------+------------------+------------+------------+---------+--------------+
+| Topic                                                 | Latency Avg (us) | Latency Max (us) | Latency Min (us) | Loss Count | Recv Count | Hz      | Bandwidth    |
++-------------------------------------------------------+------------------+------------------+------------------+------------+------------+---------+--------------+
+| reader_sub:/galbot/mic                                | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/front_head_camera/right_color/image_raw   | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:singorix/wbcs/sensor                       | 2239             | 60608            | 440              | 3          | 1108       | 122.000 | 242.048 KB/s |
+| reader_sub:/front_head_camera/right_color/camera_info | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/left_arm_camera/color/image_raw           | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/left_arm_camera/color/camera_info         | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/right_arm_camera/color/image_raw          | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/embosa_tf_static                          | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/galbot/mission_manager/onboard_config     | 1274             | 4079             | 412              | 0          | 9          | 1.000   | 0.044 KB/s   |
+| reader_sub:/embosa_tf                                 | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/odom/base_link                            | 1780             | 66764            | 337              | 3          | 949        | 100.200 | 11.022 KB/s  |
+| reader_sub:singorix/wbcs/error                        | 1849             | 66931            | 318              | 3          | 1107       | 122.000 | 1.830 KB/s   |
+| reader_sub:/right_arm_camera/color/camera_info        | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:bms                                        | 1124             | 1333             | 735              | 0          | 10         | 1.000   | 1.045 KB/s   |
+| reader_sub:singorix/wbcs/wbc_info                     | 2050             | 55588            | 458              | 1          | 554        | 61.000  | 383.568 KB/s |
+| client_sub:singorix/wbcs/controller_server            | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| client_sub:singorix/wbcs/target_server                | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
++-------------------------------------------------------+------------------+------------------+------------------+------------+------------+---------+--------------+
+
+[2026-09-29 15:43:41.989 thread:41960 info statistics.cc:167]:
++-------------------------------------------------------+---------------+---------------------------------------------------------+-------------------------+-------------------------+
+| Topic                                                 | Peer Hostname | Peer Node Name                                          | Create Time             | Match Time              |
++-------------------------------------------------------+---------------+---------------------------------------------------------+-------------------------+-------------------------+
+| reader_sub:/galbot/mic                                |               |                                                         | 2026-09-29 15:43:27.671 | unmatch                 |
+| reader_sub:/front_head_camera/right_color/image_raw   |               |                                                         | 2026-09-29 15:43:27.005 | unmatch                 |
+| reader_sub:singorix/wbcs/sensor                       | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.431 | 2026-09-29 15:43:27.436 |
+| reader_sub:/front_head_camera/right_color/camera_info |               |                                                         | 2026-09-29 15:43:27.036 | unmatch                 |
+| reader_sub:/left_arm_camera/color/image_raw           |               |                                                         | 2026-09-29 15:43:27.062 | unmatch                 |
+| reader_sub:/left_arm_camera/color/camera_info         |               |                                                         | 2026-09-29 15:43:27.100 | unmatch                 |
+| reader_sub:/right_arm_camera/color/image_raw          |               |                                                         | 2026-09-29 15:43:27.125 | unmatch                 |
+| reader_sub:/embosa_tf_static                          |               |                                                         | 2026-09-29 15:43:27.200 | unmatch                 |
+| reader_sub:/galbot/mission_manager/onboard_config     | galbot-xcu    | context_mission_mode|mission_manager|3528               | 2026-09-29 15:43:27.225 | 2026-09-29 15:43:27.424 |
+|                                                       | galbot-xcu    | version_node|devinfo_server|3587                        |                         |                         |
+| reader_sub:/embosa_tf                                 |               |                                                         | 2026-09-29 15:43:27.193 | unmatch                 |
+| reader_sub:/odom/base_link                            | galbot-xcu    | embosa_test_rpc_client_node|galbot_chassis_service|3964 | 2026-09-29 15:43:27.444 | 2026-09-29 15:43:27.450 |
+| reader_sub:singorix/wbcs/error                        | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.377 | 2026-09-29 15:43:27.391 |
+| reader_sub:/right_arm_camera/color/camera_info        |               |                                                         | 2026-09-29 15:43:27.182 | unmatch                 |
+| reader_sub:bms                                        | galbot-xcu    | embosa_bms_sub_node|galbot_chassis_service|3964         | 2026-09-29 15:43:27.234 | 2026-09-29 15:43:27.237 |
+| reader_sub:singorix/wbcs/wbc_info                     | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.401 | 2026-09-29 15:43:27.406 |
+| client_sub:singorix/wbcs/controller_server            | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.324 | 2026-09-29 15:43:27.369 |
+| client_sub:singorix/wbcs/target_server                | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.275 | 2026-09-29 15:43:27.319 |
++-------------------------------------------------------+---------------+---------------------------------------------------------+-------------------------+-------------------------+
+
+[2026-09-29 15:43:41.989 thread:41960 info statistics.cc:245]:
++-------------------------------------------------------+------------------+------------------+------------------+------------+------------+---------+--------------+
+| Topic                                                 | Latency Avg (us) | Latency Max (us) | Latency Min (us) | Loss Count | Recv Count | Hz      | Bandwidth    |
++-------------------------------------------------------+------------------+------------------+------------------+------------+------------+---------+--------------+
+| reader_sub:/galbot/mic                                | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/front_head_camera/right_color/image_raw   | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:singorix/wbcs/sensor                       | 2247             | 60608            | 440              | 3          | 1728       | 124.000 | 246.016 KB/s |
+| reader_sub:/front_head_camera/right_color/camera_info | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/left_arm_camera/color/image_raw           | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/left_arm_camera/color/camera_info         | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/right_arm_camera/color/image_raw          | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/embosa_tf_static                          | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/galbot/mission_manager/onboard_config     | 1202             | 4079             | 412              | 0          | 15         | 1.200   | 0.053 KB/s   |
+| reader_sub:/embosa_tf                                 | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/odom/base_link                            | 1654             | 66764            | 337              | 3          | 1447       | 99.600  | 10.956 KB/s  |
+| reader_sub:singorix/wbcs/error                        | 1822             | 66931            | 318              | 3          | 1728       | 124.200 | 1.863 KB/s   |
+| reader_sub:/right_arm_camera/color/camera_info        | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:bms                                        | 1099             | 1333             | 735              | 0          | 15         | 1.000   | 1.045 KB/s   |
+| reader_sub:singorix/wbcs/wbc_info                     | 1892             | 55588            | 458              | 1          | 865        | 62.200  | 391.114 KB/s |
+| client_sub:singorix/wbcs/controller_server            | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| client_sub:singorix/wbcs/target_server                | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
++-------------------------------------------------------+------------------+------------------+------------------+------------+------------+---------+--------------+
+
+[2026-09-29 15:43:46.994 thread:41960 info statistics.cc:167]:
++-------------------------------------------------------+---------------+---------------------------------------------------------+-------------------------+-------------------------+
+| Topic                                                 | Peer Hostname | Peer Node Name                                          | Create Time             | Match Time              |
++-------------------------------------------------------+---------------+---------------------------------------------------------+-------------------------+-------------------------+
+| reader_sub:/galbot/mic                                |               |                                                         | 2026-09-29 15:43:27.671 | unmatch                 |
+| reader_sub:/front_head_camera/right_color/image_raw   |               |                                                         | 2026-09-29 15:43:27.005 | unmatch                 |
+| reader_sub:singorix/wbcs/sensor                       | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.431 | 2026-09-29 15:43:27.436 |
+| reader_sub:/front_head_camera/right_color/camera_info |               |                                                         | 2026-09-29 15:43:27.036 | unmatch                 |
+| reader_sub:/left_arm_camera/color/image_raw           |               |                                                         | 2026-09-29 15:43:27.062 | unmatch                 |
+| reader_sub:/left_arm_camera/color/camera_info         |               |                                                         | 2026-09-29 15:43:27.100 | unmatch                 |
+| reader_sub:/right_arm_camera/color/image_raw          |               |                                                         | 2026-09-29 15:43:27.125 | unmatch                 |
+| reader_sub:/embosa_tf_static                          |               |                                                         | 2026-09-29 15:43:27.200 | unmatch                 |
+| reader_sub:/galbot/mission_manager/onboard_config     | galbot-xcu    | context_mission_mode|mission_manager|3528               | 2026-09-29 15:43:27.225 | 2026-09-29 15:43:27.424 |
+|                                                       | galbot-xcu    | version_node|devinfo_server|3587                        |                         |                         |
+| reader_sub:/embosa_tf                                 |               |                                                         | 2026-09-29 15:43:27.193 | unmatch                 |
+| reader_sub:/odom/base_link                            | galbot-xcu    | embosa_test_rpc_client_node|galbot_chassis_service|3964 | 2026-09-29 15:43:27.444 | 2026-09-29 15:43:27.450 |
+| reader_sub:singorix/wbcs/error                        | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.377 | 2026-09-29 15:43:27.391 |
+| reader_sub:/right_arm_camera/color/camera_info        |               |                                                         | 2026-09-29 15:43:27.182 | unmatch                 |
+| reader_sub:bms                                        | galbot-xcu    | embosa_bms_sub_node|galbot_chassis_service|3964         | 2026-09-29 15:43:27.234 | 2026-09-29 15:43:27.237 |
+| reader_sub:singorix/wbcs/wbc_info                     | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.401 | 2026-09-29 15:43:27.406 |
+| client_sub:singorix/wbcs/controller_server            | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.324 | 2026-09-29 15:43:27.369 |
+| client_sub:singorix/wbcs/target_server                | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.275 | 2026-09-29 15:43:27.319 |
++-------------------------------------------------------+---------------+---------------------------------------------------------+-------------------------+-------------------------+
+
+[2026-09-29 15:43:46.995 thread:41960 info statistics.cc:245]:
++-------------------------------------------------------+------------------+------------------+------------------+------------+------------+---------+--------------+
+| Topic                                                 | Latency Avg (us) | Latency Max (us) | Latency Min (us) | Loss Count | Recv Count | Hz      | Bandwidth    |
++-------------------------------------------------------+------------------+------------------+------------------+------------+------------+---------+--------------+
+| reader_sub:/galbot/mic                                | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/front_head_camera/right_color/image_raw   | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:singorix/wbcs/sensor                       | 2271             | 60608            | 440              | 3          | 2338       | 122.000 | 242.048 KB/s |
+| reader_sub:/front_head_camera/right_color/camera_info | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/left_arm_camera/color/image_raw           | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/left_arm_camera/color/camera_info         | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/right_arm_camera/color/image_raw          | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/embosa_tf_static                          | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/galbot/mission_manager/onboard_config     | 1122             | 4079             | 412              | 0          | 20         | 1.000   | 0.044 KB/s   |
+| reader_sub:/embosa_tf                                 | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/odom/base_link                            | 1654             | 66764            | 337              | 3          | 1948       | 100.200 | 11.022 KB/s  |
+| reader_sub:singorix/wbcs/error                        | 1858             | 66931            | 294              | 3          | 2338       | 122.000 | 1.830 KB/s   |
+| reader_sub:/right_arm_camera/color/camera_info        | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:bms                                        | 1160             | 2552             | 735              | 0          | 20         | 1.000   | 1.045 KB/s   |
+| reader_sub:singorix/wbcs/wbc_info                     | 1894             | 55588            | 458              | 1          | 1170       | 61.000  | 383.568 KB/s |
+| client_sub:singorix/wbcs/controller_server            | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| client_sub:singorix/wbcs/target_server                | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
++-------------------------------------------------------+------------------+------------------+------------------+------------+------------+---------+--------------+
+
+[2026-09-29 15:43:52.000 thread:41960 info statistics.cc:167]:
++-------------------------------------------------------+---------------+---------------------------------------------------------+-------------------------+-------------------------+
+| Topic                                                 | Peer Hostname | Peer Node Name                                          | Create Time             | Match Time              |
++-------------------------------------------------------+---------------+---------------------------------------------------------+-------------------------+-------------------------+
+| reader_sub:/galbot/mic                                |               |                                                         | 2026-09-29 15:43:27.671 | unmatch                 |
+| reader_sub:/front_head_camera/right_color/image_raw   |               |                                                         | 2026-09-29 15:43:27.005 | unmatch                 |
+| reader_sub:singorix/wbcs/sensor                       | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.431 | 2026-09-29 15:43:27.436 |
+| reader_sub:/front_head_camera/right_color/camera_info |               |                                                         | 2026-09-29 15:43:27.036 | unmatch                 |
+| reader_sub:/left_arm_camera/color/image_raw           |               |                                                         | 2026-09-29 15:43:27.062 | unmatch                 |
+| reader_sub:/left_arm_camera/color/camera_info         |               |                                                         | 2026-09-29 15:43:27.100 | unmatch                 |
+| reader_sub:/right_arm_camera/color/image_raw          |               |                                                         | 2026-09-29 15:43:27.125 | unmatch                 |
+| reader_sub:/embosa_tf_static                          |               |                                                         | 2026-09-29 15:43:27.200 | unmatch                 |
+| reader_sub:/galbot/mission_manager/onboard_config     | galbot-xcu    | context_mission_mode|mission_manager|3528               | 2026-09-29 15:43:27.225 | 2026-09-29 15:43:27.424 |
+|                                                       | galbot-xcu    | version_node|devinfo_server|3587                        |                         |                         |
+| reader_sub:/embosa_tf                                 |               |                                                         | 2026-09-29 15:43:27.193 | unmatch                 |
+| reader_sub:/odom/base_link                            | galbot-xcu    | embosa_test_rpc_client_node|galbot_chassis_service|3964 | 2026-09-29 15:43:27.444 | 2026-09-29 15:43:27.450 |
+| reader_sub:singorix/wbcs/error                        | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.377 | 2026-09-29 15:43:27.391 |
+| reader_sub:/right_arm_camera/color/camera_info        |               |                                                         | 2026-09-29 15:43:27.182 | unmatch                 |
+| reader_sub:bms                                        | galbot-xcu    | embosa_bms_sub_node|galbot_chassis_service|3964         | 2026-09-29 15:43:27.234 | 2026-09-29 15:43:27.237 |
+| reader_sub:singorix/wbcs/wbc_info                     | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.401 | 2026-09-29 15:43:27.406 |
+| client_sub:singorix/wbcs/controller_server            | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.324 | 2026-09-29 15:43:27.369 |
+| client_sub:singorix/wbcs/target_server                | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.275 | 2026-09-29 15:43:27.319 |
++-------------------------------------------------------+---------------+---------------------------------------------------------+-------------------------+-------------------------+
+
+[2026-09-29 15:43:52.000 thread:41960 info statistics.cc:245]:
++-------------------------------------------------------+------------------+------------------+------------------+------------+------------+---------+--------------+
+| Topic                                                 | Latency Avg (us) | Latency Max (us) | Latency Min (us) | Loss Count | Recv Count | Hz      | Bandwidth    |
++-------------------------------------------------------+------------------+------------------+------------------+------------+------------+---------+--------------+
+| reader_sub:/galbot/mic                                | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/front_head_camera/right_color/image_raw   | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:singorix/wbcs/sensor                       | 2316             | 60608            | 440              | 3          | 2942       | 120.800 | 239.667 KB/s |
+| reader_sub:/front_head_camera/right_color/camera_info | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/left_arm_camera/color/image_raw           | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/left_arm_camera/color/camera_info         | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/right_arm_camera/color/image_raw          | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/embosa_tf_static                          | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/galbot/mission_manager/onboard_config     | 1083             | 4079             | 412              | 0          | 25         | 1.000   | 0.044 KB/s   |
+| reader_sub:/embosa_tf                                 | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/odom/base_link                            | 1654             | 66764            | 337              | 3          | 2446       | 99.600  | 10.956 KB/s  |
+| reader_sub:singorix/wbcs/error                        | 1881             | 66931            | 294              | 3          | 2941       | 120.600 | 1.809 KB/s   |
+| reader_sub:/right_arm_camera/color/camera_info        | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:bms                                        | 1124             | 2552             | 495              | 0          | 25         | 1.000   | 1.045 KB/s   |
+| reader_sub:singorix/wbcs/wbc_info                     | 1910             | 55588            | 458              | 1          | 1472       | 60.400  | 379.795 KB/s |
+| client_sub:singorix/wbcs/controller_server            | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| client_sub:singorix/wbcs/target_server                | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
++-------------------------------------------------------+------------------+------------------+------------------+------------+------------+---------+--------------+
+
+[2026-09-29 15:43:57.005 thread:41960 info statistics.cc:167]:
++-------------------------------------------------------+---------------+---------------------------------------------------------+-------------------------+-------------------------+
+| Topic                                                 | Peer Hostname | Peer Node Name                                          | Create Time             | Match Time              |
++-------------------------------------------------------+---------------+---------------------------------------------------------+-------------------------+-------------------------+
+| reader_sub:/galbot/mic                                |               |                                                         | 2026-09-29 15:43:27.671 | unmatch                 |
+| reader_sub:/front_head_camera/right_color/image_raw   |               |                                                         | 2026-09-29 15:43:27.005 | unmatch                 |
+| reader_sub:singorix/wbcs/sensor                       | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.431 | 2026-09-29 15:43:27.436 |
+| reader_sub:/front_head_camera/right_color/camera_info |               |                                                         | 2026-09-29 15:43:27.036 | unmatch                 |
+| reader_sub:/left_arm_camera/color/image_raw           |               |                                                         | 2026-09-29 15:43:27.062 | unmatch                 |
+| reader_sub:/left_arm_camera/color/camera_info         |               |                                                         | 2026-09-29 15:43:27.100 | unmatch                 |
+| reader_sub:/right_arm_camera/color/image_raw          |               |                                                         | 2026-09-29 15:43:27.125 | unmatch                 |
+| reader_sub:/embosa_tf_static                          |               |                                                         | 2026-09-29 15:43:27.200 | unmatch                 |
+| reader_sub:/galbot/mission_manager/onboard_config     | galbot-xcu    | context_mission_mode|mission_manager|3528               | 2026-09-29 15:43:27.225 | 2026-09-29 15:43:27.424 |
+|                                                       | galbot-xcu    | version_node|devinfo_server|3587                        |                         |                         |
+| reader_sub:/embosa_tf                                 |               |                                                         | 2026-09-29 15:43:27.193 | unmatch                 |
+| reader_sub:/odom/base_link                            | galbot-xcu    | embosa_test_rpc_client_node|galbot_chassis_service|3964 | 2026-09-29 15:43:27.444 | 2026-09-29 15:43:27.450 |
+| reader_sub:singorix/wbcs/error                        | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.377 | 2026-09-29 15:43:27.391 |
+| reader_sub:/right_arm_camera/color/camera_info        |               |                                                         | 2026-09-29 15:43:27.182 | unmatch                 |
+| reader_sub:bms                                        | galbot-xcu    | embosa_bms_sub_node|galbot_chassis_service|3964         | 2026-09-29 15:43:27.234 | 2026-09-29 15:43:27.237 |
+| reader_sub:singorix/wbcs/wbc_info                     | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.401 | 2026-09-29 15:43:27.406 |
+| client_sub:singorix/wbcs/controller_server            | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.324 | 2026-09-29 15:43:27.369 |
+| client_sub:singorix/wbcs/target_server                | galbot-xcu    | singorix_wbcs_main|singorix_wbcs_main|3588              | 2026-09-29 15:43:27.275 | 2026-09-29 15:43:27.319 |
++-------------------------------------------------------+---------------+---------------------------------------------------------+-------------------------+-------------------------+
+
+[2026-09-29 15:43:57.005 thread:41960 info statistics.cc:245]:
++-------------------------------------------------------+------------------+------------------+------------------+------------+------------+---------+--------------+
+| Topic                                                 | Latency Avg (us) | Latency Max (us) | Latency Min (us) | Loss Count | Recv Count | Hz      | Bandwidth    |
++-------------------------------------------------------+------------------+------------------+------------------+------------+------------+---------+--------------+
+| reader_sub:/galbot/mic                                | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/front_head_camera/right_color/image_raw   | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:singorix/wbcs/sensor                       | 2326             | 60608            | 440              | 3          | 3552       | 122.000 | 242.048 KB/s |
+| reader_sub:/front_head_camera/right_color/camera_info | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/left_arm_camera/color/image_raw           | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/left_arm_camera/color/camera_info         | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/right_arm_camera/color/image_raw          | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/embosa_tf_static                          | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/galbot/mission_manager/onboard_config     | 1098             | 4079             | 412              | 0          | 31         | 1.200   | 0.053 KB/s   |
+| reader_sub:/embosa_tf                                 | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:/odom/base_link                            | 1654             | 66764            | 337              | 3          | 2947       | 100.200 | 11.022 KB/s  |
+| reader_sub:singorix/wbcs/error                        | 1888             | 66931            | 294              | 3          | 3551       | 122.000 | 1.830 KB/s   |
+| reader_sub:/right_arm_camera/color/camera_info        | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| reader_sub:bms                                        | 1109             | 2552             | 495              | 0          | 30         | 1.000   | 1.045 KB/s   |
+| reader_sub:singorix/wbcs/wbc_info                     | 1926             | 55588            | 458              | 1          | 1776       | 60.800  | 382.310 KB/s |
+| client_sub:singorix/wbcs/controller_server            | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
+| client_sub:singorix/wbcs/target_server                | unknown          | unknown          | unknown          | 0          | 0          | 0.000   | 0.000 KB/s   |
++-------------------------------------------------------+------------------+------------------+------------------+------------+------------+---------+--------------+
+
