@@ -455,6 +455,7 @@ WATCH.resume()
 t0 = time.perf_counter()
 n_env_clip = 0
 n_skip = 0
+last_tgt = None    # 跨块延续（闭环同口径）：块首拍 |Δcmd| 才能暴露换块跳变
 for bi, tgt_blk in enumerate(BLOCKS):
     cur = read_joints()
     rows = build_rows(cur, tgt_blk)
@@ -481,7 +482,6 @@ for bi, tgt_blk in enumerate(BLOCKS):
     print(f"\n── 回放块 {bi+1}/{n_blocks}（行 {n_rows}）| "
           f"|Δcmd| mean {d[1:].mean()*1000:.1f} max {d[1:].max()*1000:.1f} mrad ──")
 
-    last_tgt = None
     _next_t = time.perf_counter()
     for kk in range(n_rows):
         _now = time.perf_counter()
