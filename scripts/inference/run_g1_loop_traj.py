@@ -6,10 +6,11 @@
 抖感∝指令沿能量=阶跃幅值×沿频率）；本脚本走同事 infer_policy 的真机在役
 路线——
   换块时一次性：行目标（链式 ±--delta-max rad/行 限幅）→ [当前实际位]+
-  行目标 样条插值成每行 --frames-per-row 帧（默认 8 ≈240Hz）→ 每 row-tick
+  行目标 样条插值成每行 --frames-per-row 帧（默认 1=纯 30Hz 直发；10-10
+  用户定案退役 240Hz 微流，N>1 仅 A/B 显式选用）→ 每 row-tick
   按 (tick−--burst-reserve-ms) 预算匀速突发下发 set_joint_commands
-  （time_from_start=0，标准关节只消费 position）。指令阶跃幅值≈行差/8
-  （<2 mrad 量级），降到伺服分辨率以下——消指令沿激励而非压速度。
+  （time_from_start=0，标准关节只消费 position）。N=1 时指令阶跃=整行差
+  （链钳 ±delta-max 封顶）；N>1 时阶跃≈行差/N——消指令沿激励而非压速度。
 SDK 契约出处：g1/__init__.pyi set_joint_commands "suitable for
   high-frequency control usage; For standard joints only the position
   field will be effective"；插值算法移植自同事 /home/galbot/infer_policy/
@@ -44,7 +45,8 @@ RTC：--rtc-horizon N > 0 时启用推理侧前缀引导（同 native，FlashRT 
   ~/miniforge3/envs/flash_pyrt311/bin/python \
       ~/holy/scripts/inference/run_g1_loop_traj.py \
       [--ckpt ~/holy/models/pi05_g1_onlypick_deploy] [--exec] \
-      [--rounds 60] [--frames-per-row 8] [--rtc-horizon 10]
+      [--rounds 60] [--rtc-horizon 10]
+  # 240Hz 微流（--frames-per-row 8）已于 10-10 退役，默认 1=纯 30Hz 直发
 """
 import argparse
 import atexit
@@ -84,10 +86,11 @@ ap.add_argument("--delta-max", type=float, default=None,
 ap.add_argument("--fps", type=int, default=30,
                 help="行节拍频率 Hz（默认 30=训练控制率；>40 拒绝：tick 低于"
                      "取图+SDK 硬开销 ~25ms 必丢拍）")
-ap.add_argument("--frames-per-row", type=int, default=8,
+ap.add_argument("--frames-per-row", type=int, default=1,
                 help="每行插值帧数：行目标样条插成 N 帧于 row-tick 内按预算匀速"
-                     "突发下发 set_joint_commands（默认 8≈240Hz@30fps，指令阶跃"
-                     "≈行差/8；SDK 单帧调用须 <(tick−预留)÷N，超了看丢拍遥测降 N）")
+                     "突发下发 set_joint_commands。默认 1=纯 30Hz 直发（每 tick"
+                     " 一条命令，原生 lerobot 语义；10-10 用户定案退役 240Hz 微"
+                     "流）；N>1 仅留作 A/B 显式选用（8≈240Hz@30fps）")
 ap.add_argument("--burst-reserve-ms", type=float, default=6.0,
                 help="row-tick 内留给读关节/打印/换块的毫秒数：帧突发配速预算="
                      "tick−该值（默认 6）")

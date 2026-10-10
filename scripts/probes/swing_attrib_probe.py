@@ -82,8 +82,9 @@ ap.add_argument("--exec", dest="do_exec", action="store_true",
                 help="真机下发（不带=干跑：打印计划即退）")
 ap.add_argument("--rounds", type=int, default=0, help="回放块数上限（0=全部）")
 ap.add_argument("--fps", type=int, default=30, help="行节拍 Hz")
-ap.add_argument("--frames-per-row", type=int, default=8,
-                help="每行插值帧数（stream 突发下发）")
+ap.add_argument("--frames-per-row", type=int, default=1,
+                help="每行插值帧数（stream 突发下发；默认 1=纯 30Hz 直发，"
+                     "镜像 run_g1_loop_traj 在役配方——240Hz 微流 10-10 退役）")
 ap.add_argument("--interp", choices=("linear", "cubic", "quintic"), default="cubic")
 ap.add_argument("--delta-max", type=float, default=0.05, help="链式限幅 rad/行")
 ap.add_argument("--ema-alpha", type=float, default=0.0, help="行目标 EMA（0=关）")
