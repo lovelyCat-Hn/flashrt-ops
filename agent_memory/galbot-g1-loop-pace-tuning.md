@@ -8,6 +8,8 @@ metadata:
   modified: 2026-10-07T10:53:24.286Z
 ---
 
+> **2026-10-08 改名附记**：闭环脚本定名 `run_g1_loop.py`（原 run_g1_loop_rtc.py/"B 脚本"），旗名 --steps-per-round→--n-action-steps、--steps-per-cmd→--steps-per-command、--rtc-hold-max→--hold-max、--rtc-ramp→--hold-ramp、--no-rtc-hold→--late-action stale、--horizon→--chunk-size；config [loop] 键名同步（旧键启动即硬报错）。对照表 `~/holy/docs/lerobot-alignment.md`。本文工作点语义与数值一律不变。
+
 **闭环速度统一律（2026-09-30 实测定案）**：臂速÷数据集原速 = n ÷ (30 × pace × div)，n=每轮步数（spc=n 单指令形态）。pace 下限=推理水位（0.455s，e2e ~390ms），**只许花不许赚**——拉大窗口零收益（推理余量无用处），实测 pace 0.56 轮更差：重规划 2.2→1.75Hz，模型说停时臂多滑 20% 过冲（|Δcmd| 9.3 残差 36.7 签名）。可调的只有 (n, div)。
 
 **工作点定案 v3（2026-10-07 晚，已写入 config，取代 v2）**：`spc=25 / 合步 25 / pace 0.35 / div 1.5 / near_div 2`（≈**1.59×** 原速），**前置=--nav-suspend**（导航栈冻结→推理 329±7ms、max 336 尾部消失）。实测：hold 窗 0（两跑 76 轮）、轮耗时 p50 356ms、L 释放轮 12（t+4.6s）、**R 落盒轮 27（t+10.0s 纪录**，v2 14.0-14.5 → 12.0 → 10.0 三级跳）。代价：导程残差 p50 79 / max 283 mrad、8/37 段 ≥100（v2 时 p50 30-40）——臂持续吃滞后，用户现场判读可接受，**持物复验前保留观察**。边界：**水位 ≈0.34-0.35s**（pace 再低=贴水崖边，偶发抖动即回流 hold 窗）；spc15 反例 15/0.35/1.5=0.95×、落盒拖到 78 轮 27.8s+（速度律反向命中，spc 勿再动）。⚠ 全程空爪，持物物理 place 复验未做。
@@ -27,5 +29,7 @@ metadata:
 **chunk 边界语义**（排障速查）：合步**不跨 chunk**——每条指令 100% 属于本 chunk，目标=第 n 步累积增量终点（plan_step(k_end−1)），其余 30 步丢弃；抽帧在第一条指令发出瞬间（k==0，[run_g1_loop.py:630-632]），非步末；spc>steps-per-round 被静默钳到 steps-per-round（[:399]）；**每轮单指令（spc=n）+ 锚永远新鲜 = 无复位解**；spc<n 拆分形态第二条指令啃陈旧锚 → 复位（24/12 实证，弃用）。缝上小幅回追=轨迹弧线的真实内容（关节非单调）+ 25 步前瞻偶发投机过头（496→41 mrad 打脸对），属模型侧，随计划质量改善。
 
 **导航栈 SIGSTOP 搁置杠杆（2026-10-07 定案，BENCHMARKS 附录）**：B 脚本 `--nav-suspend`（默认关）闭环前 `kill -STOP` 冻结纯导航侧 7 进程（localization/fusion/navigation_plan/vtn/surround/swallows/lidar_capture，PID 随重启变按名找），退出自动 CONT（5 退出点显式 resume+独立守护进程兜底 kill -9，CONT 幂等）。**vtn 8s 探针实证 launcher 只盯 exit 不怕冻结态**；冻结后 GR3D 50→7%（GPU 争用坐实）、推理 375.3→320.5（−54.8ms），**真机闭环已验**：hold 窗清零、推理 329±7 max 336、水位击穿兑现 → 直接催生工作点 v3（落盒 14.0→10.0s）。**约束**：只在「臂上任务+底盘不动」窗口用（localization 冻结期位姿不更新）；不碰 motion_plan/相机 capture/robot_state_publish/hpu_comm/Perception。**sdkfree 探针切分（同日）**：无 SDK 进程文件帧 318.2 ≈ SDK 在场 320.5 → **我们进程订阅成本≈0**，剩余 ~81ms 全在守护侧（相机 capture 30fps 编码+DMA 为大头）；环境侧剩两个选项=采集降帧（−30~60，动 vendor 配置待评估消费者）/motion_plan 搁置（−15~25，失败方向偏安全但关节路径未证）；工具 `scripts/probes/sdkfree_infer_probe.py`。
+
+**native 固定节拍孪生落地（2026-10-09，本文速度律不适用面声明）**：`scripts/inference/run_g1_loop_native.py`（holy e8c22c3）= v3 的 A/B 对照，**删 pace/div/合步/hold 全家**——固定 tick=1/30s 消 1 条 action，速度由 Δaction/tick 涌现 ≈1.0× 数据集原速，上方速度律 n/(30×pace×div) 对它**无意义**（无 pace 可调；`--speed 2.0` 只是逐拍限速天花板，非配速）。消费到水位 25/50 触发预取，新块落地整块换入弃尾；星饿（块耗尽推理未归）=不下发冻结（刚性伺服保持），超 2s 停机——与 v3 hold 单调收敛是两种兜底哲学。tick 绝对截止 `next_t+=TICK`、落后超 1 拍重锚绝不连发。换块弃尾的接缝尖峰（首拍 |Δcmd| vs 块内均值）是它的主遥测=v3 挂账"残留指令切换抖动"的量化。`--rtc-horizon 10` 可开推理侧前缀引导消接缝（默认 0=关）。v3 工作点 25/0.35/1.5 **仍是现役默认**，native 是对照实验线非替换；真机三态 A/B 待跑。术语对照 docs/lerobot-alignment.md §九。
 
 关联 [[galbot-machine3-deployment-state]] [[galbot-g1-pvt-trajectory-hazard]]
