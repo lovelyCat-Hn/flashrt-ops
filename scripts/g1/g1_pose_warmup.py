@@ -7,7 +7,8 @@
 
 两段式（安全优先）：
   ① move_whole_body_joint_zero —— SDK 预定义零位，带碰撞检查（reset_pos.py
-     已验证用法），先脱离收拢/折叠等大偏移姿态。--skip-zero 可跳过
+     已验证用法），先脱离收拢/折叠等大偏移姿态。2026-10-12 起**默认跳过**
+     （规划器大偏移常 TIMEOUT；--no-skip-zero 显式执行）
   ② 双臂 7×2 + 头 2 + 腿 5（躯干站高/前倾）set_joint_positions → 数据集
      state.mean（采集平均工作姿态，与零位接近，小步幅）。臂/头限速默认
      0.15 rad/s，腿 0.2 rad/s。--skip-leg 可跳过腿部（会改变站高/前倾，
@@ -28,7 +29,7 @@ dim0-11 入域即达标；leg/head 窄维（宽 <1e-3）可能仍亮，属传感
   LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
   ~/miniforge3/envs/flash_pyrt311/bin/python \
       ~/holy/scripts/g1/g1_pose_warmup.py \
-      [--ckpt ~/holy/models/pi05_g1_deploy] [--skip-zero] [--speed 0.15] [--grip]
+      [--ckpt ~/holy/models/pi05_g1_deploy] [--no-skip-zero] [--speed 0.15] [--grip]
 
 中断：随时按 q 即退（含 SDK 阻塞运动中——Ctrl-C 会被阻塞 C++ 调用推迟，
 q 走独立监听线程不受限）；需立即断运动拍物理急停。
@@ -54,13 +55,34 @@ ap = argparse.ArgumentParser(description=__doc__,
 ap.add_argument("--ckpt", default=None,
                 help="部署目录（默认 config [run].ckpt；读 norm_stats.json 的 state.mean 作目标）")
 ap.add_argument("--skip-zero", action="store_true", default=None,
-                help="跳过零位段（已在工作位附近时；config [warmup].skip_zero）")
+                help="跳过零位段（2026-10-12 起默认即跳过，config [warmup].skip_zero）")
+ap.add_argument("--no-skip-zero", action="store_true",
+                help="显式执行段①零位（覆盖默认跳过；折叠/收拢等大偏移姿态先"
+                     "脱离时用——零位带碰撞检查，段② 直控没有）")
 ap.add_argument("--speed", type=float, default=None,
                 help="臂/头关节速度上限 rad/s（默认 0.15；config [warmup].speed）")
 ap.add_argument("--grip", action="store_true", default=None,
                 help="闭合夹爪到数据集起点 0%%（width_min；需 manifest 标定；config [gripper].enabled）")
 ap.add_argument("--no-grip", action="store_true",
                 help="显式不闭合夹爪（覆盖 config 的 gripper.enabled=true）")
+ap.add_argument("--init-settle", type=float, default=None,
+                help="robot.init 后 settle 秒（默认 5.0；独立运行勿动）。"
+                     "编排器快速复位路径传小值——前一段推理子进程刚释放控制器，"
+                     "SDK 栈是热的；settle 不足的表现=start_controller 非 SUCCESS"
+                     " 直接报错退出（响亮失败，无静默风险）")
+ap.add_argument("--then-move", nargs=3, type=float, default=None,
+                metavar=("X", "Y", "YAW_DEG"),
+                help="达标后【同一 SDK 会话】底盘横移（编排器 reset+move 合并段；"
+                     "独立运行勿用）：move_straight_to 相对位移 x/y 米"
+                     "（base_link 系 x前/y左，odom 系免定位）+ 原地转角 deg；"
+                     "与 --then-goto 互斥")
+ap.add_argument("--then-goto", default=None, choices=["place", "pick"],
+                help="同上但走 map 系绝对坐标直达（g1_warm_core."
+                     "nav_goto_station：navigate_to_goal(collision_check="
+                     "False)+0.5s 轮询判到达，需定位锁在）；与 --then-move "
+                     "互斥。编排器默认发 --then-goto place")
+ap.add_argument("--move-timeout", type=float, default=30.0,
+                help="--then-move/--then-goto 的导航内部超时 s")
 ap.add_argument("--skip-leg", action="store_true", default=None,
                 help="跳过躯干/腿对齐（腿部动作改变站高/前倾，默认对齐；config [warmup].skip_leg）")
 ap.add_argument("--pose-file", default=None,
@@ -69,6 +91,8 @@ ap.add_argument("--pose-file", default=None,
 ap.add_argument("--config", default=g1_config.DEFAULT_PATH,
                 help="配置文件路径（优先级 CLI > config > 内置默认）")
 args = ap.parse_args()
+if args.then_move is not None and args.then_goto is not None:
+    ap.error("--then-move 与 --then-goto 互斥，二选一")
 g1_config.apply(args, {
     "ckpt": ("run", "ckpt"),
     "speed": ("warmup", "speed"),
@@ -78,6 +102,8 @@ g1_config.apply(args, {
 })
 if args.no_grip:
     args.grip = False
+if args.no_skip_zero:
+    args.skip_zero = False   # 覆盖 config/BUILTIN 的默认跳过，显式执行段①
 # pose_file 是可选键（BUILTIN 无兜底，不进 apply mapping，避免双双缺省即退出）
 POSE_FILE = args.pose_file
 if POSE_FILE is None:
@@ -178,52 +204,19 @@ sys.excepthook = _kb_hook
 # `分析脚本`从数据集 task_index=0 的 98 条起始帧取中位数生成。
 CKPT = pathlib.Path(args.ckpt)
 ns_p = CKPT / "norm_stats.json"
-# 位姿来源三级：CLI --pose-file > config [warmup].pose_file > 部署目录同名文件
-start_p = (pathlib.Path(POSE_FILE) if POSE_FILE
-           else CKPT / "episode_start_task0.json")
-if start_p.exists():
-    blk = json.loads(start_p.read_text())
-    TARGET = blk["start_pose"]
-    ns = json.loads(ns_p.read_text()) if ns_p.exists() else None
-    MODE = ns.get("norm_mode", "q01_q99") if isinstance(ns, dict) else "q01_q99"
-    print(f"[warm] 目标 = {start_p}"
-          + ("" if POSE_FILE else "（部署目录零配置发现）")
-          + f"（{blk.get('n_episodes', '?')} 条起始中位"
-            f"{('，task: ' + blk['task']) if blk.get('task') else ''}，"
-            f"臂维组内最大波动 {blk.get('spread_max_dev', 0):.2f} rad）")
-elif ns_p.exists():                     # prep 产物：{norm_mode, actions{...}, state{...}}
-    ns = json.loads(ns_p.read_text())
-    TARGET = ns["state"]["mean"]
-    MODE = ns.get("norm_mode", "q01_q99")
-    print("[warm] ⚠ 无位姿文件（--pose-file / config [warmup].pose_file / "
-          "部署目录 episode_start_task0.json 都没有），退回 state.mean"
-          "（多 task 起始的平均值，非任务起点——用 g1_pose_extract.py 生成）")
-else:                                   # 兜底：lerobot 数据集 schema
-    ms_p = CKPT.parent / "meta" / "stats.json"
-    if not ms_p.exists():
-        raise SystemExit(f"找不到 stats：{ns_p} 或 {ms_p}")
-    lg = json.loads(ms_p.read_text())
-    TARGET = lg["observation.state"]["mean"]
-    MODE = "q01_q99"
-if len(TARGET) != 23:
-    raise SystemExit(f"目标姿态应 23 维，实得 {len(TARGET)}")
-
-LEFT = [f"left_arm_joint{i}" for i in range(1, 8)]
-RIGHT = [f"right_arm_joint{i}" for i in range(1, 8)]
-HEAD = ["head_joint1", "head_joint2"]
-LEG = [f"leg_joint{i}" for i in range(1, 6)]
-GRIP = ["right_gripper_joint1", "left_gripper_joint1"]   # 数据集序: dim7 右 / dim15 左
-# ⚠ 数据集 23 维序是【右臂在前】（meta/info.json 权威定义，2026-09-22 实证）:
-#   0-6 右臂 / 7 右夹爪 / 8-14 左臂 / 15 左夹爪 / 16-20 腿 / 21-22 头
-# 读取顺序一律跟数据集序，杜绝左←→右整块互换（曾把右臂目标下给左臂，
-# 机械臂镜像甩到背后——用户实测 "到背面来抓东西了"）
-STATE_NAMES = RIGHT + GRIP[:1] + LEFT + GRIP[1:] + LEG + HEAD
-IDX = {"right_arm": list(range(0, 7)), "left_arm": list(range(8, 15)),
-       "head": list(range(21, 23)), "leg": list(range(16, 21))}
-
-sys.path.insert(0, "/home/galbot/holy/FlashRT")
+# 位姿来源三级 + 常量 + 读关节/摆臂/达标/横移序列：全部在共享核心
+# g1_warm_core（2026-10-13 折叠改造：warmup 与 run_g1_loop.py 折叠段共用，
+# 改一处两处生效，勿在此重写序列）
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from g1_warm_core import (LEFT, RIGHT, HEAD, LEG, GRIP, STATE_NAMES, IDX,  # noqa: E402
+                          load_target, send_warm, judge as _judge_core,
+                          read23 as _read23_core, report as _report_core,
+                          nav_straight_move, nav_goto_station)
 from flash_rt.core.utils.actions import normalize_state  # noqa: E402
-from galbot_sdk.g1 import GalbotRobot, GalbotMotion, G1JointGroup  # noqa: E402
+from galbot_sdk.g1 import (GalbotRobot, GalbotMotion, G1JointGroup,  # noqa: E402
+                           GalbotNavigation, G1ControllerName)
+
+TARGET, ns, MODE = load_target(CKPT, POSE_FILE)
 
 # 夹爪标定（manifest；有则读数换算 0~100%，与数据集 state 单位对齐）
 mf_p = CKPT / "flashrt_deploy.json"
@@ -235,23 +228,30 @@ if args.grip and (GRIP_WMIN is None or GRIP_WMAX is None):
                      "--grip-wmin/--grip-wmax（2026-09-23 实测 0.0005/0.1200 m）")
 
 
+def _die(msg, code=1):
+    """失败出口：SDK 活着时裸 raise=解释器退场撞残留线程 → SIGSEGV
+    （rc=-11 掩盖真实原因，2026-10-13 八跑实录）——先关 SDK 再 os._exit。"""
+    print(msg, flush=True)
+    r = globals().get("robot")
+    try:
+        if r is not None:
+            r.request_shutdown(); r.wait_for_shutdown(); r.destroy()
+            print("SDK 已关闭", flush=True)
+    except Exception:
+        pass
+    try:
+        WATCH.restore()
+    except Exception:
+        pass
+    os._exit(code)
+
+
 def read23(robot):
-    vals = robot.get_joint_positions([], STATE_NAMES)
-    if not vals or len(vals) != 23:
-        raise SystemExit(f"关节读取失败（返回 {len(vals) if vals else 0} 维）")
-    st = [float(v) for v in vals]
-    if GRIP_WMIN is not None and GRIP_WMAX is not None:
-        for i in (7, 15):   # SDK 米 → 数据集 0~100%
-            st[i] = (st[i] - GRIP_WMIN) / (GRIP_WMAX - GRIP_WMIN + 1e-9) * 100.0
-    return st
+    return _read23_core(robot, STATE_NAMES, GRIP_WMIN, GRIP_WMAX, _die)
 
 
 def report(cur):
-    print(f"{'维':>4} {'关节':<22} {'当前':>8} {'目标':>8} {'差':>8}")
-    for i, n in enumerate(STATE_NAMES):
-        d = TARGET[i] - cur[i]
-        mark = " ←" if abs(d) > 0.05 and n not in GRIP else ""
-        print(f"{i:>4} {n:<22} {cur[i]:>8.3f} {TARGET[i]:>8.3f} {d:>+8.3f}{mark}")
+    _report_core(cur, TARGET, STATE_NAMES)
 
 
 print(f"目标姿态已就绪（norm_mode={MODE}）——来源见上方 [warm] 行")
@@ -259,11 +259,18 @@ cur = None
 
 print("\n== ① SDK 初始化（确认急停可及！）==")
 robot = GalbotRobot()
-motion = GalbotMotion()
+# GalbotMotion 惰性创建：仅段①零位需要（规划器 move_whole_body_joint_zero）。
+# 默认 skip_zero 复位路径只走 set_joint_positions 直控，不碰 motion.init
+# ——省初始化时间，也绕开 FK 脱机挂死面（2026-09 实录）。5s settle 保留：
+# 与 run_g1_loop 同款，双脚本日常实证，勿删。
+motion = None
+if not args.skip_zero:
+    motion = GalbotMotion()
 if not robot.init():
-    raise SystemExit("robot.init 失败")
-motion.init()
-time.sleep(5)
+    _die("robot.init 失败")
+if motion is not None:
+    motion.init()
+time.sleep(5.0 if args.init_settle is None else args.init_settle)
 st = robot.start_controller("all")
 print(f"start_controller('all') → {st}")
 
@@ -337,43 +344,43 @@ input(f"\n⚠ 段②：双臂+头" + ("+躯干腿" if not args.skip_leg else "")
 WATCH.resume()
 if args.grip and args.skip_zero:
     fire_grip_close()   # 跳过段① 时在段② 前发，闭合仍与臂动作并行
-arm_names = RIGHT + LEFT + HEAD   # 名字与目标值逐位配对，顺序跟数据集维序
-arm_tgt = [TARGET[i] for i in IDX["right_arm"] + IDX["left_arm"] + IDX["head"]]
-st = robot.set_joint_positions(arm_tgt, joint_names=arm_names,
-                               is_blocking=True, speed_rad_s=args.speed,
-                               timeout_s=45.0)
-print(f"set_joint_positions(臂+头) → {st}")
-time.sleep(1.0)
+send_warm(robot, TARGET, args.speed, skip_leg=bool(args.skip_leg))
 
-# ── 段②b：躯干/腿 → 目标位姿（站高/前倾对齐采集起点）──
-if not args.skip_leg:
-    leg_tgt = [TARGET[i] for i in IDX["leg"]]
-    st_l = robot.set_joint_positions(leg_tgt, joint_names=LEG,
-                                     is_blocking=True, speed_rad_s=0.2,
-                                     timeout_s=45.0)
-    print(f"set_joint_positions(躯干/腿) → {st_l}")
-    time.sleep(1.0)
-
-# ── 达标判定：归一化 [-1,1] 外维数 ──
+# ── 达标判定：归一化 [-1,1] 外维数（共享核心版）──
 cur = read23(robot)
 report(cur)
-import numpy as np  # noqa: E402
-st_n = normalize_state(np.array(cur, dtype=np.float32), ns)
-out_dims = [f"dim{i}({STATE_NAMES[i]})" for i in range(23) if abs(st_n[i]) > 1.0]
-arms_out = [d for d in out_dims if int(d[3:d.index("(")]) < 16]   # 臂+夹爪段 = dim0-15
-print(f"\n== 达标判定 ==\n[-1,1] 外 {len(out_dims)} 维: {out_dims or '无'}")
-print(f"双臂维(0-7,8-15) 外 {len(arms_out)} 维 → "
-      + ("✅ 达标，可跑推理" if not arms_out else "⚠ 仍偏，检查臂段是否到位"))
-print("（leg/head 窄维亮灯属传感器噪声量级， Part B 已知）")
-leg_dev = max(abs(cur[IDX['leg'][k]] - TARGET[IDX['leg'][k]]) for k in range(5))
-print(f"躯干/腿最大偏差 {leg_dev:.3f} rad"
-      + ("（已下发对齐；偏大=未到位，查上方状态）" if not args.skip_leg
-         else "（--skip-leg 未下发，仅对照）"))
+arms_out = _judge_core(cur, TARGET, ns, skip_leg=bool(args.skip_leg))
 if args.grip:
     ok_g = abs(cur[7] - TARGET[7]) <= 10 and abs(cur[15] - TARGET[15]) <= 10
     print(f"夹爪核对: 右 {cur[7]:.1f}%（目标 {TARGET[7]:.1f}%）/ "
           f"左 {cur[15]:.1f}%（目标 {TARGET[15]:.1f}%，±10% 容差）→ "
           + ("✅" if ok_g else "⚠ 未收到位，查夹爪或重跑（--grip 已含在段① 并行发出）"))
+
+if args.then_move is not None:
+    # ③ 同会话底盘横移（官方 GalbotNavigation.move_straight_to 四步，
+    # 契约细节见 g1_warm_core.nav_straight_move 文档）
+    sx, sy, syaw = args.then_move
+    print(f"\n== ③ 同会话横移 x={sx:+.3f} y={sy:+.3f} m yaw={syaw:+.2f}°"
+          f"（base_link 系 y+=左）timeout {args.move_timeout:.0f}s ==", flush=True)
+    try:
+        ok_m, st_m = nav_straight_move(robot, sx, sy, syaw, args.move_timeout)
+    except Exception as exc:       # SDK 异常走 _die 干净退出，防 teardown 段错误掩盖 rc
+        _die(f"横移 API 异常: {exc!r}")
+    if not ok_m:
+        _die(f"横移失败 status={st_m}")   # 复位已成、横移失败：rc=1 编排器中止
+
+if args.then_goto is not None:
+    # ③′ 同会话底盘绝对坐标直达（10-14 编排器 goto 模式，契约见
+    # g1_warm_core.nav_goto_station：is_localized 闸+WAIT_INITIALIZED
+    # 限时重试+0.5s 轮询 check_goal_arrival）
+    print(f"\n== ③′ 同会话 goto 工位 {args.then_goto} "
+          f"timeout {args.move_timeout:.0f}s ==", flush=True)
+    try:
+        ok_m, st_m = nav_goto_station(robot, args.then_goto, args.move_timeout)
+    except Exception as exc:
+        _die(f"goto API 异常: {exc!r}")
+    if not ok_m:
+        _die(f"goto 失败 status={st_m}")   # 复位已成、横移失败：rc=1 编排器中止
 
 robot.request_shutdown(); robot.wait_for_shutdown(); robot.destroy()
 print("SDK 已关闭")

@@ -38,6 +38,19 @@ SDK 调用全留主线程）。可选坡升（--hold-ramp N，执行侧 crossfad
 连续 ≥2 窗（臂真减速过）后的 N 轮臂速限幅 0.5→1.0 线性恢复，柔化再起步；
 1 窗轮询早退的 hold 不触发（臂未减速，坡升纯属慢性拖慢）。零推理成本。
 
+二相（--phase2-prompt，2026-10-14，需 --post-gate warm-move）：
+【单模型档，现默认】只给 --phase2-prompt——0930 部署权重实为 pick+place
+4 任务合并训练（train_config wandb notes「4-task merged pick/place
+dataset」实锤；目录名 only_pick 只是部署命名骗人），place 无需换权重：
+折叠成功后同引擎只换 prompt+相位状态（grip-state-cmd 关/HOME 重基准/
+计数清零/place 轮从 0 重计），无第二构造载入（省 ~26s 与其 +45s 预算）。
+【双构造档，--dual-load/--phase2-ckpt 显式选，A/B 回退用】place ckpt 开局
+与 pick 一起载入+建引擎（v2 开局同载；v1 藏折叠窗口 26.0s>16.8s 漏出
+~9s 已废），折叠后换 model/norm_stats/prompt/包络盒（place ckpt）。
+两档共同：HOME 重基准/计数清零/直到编排器释放门注入 q（rc=2=任务完成）；
+place 轮 grip-state-cmd 自动关闭（持物签名会把释放锁死）；导航栈保持
+醒来（折叠横移已 resume），与独立 place 段（--nav-suspend）差 ~55ms/轮。
+
 用法:
   LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
   ~/miniforge3/envs/flash_pyrt311/bin/python \
@@ -62,6 +75,9 @@ import termios
 import threading
 import time
 import tty
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "g1"))
+import g1_warm_core  # noqa: E402  warm 复位共享核心（--post-gate 折叠段与 warmup 共用）
 
 ap = argparse.ArgumentParser(description=__doc__,
                              formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -100,6 +116,20 @@ ap.add_argument("--near-div", type=float, default=None,
                      "0=关闭（默认）；config [loop].near_div")
 ap.add_argument("--near-gap", type=float, default=None,
                 help="近距阻尼触发导程 rad（默认 0.06=60 mrad）；config [loop].near_gap")
+ap.add_argument("--near-bypass", type=int, default=None,
+                help="抓取事件（任一爪开→合穿越）后近距阻尼旁路轮数：返回/后撤段"
+                     "强制全速（ep0 后撤窗 ~4s≈11 轮，15 留余量），到期自动交还；"
+                     "0=关闭；config [loop].near_bypass")
+ap.add_argument("--near-n", type=int, default=None,
+                help="近窄轮：近阻尼触发（--near-gap 命中）时本轮配额与指令宽度"
+                     "收缩为 N 步（spc 联动=min(spc,N)，与 --near-div 同窗生效）"
+                     "——每轮吃最新观测重规划的短导程，目标链贴臂无滞后税，"
+                     "代价=时间线变慢 ~n/N；0=只动配速不动步宽；config [loop].near_n")
+ap.add_argument("--near-exit", type=float, default=None,
+                help="近态退出阈值 rad（滞回上阈：进态=--near-gap，退态=本值；"
+                     "默认 0=2×near_gap）。单阈值时增量在阈值两侧的接近段会逐轮"
+                     "窄↔宽翻转=速度方波往复摆动（10-13 实录后新增）；"
+                     "config [loop].near_exit")
 ap.add_argument("--cache-frames", type=int, default=None,
                 help="K/V 时序复用周期：1=每帧全量（默认，无损）；2=全量/仅解码交替"
                      "（中间帧视觉前缀复用上一帧 K/V，推理提速但隔帧陈旧——本机节拍下"
@@ -165,6 +195,47 @@ ap.add_argument("--nav-suspend", action="store_true",
                      "退出自动 CONT（含 kill -9，守护网兜底）。"
                      "⚠ 只用于臂上任务+底盘不动窗口：冻结期 localization 位姿停更，"
                      "底盘先恢复导航。默认关")
+ap.add_argument("--post-gate", choices=["none", "warm", "warm-move"],
+                default="none",
+                help="门触发后折叠（10-13）：编排器注入 'r' → 本轮止步 → "
+                     "同会话执行 reset（摆臂到 --fold-pose-file 位姿；warm-move "
+                     "档再加 GalbotNavigation 横移 --then-move）后退出 rc=0，"
+                     "省 warmup 子进程 ~4-5s。none=q 即退（原行为，rc=2）。"
+                     "折叠期间 q 仍可急停（rc=4=折叠中止）")
+ap.add_argument("--fold-ckpt", default=None,
+                help="折叠摆臂的目标位姿/norm_stats/夹爪标定来源目录（=place ckpt）")
+ap.add_argument("--fold-pose-file", default=None,
+                help="折叠摆臂目标位姿 json（23 维 start_pose，place 起始）")
+ap.add_argument("--fold-speed", type=float, default=0.8,
+                help="折叠摆臂臂/头速度 rad/s（=编排器 --reset-speed）")
+ap.add_argument("--then-move", nargs=3, type=float, default=None,
+                metavar=("X", "Y", "YAW_DEG"),
+                help="--post-gate warm-move 的横移（base_link 系 x前/y左，"
+                     "deg）；与 --then-goto 互斥")
+ap.add_argument("--then-goto", default=None, choices=["place", "pick"],
+                help="--post-gate warm-move 的横移走 map 系绝对坐标直达"
+                     "（g1_warm_core.nav_goto_station：navigate_to_goal"
+                     "(collision_check=False)+0.5s 轮询判到达；10-14 同"
+                     " g1_base_move --goto）；与 --then-move 互斥。编排器"
+                     "默认发 --then-goto place")
+ap.add_argument("--move-timeout", type=float, default=30.0,
+                help="--then-move/--then-goto 的导航内部超时 s")
+ap.add_argument("--phase2-ckpt", default=None,
+                help="二相双构造旧路径：place ckpt 目录，折叠窗口内后台载入"
+                     "+烧引擎，折叠后换权重切相（10-14 起可选——0930 权重实为"
+                     " pick+place 合并训练，只传 --phase2-prompt 即单模型切相，"
+                     "省第二构造 ~26s 载入；本参数留作 A/B/回退）")
+ap.add_argument("--phase2-prompt", default=None,
+                help="二相 place 轮的 prompt（编排器传 place-prompt）。只给本参"
+                     "不给 --phase2-ckpt=单模型切相（同权重只换 prompt）")
+ap.add_argument("--phase2-pace", type=float, default=None,
+                help="切相后 place 轮配速窗口 s（默认沿用 pick 值）。place 相"
+                     "导航栈醒着（二相设计如此，+55ms/轮），pace 须盖住醒着"
+                     "水位 ~0.42——pace<水位=续航背靠背→夹爪翻摆 500+ mrad"
+                     "（9/30 sweep 0.38 判死实录，二相 place@0.35 同条件）")
+ap.add_argument("--phase2-pace-div", type=float, default=None,
+                help="切相后 place 轮配速系数（默认沿用；0.43 那套配 1.65，"
+                     "9-30 a25a59c 定案）")
 args = ap.parse_args()
 
 # ── 全文日志落盘：q 退出走 os._exit 不刷缓冲（09-23 坑），故逐行强制 flush ──
@@ -206,6 +277,9 @@ g1_config.apply(args, {
     "pace_div": ("loop", "pace_div"),
     "near_div": ("loop", "near_div"),
     "near_gap": ("loop", "near_gap"),
+    "near_bypass": ("loop", "near_bypass"),
+    "near_n": ("loop", "near_n"),
+    "near_exit": ("loop", "near_exit"),
     "cache_frames": ("loop", "cache_frames"),
     "max_excursion": ("loop", "max_excursion"),
     "settle": ("loop", "settle"),
@@ -326,6 +400,13 @@ class NavSuspend:
 
 NAV = None   # suspend 后指向 NavSuspend 实例；各退出路径 None 守卫调用 resume
 
+# ── 门触发折叠（--post-gate，10-13）：编排器门触发注入 'r' → 主循环止步 →
+# 同会话复位+横移（省 warmup 子进程 ~4-5s）。QuitWatcher 收 'r' 置事件不退程；
+# 折叠期间 q 仍可急停（rc=4=折叠中止，编排器按失败拦下不进 place）──
+FOLD_EVENT = threading.Event()      # 'r' 触发 → 主循环下一检查点止步
+FOLD_REQUESTED = False              # 参数校验后置位（--post-gate != none）
+FOLD_MOVE = False                   # warm-move 档（摆臂后横移）
+
 
 class QuitWatcher:
     """后台线程监听键盘 q：任何阶段即时退出（SDK 阻塞 C++ 调用吞 Ctrl-C）。"""
@@ -339,15 +420,23 @@ class QuitWatcher:
             self._old = termios.tcgetattr(self.fd)
             tty.setcbreak(self.fd)
             atexit.register(self.restore)
-            r, w = os.pipe()                # 信号直通管道：C 层收信号即写字节，
-            os.set_blocking(w, False)       # 主线程卡死在 SDK C++ 调用也能退出
-            signal.set_wakeup_fd(w)
-            signal.signal(signal.SIGINT, lambda *_: None)     # 退出走管道，别靠
-            signal.signal(signal.SIGTERM, lambda *_: None)    # 会被推迟的异常
-            self._wake_r = r
-            self.active.set()
-            threading.Thread(target=self._loop, daemon=True).start()
+            self.active.set()       # tty：构造即监听（提示符处 pause/resume 照旧）
+        # else：编排器 stdin=管道。termios 设不了（ENOTTY），但 select+read 照常
+        # 收 'q'——10-13 实锤 isatty 门把监听线程整个跳过=门触发写 q 无人读，
+        # loop 一路跑到相机冻结看门狗收尾（131514~140210 五跑 q=0）。
+        # active 留空=不与提示符 input() 抢预喂的 '\n'，resume()（提示符后）才开听。
+        r, w = os.pipe()                # 信号直通管道：C 层收信号即写字节，
+        os.set_blocking(w, False)       # 主线程卡死在 SDK C++ 调用也能退出
+        signal.set_wakeup_fd(w)
+        signal.signal(signal.SIGINT, lambda *_: None)     # 退出走管道，别靠
+        signal.signal(signal.SIGTERM, lambda *_: None)    # 会被推迟的异常
+        self._wake_r = r
+        threading.Thread(target=self._loop, daemon=True).start()
+        if os.isatty(self.fd):
             print("（循环期间随时按 q 或 Ctrl-C 退出；确认提示符处用回车；急停第一优先级）")
+        else:
+            print("（stdin=管道：'q' 监听已挂（编排器门触发/超时写 q 生效）；"
+                  "Ctrl-C 由父进程转发）")
 
     def restore(self):
         if self._old is not None:
@@ -380,18 +469,67 @@ class QuitWatcher:
                     if NAV is not None:
                         NAV.resume()
                     os._exit(130)
-                if sys.stdin.read(1) in ("q", "Q"):
-                    print("\n⛔ 按下 q —— 立即退出（已下发目标可能仍在限速执行）")
+                ch = sys.stdin.read(1)
+                if ch in ("q", "Q"):
+                    folding = FOLD_EVENT.is_set()
+                    print("\n⛔ 按下 q —— 立即退出（已下发目标可能仍在限速执行）"
+                          + ("〔折叠中止 rc=4〕" if folding else ""))
                     self.restore()
                     if NAV is not None:
                         NAV.resume()
-                    os._exit(2)
+                    os._exit(4 if folding else 2)
+                if ch in ("r", "R") and FOLD_REQUESTED and not FOLD_EVENT.is_set():
+                    print("\n[fold] 收到 'r' —— 本轮止步后执行折叠 reset"
+                          + ("+横移" if FOLD_MOVE else ""))
+                    FOLD_EVENT.set()
             except Exception:
                 self.restore()
                 if NAV is not None:
                     NAV.resume()
                 os._exit(3)   # 监听线程死了比静默更危险：宁可误退不可失控
 
+
+# ── 折叠参数校验（fail loud，缺件直接退出，不进循环）──
+FOLD_REQUESTED = args.post_gate != "none"
+FOLD_MOVE = args.post_gate == "warm-move"
+if FOLD_REQUESTED:
+    if not args.fold_ckpt or not args.fold_pose_file:
+        raise SystemExit("--post-gate warm/warm-move 需要 --fold-ckpt + "
+                         "--fold-pose-file（place 起始位姿来源）")
+    if FOLD_MOVE:
+        if args.then_move is not None and args.then_goto is not None:
+            raise SystemExit("--then-move 与 --then-goto 互斥，二选一")
+        if args.then_move is None and args.then_goto is None:
+            raise SystemExit("--post-gate warm-move 需要 --then-move X Y "
+                             "YAW_DEG 或 --then-goto place|pick")
+
+# ── 二相参数校验（fail loud）──
+# 两态（2026-10-14 同事确认定案）：0930 权重=4 任务 pick+place 合并训练
+# （train_config wandb notes 实锤），place 无需换权重——只给 --phase2-prompt
+# 即单模型切相（省第二构造载入+建引擎 ~26s 与 +45s 预算）；仍传 --phase2-ckpt
+# 则走旧双构造路径（A/B/回退用）。
+PH2 = None
+if args.phase2_prompt:
+    if args.post_gate != "warm-move":
+        raise SystemExit("--phase2-* 需要 --post-gate warm-move（切相发生在"
+                         "折叠+横移之后，横移是 place 工位的必要位移）")
+    if args.phase2_ckpt:
+        _p2 = pathlib.Path(args.phase2_ckpt)
+        if not (_p2 / "flashrt_deploy.json").exists():
+            raise SystemExit(f"--phase2-ckpt 缺 flashrt_deploy.json: {_p2}")
+        PH2 = {"ckpt": _p2, "prompt": args.phase2_prompt,
+               "model": None, "error": None}
+        print(f"[phase2] 二相开（双构造旧路径）：place ckpt {_p2.name}（折叠"
+              "窗口内后台载入，折叠后原地切相；place 轮 grip-state-cmd 自动关）")
+    else:
+        PH2 = {"ckpt": None, "prompt": args.phase2_prompt,
+               "model": None, "error": None}
+        print("[phase2] 二相开（单模型）：同权重只换 prompt——0930 权重为 "
+              "pick+place 合并训练（train_config 实锤），无第二构造载入；"
+              "place 轮 grip-state-cmd 自动关、包络沿用（pick 侧包络本就派生"
+              "自 199 集 pick+place 合并数据）")
+elif args.phase2_ckpt:
+    raise SystemExit("--phase2-ckpt 需要 --phase2-prompt（place 轮 prompt）")
 
 WATCH = QuitWatcher()
 
@@ -463,7 +601,7 @@ if args.grip:
     GRIP = {"names": (("right_gripper", 7), ("left_gripper", 15)),
             "wmin": float(wmin), "wmax": float(wmax),
             "speed": args.grip_speed, "effort": args.grip_effort,
-            "chg": args.grip_chg, "sent": {}}
+            "chg": args.grip_chg, "sent": {}, "sent_peak": {}, "grasp_r": -10**9}
     print(f"夹爪下发开启: 0%→{wmin} m | 100%→{wmax} m | 速度 {args.grip_speed} m/s | "
           f"力矩 {args.grip_effort} N | 变化阈值 {args.grip_chg}%")
     if args.grip_state_cmd:
@@ -550,20 +688,38 @@ def state_from_joints(vals) -> np.ndarray:
 
 
 def grip_state_cmd_override(st_raw):
-    """--grip-state-cmd：state 夹爪维(7/15)改喂最后指令值（默认=SDK 回读）。
+    """--grip-state-cmd：state 夹爪维(7/15)改喂指令值，持物段例外（10-12 修正）。
 
     SDK 夹爪反馈滞后 ~6.3-8s（2026-09-23 实测），pick 的关键窗口只有 ~7s——
-    喂回读=模型全程看到冻结在起始值的夹爪状态；数据集 state 跟随指令仅
-    ~0.3-1s（10-05 判读 ep0：开爪 1s 内跟上、闭到物体稳读 33.5%）。指令值
-    即数据集语义的快跟随，把 train/serve 的夹爪 state 拉回一致。
-    未发过指令的爪（GRIP["sent"] 空）保留回读值——起步时两者本就一致。
+    跟随段喂回读=模型全程看到冻结在起始值的夹爪状态；数据集 state 跟随指令
+    仅 ~0.3-1s，故跟随段喂指令值。
+
+    ⚠ 持物签名修正（2026-10-12 帧级实锤）：数据集「抓到物体」语义=指令 0%
+    + state 被物体撑在 ~33.5%（ep0 t5.1s 起；40 集持物段 state 中位 33.5、
+    p10-p90=33.0-33.5 恒定）——模型靠该组合识别「已持物→后撤→交接」。
+    闭合后若照喂指令 0% = 把签名抹成「空爪闭紧」（预抓取/释放后分布），
+    交接序列永不触发（loop_20261012_165104 实录：L t+5.3s 抓住、模型不后撤、
+    R 爪全程 0%·hold）。故分三段：
+      开爪/跟随段（指令 >10%）：喂指令值（含回读不可信的整个滞后窗）；
+      持物段（指令 <10% 且该爪历史指令峰值 >50% = 开→合全程走完）：
+        喂持物签名 33.5（数据集恒定值；SDK 回读在交接关键窗内仍处滞后，弃用）；
+      未开过爪的闭合（峰值 ≤50%，如起步双爪 0%）：喂指令值（=空爪闭合，正确）。
+    已知限制：释放后（指令仍 0）滞留持物签名——pick 线释放后任务即转 R 臂，
+    state 不再参与关键决策，首版接受；空抓（夹空）时也会误报持物，行为=
+    提前交接 R，属可接受恢复路径。
     """
     if GRIP is None or not args.grip_state_cmd:
         return st_raw
     st = np.array(st_raw, dtype=np.float32)
     for name, dim in GRIP["names"]:
         sent = GRIP["sent"].get(name)
-        if sent is not None:
+        if sent is None:
+            continue
+        peak = GRIP["sent_peak"].get(name, 0.0)
+        GRIP["sent_peak"][name] = max(peak, sent)
+        if sent < 10.0 and GRIP["sent_peak"][name] > 50.0:
+            st[dim] = 33.5
+        else:
             st[dim] = sent
     return st
 
@@ -577,6 +733,24 @@ def read_joints(robot, names) -> np.ndarray:
 
 _LAST_FRAMES = {}     # 相机冻结守卫：逐轮像素级对比（2026-09-24 右臂下压排查引入）
 _FREEZE_STREAK = {}
+
+
+def letterbox224(img):
+    """等比缩放长边到 224 + 上下纯黑条填充——精确复现训练数据集的图像变换。
+
+    2026-10-12 实锤（pick_place_balence 抽帧判读）：三视角训练帧全部为
+    letterbox——224×224、上下各 28px 纯黑条、内容带 168px=224×960/1280（源帧
+    4:3 等比缩放，非拉伸非裁剪；本机 SDK 原生 640×480/1280×960 均 4:3，
+    infer_policy 的 crop 步为 no-op）。原直拉 resize 满幅无条=train/serve
+    图像分布失配（run_g1_loop_traj.py 同款修复）。
+    """
+    h, w = img.shape[:2]
+    _s = 224.0 / max(h, w)
+    _nh, _nw = round(h * _s), round(w * _s)
+    _cv = np.zeros((224, 224, 3), dtype=np.uint8)
+    _y, _x = (224 - _nh) // 2, (224 - _nw) // 2
+    _cv[_y:_y + _nh, _x:_x + _nw] = cv2.resize(img, (_nw, _nh))
+    return _cv
 
 
 def grab_views(robot) -> dict:
@@ -599,7 +773,7 @@ def grab_views(robot) -> dict:
                              f"（实时流有传感器噪声不可能全等）——观测已失真，"
                              f"停止循环。排查 RT 相机服务")
         out[key] = np.ascontiguousarray(
-            cv2.cvtColor(cv2.resize(img, (224, 224)), cv2.COLOR_BGR2RGB))
+            cv2.cvtColor(letterbox224(img), cv2.COLOR_BGR2RGB))
     return out
 
 
@@ -674,26 +848,41 @@ def env_first_violation(ch):
     return r, j, float(ch[r, j]), float(ENV_HI[j] if upper else ENV_LO[j])
 
 
+def _phys_mm(robot, name):
+    """物理爪宽回读（m→mm）；读不到回 None（编排器门按未持物处理=安全向）。"""
+    try:
+        gs = robot.get_gripper_state(getattr(G1JointGroup, name))
+    except Exception:
+        return None
+    return None if gs is None else gs.width * 1000.0
+
+
 def send_grip(robot, chunk_row):
     """chunk 行 dim7/dim15（0~100%）→ 标定宽度下发（超阈值才发，非阻塞）。
 
-    ⚠ SDK 夹爪反馈滞后 ~6.3s 且期间 is_moving 恒 False——本函数只发不查
-    不等待（否则拖死控制环）；终态核对放循环结束后。
+    本函数只发不查不等待（否则拖死控制环）；终态核对放循环结束后。
+    行尾附【实 X.Xmm】=物理回读宽度（10-13 爪标定：回读新鲜 p50 10ms，
+    推翻 6.3s 滞后旧说）——编排器相位门 v4 靠它判「真持物」：
+    指令闭合≠抓住（143656 实证空爪闭合指令 0-3.5% 照样持续），实宽才是。
     """
     if GRIP is None:
         return None
     parts = []
     for name, dim in GRIP["names"]:
         p = float(np.clip(chunk_row[dim], 0.0, 100.0))
+        pm = _phys_mm(robot, name)
+        ptag = "[实 ?mm]" if pm is None else f"[实 {pm:.1f}mm]"
         last = GRIP["sent"].get(name)
         if last is not None and abs(p - last) < GRIP["chg"]:
-            parts.append(f"{name[0].upper()} {p:.1f}%·hold")
+            parts.append(f"{name[0].upper()} {p:.1f}%·hold{ptag}")
             continue
         w = GRIP["wmin"] + p / 100.0 * (GRIP["wmax"] - GRIP["wmin"])
         st = robot.set_gripper_command(getattr(G1JointGroup, name),
                                        w, GRIP["speed"], GRIP["effort"], False)
         GRIP["sent"][name] = p
-        parts.append(f"{name[0].upper()} {p:.1f}%→{w * 1000:.0f}mm "
+        if last is not None and last >= 10.0 and p < 10.0:
+            GRIP["grasp_r"] = globals().get("r", 0)   # 开→合穿越=抓取事件（近阻尼旁路锚点）
+        parts.append(f"{name[0].upper()} {p:.1f}%→{w * 1000:.0f}mm{ptag} "
                      f"{str(st).replace('ControlStatus.', '')}")
     return "  ".join(parts)
 
@@ -736,6 +925,32 @@ for _ in range(3):
     model.predict(grab_views(robot), prompt=args.prompt,
                   state=normalize_state(read_joints(robot, STATE_NAMES), ns))
 print("预热推理 ×3 完成（吸收惰性引擎构建）")
+
+# ── 二相开局同载（2026-10-14 v2）：place 构造在启动段就建好引擎——GPU 空载
+# 串行，不与 pick 推理竞争。v1 藏折叠窗口实测 26.0s > 窗口 16.8s，漏出 ~9s
+# 空档；v2 代价=pick 起跑晚一次 place 载入+建引擎（编排器预算已放宽）。
+# autotune 只是把每层 GEMM 算法提前选定，不影响推理数值/速度（不同算法=同
+# 数学不同归约序，差异在既有运行间抖动带内）。失败不拦 pick：PH2["error"]
+# 留到切相时响亮失败（pick 是贵的一段，别让 place 侧问题烧掉它）──
+if PH2 is not None and PH2["ckpt"] is not None:
+    t_p2 = time.time()
+    try:
+        _m2 = flash_rt.load_model(str(PH2["ckpt"]), config="pi05",
+                                  num_views=VIEWS,
+                                  cache_frames=args.cache_frames,
+                                  action_dim=ACTION_DIM)
+        _rng = np.random.default_rng(0)
+        _obs = {k: _rng.integers(0, 255, (224, 224, 3), dtype=np.uint8)
+                for k in list(CAM_MAP)[:VIEWS]}
+        _st = np.linspace(-0.5, 0.5, ACTION_DIM, dtype=np.float32)
+        _m2.predict(_obs, prompt=PH2["prompt"], state=_st)   # 建引擎 autotune
+        _m2.predict(_obs, prompt=PH2["prompt"], state=_st)
+        PH2["model"] = _m2
+        print(f"[phase2] place 构造开局就绪（载入+建引擎 "
+              f"{time.time() - t_p2:.1f}s，pick 起跑相应延后）")
+    except Exception as e:
+        PH2["error"] = e
+        print(f"⛔ [phase2] place 构造开局载入失败（pick 照跑，切相时中止）: {e!r}")
 n_steps = max(1, min(args.n_action_steps, args.chunk_size))
 spc = max(1, min(args.steps_per_command, n_steps))   # 合步宽度（≤ 每轮步数）
 BUDGET = spc * args.delta_max                    # 每条指令位移限幅
@@ -750,6 +965,13 @@ if args.pace_div < 1.0:
           "（速度过零停顿），无收益；半程=2 / 全程=1")
 if 0 < args.near_div < 1.0:
     print(f"⚠ --near-div {args.near_div} < 1：近距反而提速会加剧过冲，建议 2；0=关闭")
+near_n_eff = None
+if args.near_n:
+    if not (1 <= args.near_n <= n_steps):
+        near_n_eff = max(1, min(args.near_n, n_steps))
+        print(f"⚠ --near-n {args.near_n} 出界（1~n_action_steps {n_steps}），钳到 {near_n_eff}")
+    else:
+        near_n_eff = args.near_n
 
 
 def plan_step(k, cur, budget=None):
@@ -908,10 +1130,187 @@ job = _PredictJob(model, args.prompt)
 job.start(*fresh_obs())              # 轮 0 的 chunk
 
 t_loop0 = time.perf_counter()        # 任务秒表：轮头打印 t+s，对齐数据集 13s 看进度
+near_sticky = False                  # 近态驻留标志（滞回进/出双阈值，10-13 泵动修复）
 
-for r in range(args.rounds):
-    if aborted:
+def _run_post_gate_fold():
+    """门触发后同会话折叠 reset（+横移）。摆臂序列=g1_warm_core（与 warmup
+    同源）。顺序=【摆臂先行，导航栈仍吊起】：--nav-suspend 下机器最安静，
+    与 pick 推理期臂动平滑的条件完全一致——10-13 首跑先 resume 再摆臂，
+    7 个导航进程苏醒风暴（GR3D 50%）正压在运动段上，用户目击摆臂卡顿；
+    warmup 旧流程摆臂前有 ~10s 间隔故无此象。resume 挪到摆臂后、仍必在
+    nav_straight_move 的 nav.init 之前（约束不变；栈未醒透的 WAIT_INITIALIZED
+    由 nav_straight_move 限时重试兜住）。达标判定比 warmup 独立跑更严：
+    warmup 仅告警，折叠臂未达标=place 输入 OOD，直接响亮失败（rc=1 编排器
+    中止），不空臂进 place。"""
+    print("\n== 折叠 reset（同会话）：摆臂 place 起始位（导航栈吊起保安静）"
+          " → 恢复导航栈" + (" → 横移" if FOLD_MOVE else "") + " ==",
+          flush=True)
+    t_fold = time.perf_counter()
+    t_warm_s = 0.0
+    t_move_s = 0.0
+    try:
+        target, ns_w, _mode = g1_warm_core.load_target(
+            args.fold_ckpt, args.fold_pose_file)
+        mf_p = pathlib.Path(args.fold_ckpt) / "flashrt_deploy.json"
+        cal = (json.loads(mf_p.read_text()).get("gripper", {})
+               if mf_p.exists() else {})
+        wmin, wmax = cal.get("width_min"), cal.get("width_max")
+
+        def _die_fold(msg):
+            raise RuntimeError(msg)
+
+        st0 = g1_warm_core.read23(robot, g1_warm_core.STATE_NAMES,
+                                  wmin, wmax, _die_fold)
+        g1_warm_core.report(st0, target, g1_warm_core.STATE_NAMES)
+        print(f"[fold] 摆臂（臂/头 {args.fold_speed} rad/s，腿 0.2）...",
+              flush=True)
+        g1_warm_core.send_warm(robot, target, args.fold_speed)
+        cur = g1_warm_core.read23(robot, g1_warm_core.STATE_NAMES,
+                                  wmin, wmax, _die_fold)
+        g1_warm_core.report(cur, target, g1_warm_core.STATE_NAMES)
+        arms_out = g1_warm_core.judge(cur, target, ns_w)
+        t_warm_s = time.perf_counter() - t_fold   # 含首末两次读表+判定
+        if arms_out:
+            print(f"⛔ [fold] 臂维未达标: {arms_out}（warm 段 {t_warm_s:.1f}s）",
+                  flush=True)
+            return False
+        if NAV is not None:
+            NAV.resume()   # 摆臂后再醒导航栈；失败路径由外层尾部兜底 resume
+        if FOLD_MOVE:
+            t_m0 = time.perf_counter()
+            if args.then_goto is not None:
+                ok, detail = g1_warm_core.nav_goto_station(
+                    robot, args.then_goto, args.move_timeout)
+            else:
+                ok, detail = g1_warm_core.nav_straight_move(
+                    robot, args.then_move[0], args.then_move[1],
+                    args.then_move[2], args.move_timeout)
+            t_move_s = time.perf_counter() - t_m0
+            if not ok:
+                print(f"⛔ [fold] 横移失败: {detail}（warm {t_warm_s:.1f}s"
+                      f" + 横移 {t_move_s:.1f}s）", flush=True)
+                return False
+        print(f"✅ [fold] 折叠完成（warm {t_warm_s:.1f}s"
+              + (f" + 横移 {t_move_s:.1f}s" if FOLD_MOVE else "")
+              + f"，总 {time.perf_counter() - t_fold:.1f}s）", flush=True)
+        return True
+    except Exception as e:
+        print(f"⛔ [fold] 异常: {e!r}（warm {t_warm_s:.1f}s"
+              f" + 横移 {t_move_s:.1f}s）", flush=True)
+        return False
+
+
+# ── 二相切换（--phase2-ckpt，2026-10-14）：fold 检测即后台载 place 构造，
+# 折叠+横移窗口（~16.6s 实测）足够载入 6.9-10.6s + 首推建引擎 ~3s；折叠成功
+# 后 join 载入线程 → 换 model/ns/prompt/包络/HOME 重基准/计数清零 → place 轮。
+# 双构造共存前置实验 dual_model_swap_probe 全绿（统计判据：交替抖动落在单
+# 构造自抖带内，位等本就不是本管线性质——原子/split-k 非确定性）──
+def _load_env_arrays(ckpt_dir):
+    """place ckpt 的关节包络盒（同启动段解析；无文件则沿用 pick 盒并告警）。"""
+    _ef = pathlib.Path(ckpt_dir) / "joint_envelope.json"
+    if not _ef.exists():
+        print(f"[phase2] ⚠ {_ef} 不存在——place 轮沿用 pick 包络盒")
+        return ENV_LO, ENV_HI
+    _e = json.loads(_ef.read_text())
+    _inf = float("inf")
+    _lo = [(-_inf if v is None else float(v)) for v in _e["action_lo"]]
+    _hi = [(_inf if v is None else float(v)) for v in _e["action_hi"]]
+    print(f"[phase2] 包络盒换 {_ef.name}（来源 {_e.get('source', '?')}；"
+          f"余量 ±{args.envelope_margin} rad）")
+    lo = np.array(_lo, dtype=np.float32)
+    hi = np.array(_hi, dtype=np.float32)
+    _m = args.envelope_margin     # 余量同启动段：只放开臂维（夹爪维 ±inf 恒过）
+    lo[:7] -= _m
+    lo[8:15] -= _m
+    hi[:7] += _m
+    hi[8:15] += _m
+    return lo, hi
+
+
+def _switch_to_phase2():
+    """全局换相进 place 轮。双构造路径（--phase2-ckpt）：place 构造已在
+    启动段建好引擎，此处换 model/ns/包络；单模型路径（只给 --phase2-prompt）：
+    同权重同引擎，只换 prompt+相位状态。失败返 False（调用方 rc=1 退）。"""
+    global model, ns, HOME, ENV_LO, ENV_HI, job, t_loop0
+    global infer_ms, grab_ms, round_ms, step_ms, track_err, pace_hist
+    global cmd_hist, sustain_cmds, sust_last, hold_windows, hold_last
+    global ramp_left, env_hits, env_trunc, res_bad, res_warned, ramp_fired
+    global near_sticky
+    if PH2["error"] is not None or (PH2["ckpt"] is not None
+                                    and PH2["model"] is None):
+        print(f"⛔ [phase2] place 构造不可用: {PH2['error']!r}", flush=True)
+        return False
+    if PH2["ckpt"] is not None:
+        model = PH2["model"]
+        ns = model._pipe.norm_stats
+        ENV_LO, ENV_HI = _load_env_arrays(PH2["ckpt"])
+    # 单模型路径（ckpt=None）：同引擎/同 ns/同包络——只换相位状态与 prompt
+    # （job 在下方用 PH2["prompt"] 重建）
+    args.grip_state_cmd = False     # place 轮不喂指令值：持物签名 33.5% 会把
+    #                               释放序列锁死（10-12 判读；独立 place 段同款）
+    if args.phase2_pace is not None:
+        args.pace = args.phase2_pace        # place 相导航栈醒着（二相设计如
+    if args.phase2_pace_div is not None:    # 此），pace 显式传大窗盖住水位
+        args.pace_div = args.phase2_pace_div
+    if GRIP is not None:            # 爪下发保持开（place 模型要发开爪指令），
+        GRIP["sent"] = {}           # 只清指令历史/持物相位；标定 wmin/wmax 是
+        GRIP["sent_peak"] = {}      # 物理量与 ckpt 无关，沿用
+        GRIP["grasp_r"] = -10**9
+    HOME = read_joints(robot, ARM_NAMES)   # place 起始位重基准（漂移护栏基线）
+    # 计数器全清零（同 ③ 初始化清单）——place 轮统计独立于 pick
+    infer_ms = LatencyTracker()
+    grab_ms = LatencyTracker()
+    round_ms = LatencyTracker()
+    step_ms = LatencyTracker()
+    track_err = []
+    pace_hist = LatencyTracker()
+    cmd_hist = None
+    sustain_cmds = sust_last = hold_windows = hold_last = 0
+    ramp_left = env_hits = env_trunc = res_bad = ramp_fired = 0
+    res_warned = False
+    near_sticky = False
+    job = _PredictJob(model, PH2["prompt"])
+    job.start(*fresh_obs())         # place 轮 0 的 chunk（fresh_obs 用新 ns）
+    t_loop0 = time.perf_counter()
+    print(f"\n{'=' * 14} [phase2] place 相开始（轮数重计，prompt："
+          f"{PH2['prompt']}；pace {args.pace}s×1/{args.pace_div:g}）"
+          f"{'=' * 14}", flush=True)
+    return True
+
+
+fold_active = False
+phase2_active = False
+r = -1
+while True:
+    r += 1
+    if aborted or r >= args.rounds:
         break
+    if FOLD_EVENT.is_set() and not phase2_active:
+        if PH2 is None:
+            print(f"[fold] 门折叠请求——第 {r} 轮前止步（已完成 {r}/{args.rounds} 轮）")
+            break
+        print(f"[fold] 门折叠请求——第 {r} 轮前切相（pick 已完成 {r} 轮；"
+              + ("place 构造已在启动段建好，折叠后原地换相" if PH2["ckpt"]
+                 is not None else "单模型同权重，折叠后只换 prompt 原地换相")
+              + "）")
+        if not _run_post_gate_fold():
+            WATCH.restore()
+            if NAV is not None:
+                NAV.resume()
+            print("SDK 关闭中...")
+            robot.request_shutdown(); robot.wait_for_shutdown(); robot.destroy()
+            os._exit(1)
+        if not _switch_to_phase2():
+            WATCH.restore()
+            if NAV is not None:
+                NAV.resume()
+            print("SDK 关闭中...")
+            robot.request_shutdown(); robot.wait_for_shutdown(); robot.destroy()
+            os._exit(1)
+        phase2_active = True
+        FOLD_EVENT.clear()          # q 语义回 rc=2（place 相的 q=释放门/手动中止）
+        r = -1                      # place 轮数从 0 重计
+        continue
     t_r = time.perf_counter()
     chunk = job.result()             # 上轮执行期间启动的推理——此刻早已就绪
     BASE_ARM = job.state_arm         # 新块 delta 基准 = 该块预测时刻臂位
@@ -994,8 +1393,9 @@ for r in range(args.rounds):
     sust_before = sustain_cmds
     hold_before = hold_windows
     k = 0
+    n_steps_r, spc_r = n_steps, spc   # 本轮配额/步宽，每轮重置=退出近态自动回全宽
     while k < len(chunk):
-        k_end = min(k + spc, len(chunk))   # 本条指令消费 chunk 步 [k, k_end)
+        k_end = min(k + spc_r, len(chunk))   # 本条指令消费 chunk 步 [k, k_end)
         cur = read_joints(robot, ARM_NAMES)
         tgt = plan_step(k_end - 1, cur, BUDGET)
         drift = float(np.max(np.abs(tgt - HOME)))
@@ -1004,6 +1404,24 @@ for r in range(args.rounds):
                   f"{args.max_excursion * 1000:.0f}，停止循环（机械臂留在原地）")
             aborted = True
             break
+        # 近态判定用全宽导程（先宽后缩，触发语义与不开 --near-n 完全一致）；
+        # 滞回：进态用 near_gap、退态用 near_exit（默认 2×near_gap）——单阈值
+        # 时增量在阈值两侧的接近段逐轮窄↔宽翻转=1.59×↔1.0× 速度方波往复
+        # 摆动（10-13 loop_20261013_100407 轮 9-21 实录），滞回后整段稳定驻留；
+        # 命中且开近窄轮时仅本轮首条指令降档，轮首已重置=退出自动回全宽
+        gap0 = float(np.max(np.abs(tgt - cur)))
+        near_gate = args.near_exit if args.near_exit else args.near_gap * 2.0
+        near_thr = near_gate if near_sticky else args.near_gap
+        near_cmd = (args.near_div >= 1.0 and gap0 < near_thr
+                    and r - GRIP["grasp_r"] >= args.near_bypass)
+        near_sticky = near_cmd
+        if near_cmd and near_n_eff and k == 0:
+            n_steps_r = max(1, min(near_n_eff, len(chunk)))
+            spc_r = min(spc, n_steps_r)
+            if spc_r < k_end - k:
+                k_end = min(k + spc_r, len(chunk))
+                tgt = plan_step(k_end - 1, cur, BUDGET)
+                gap0 = float(np.max(np.abs(tgt - cur)))
         ramp_f = 1.0                       # 本窗坡升系数（1.0=不限速）
         cmd_delta = (tgt - cmd_hist) if cmd_hist is not None else np.zeros_like(tgt)
         cmd_hist = tgt.copy()
@@ -1023,10 +1441,9 @@ for r in range(args.rounds):
             # 闭环每轮从真实状态重规划，滞后自校正。窗口自发令前起算（推理
             # 重叠在内）。0.6 提速实测更抖（每点全停，冲击∝速度），平滑靠
             # 永不到点而非提速
-            gap0 = float(np.max(np.abs(tgt - cur)))
             div_eff = args.pace_div
-            if args.near_div >= 1.0 and gap0 < args.near_gap:
-                div_eff = args.near_div   # 近距阻尼：单调收敛+滤计划摆幅
+            if near_cmd:
+                div_eff = args.near_div   # 近距阻尼（抓取后旁路窗内跳过=后撤全速）
             pace_v = max(V_MIN, min(gap0 / (div_eff * args.pace), args.speed))
             if ramp_left > 0:
                 # 坡升：多窗 hold（臂真减速过）后的再起步柔化，0.5→1.0 线性恢复
@@ -1051,10 +1468,11 @@ for r in range(args.rounds):
             res_warned = True
             print("⚠ 导程残差 ≥100 mrad 持续 3 段——疑似爪尖受阻（顶桌/卡物），"
                   "注意观察，必要时按 q 停")
-        tag = f"指令[步{k}-{k_end - 1}]" + ("·续航" if k >= n_steps else "") \
+        tag = f"指令[步{k}-{k_end - 1}]" + ("·续航" if k >= n_steps_r else "") \
             + ("·近阻尼" if div_eff != args.pace_div else "") \
+            + ("·窄轮" if n_steps_r != n_steps else "") \
             + (f"·坡升{ramp_f:.2f}" if ramp_f < 1.0 else "")
-        if k >= n_steps:
+        if k >= n_steps_r:
             sustain_cmds += 1
         print(f"  {tag}: |Δcmd| "
               f"{float(np.max(np.abs(cmd_delta))) * 1000:5.1f} mrad | "
@@ -1065,9 +1483,9 @@ for r in range(args.rounds):
             break
         k = k_end
         # 配额消费完：新块就绪（或已是最后一轮）→ 立即换块零等待
-        if k >= n_steps and (r == args.rounds - 1 or job.done()):
+        if k >= n_steps_r and (r == args.rounds - 1 or job.done()):
             break
-        if k >= n_steps:
+        if k >= n_steps_r:
             if args.late_action == "stale":
                 continue               # stale：旧 chunk 深尾续航（原 A 行为）
             # ── hold：等推理，单调收敛到本块已消费段终点（chunk[n_steps-1]）──
@@ -1075,7 +1493,7 @@ for r in range(args.rounds):
             # 不变（chg 阈值抑制重发→无翻摆）、逐 10ms 轮询（推理落地立即换块，
             # 不烧满剩余窗）。护栏/限幅/配速律照旧，hold 窗是纯墙钟成本
             hold_n = 0
-            while not job.done() and not aborted:
+            while not job.done() and not aborted and not FOLD_EVENT.is_set():
                 hold_n += 1
                 hold_windows += 1
                 if hold_n > args.hold_max:
@@ -1094,14 +1512,15 @@ for r in range(args.rounds):
                 cmd_delta = ((tgt_h - cmd_hist) if cmd_hist is not None
                              else np.zeros_like(tgt_h))
                 cmd_hist = tgt_h.copy()
-                gp = send_grip(robot, chunk[min(n_steps, len(chunk)) - 1])
+                gp = send_grip(robot, chunk[min(n_steps_r, len(chunk)) - 1])
                 if gp:
                     print(f"  夹爪: {gp}")
                 t_s = time.perf_counter()
                 gap0 = float(np.max(np.abs(tgt_h - cur)))
                 div_eff = args.pace_div
-                if args.near_div >= 1.0 and gap0 < args.near_gap:
-                    div_eff = args.near_div   # 近距阻尼同主路径
+                if (args.near_div >= 1.0 and gap0 < near_thr
+                        and r - GRIP["grasp_r"] >= args.near_bypass):
+                    div_eff = args.near_div   # 近距阻尼同主路径（同轮同滞回口径）
                 pace_v = max(V_MIN, min(gap0 / (div_eff * args.pace), args.speed))
                 robot.set_joint_positions(tgt_h.tolist(), joint_names=ARM_NAMES,
                                           is_blocking=False, speed_rad_s=pace_v)
@@ -1136,7 +1555,8 @@ for r in range(args.rounds):
     hold_last = hold_windows - hold_before
 
 # ── ④ 汇总 ──
-if GRIP:
+fold_active = FOLD_EVENT.is_set()   # 门触发折叠：汇总后同会话复位（+横移）
+if GRIP and not fold_active:
     time.sleep(8.0)   # 夹爪反馈滞后 ~6.3s（2026-09-23 实测），留足再读终态
     for name, _ in GRIP["names"]:
         gs = robot.get_gripper_state(getattr(G1JointGroup, name))
@@ -1152,13 +1572,18 @@ if len(infer_ms):
 if len(grab_ms):
     print(f"取图+读关节: {pstats(grab_ms)}")
 if len(step_ms):
-    print(f"单指令执行({spc} 步合步): {pstats(step_ms)}")
+    print(f"单指令执行({spc} 步合步"
+          + (f"，近窄 {near_n_eff} 步" if near_n_eff else "") + f"): {pstats(step_ms)}")
 if len(round_ms):
     print(f"整轮(重规划周期): {pstats(round_ms)}")
 if track_err:
     print(f"导程残差: mean {np.mean(track_err):.1f} | max {max(track_err):.1f} mrad"
           f"（配速系数 {args.pace_div:g}"
           + (f"，近距 {args.near_gap*1000:.0f} mrad 内阻尼 {args.near_div:g}"
+             f"（退出门限 {(args.near_exit or args.near_gap * 2.0) * 1000:.0f} mrad，"
+             "抓取后旁路 "
+             f"{args.near_bypass} 轮）"
+             + (f"，近窄轮 {near_n_eff} 步" if near_n_eff else "")
              if args.near_div >= 1.0 else "")
           + (f"；包络护栏截断 {env_trunc} 轮" if ENV_LO is not None else "")
           + "：残差≈导程×(1-1/div) 属预期；"
@@ -1178,6 +1603,15 @@ if args.hold_ramp > 0:
           f"1 窗早退的 hold 不触发，臂未减速无需柔化）")
 print(f"最终偏离起始位: {exc:.0f} mrad（护栏 {args.max_excursion * 1000:.0f} mrad）"
       + (" ⛔ 护栏触发过" if aborted else ""))
+
+# ── ③b 门触发折叠：同会话复位+横移，失败 rc=1（编排器拦下不进 place）──
+if fold_active and not _run_post_gate_fold():
+    WATCH.restore()
+    if NAV is not None:
+        NAV.resume()
+    print("SDK 关闭中...")
+    robot.request_shutdown(); robot.wait_for_shutdown(); robot.destroy()
+    os._exit(1)
 
 WATCH.restore()
 if NAV is not None:
