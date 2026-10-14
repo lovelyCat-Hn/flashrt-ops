@@ -43,13 +43,26 @@ VIEWS = {
 }
 
 
+def letterbox224(img):
+    """等比缩放长边到 224 + 上下黑条——对齐训练数据集变换（2026-10-12 实锤：
+    pick_place_balence 三视角训练帧全部 letterbox 224，上下 28px 纯黑条、
+    内容带 168px；--frames 喂原生帧时必须走此变换，喂 224² 数据集帧时恒等。"""
+    h, w = img.shape[:2]
+    _s = 224.0 / max(h, w)
+    _nh, _nw = round(h * _s), round(w * _s)
+    _cv = np.zeros((224, 224, 3), dtype=np.uint8)
+    _y, _x = (224 - _nh) // 2, (224 - _nw) // 2
+    _cv[_y:_y + _nh, _x:_x + _nw] = cv2.resize(img, (_nw, _nh))
+    return _cv
+
+
 def load_obs():
     out = {}
     for key, fn in VIEWS.items():
         img = cv2.imread(os.path.join(args.frames, fn))
         assert img is not None, fn
         out[key] = np.ascontiguousarray(
-            cv2.cvtColor(cv2.resize(img, (224, 224)), cv2.COLOR_BGR2RGB))
+            cv2.cvtColor(letterbox224(img), cv2.COLOR_BGR2RGB))
     return out
 
 

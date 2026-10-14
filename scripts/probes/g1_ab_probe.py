@@ -36,6 +36,19 @@ import flash_rt  # noqa: E402
 from flash_rt.core.utils.actions import normalize_state  # noqa: E402
 
 
+def letterbox224(img):
+    """等比缩放长边到 224 + 上下黑条——对齐训练数据集变换（2026-10-12 实锤：
+    pick_place_balence 三视角训练帧全部 letterbox 224，上下 28px 纯黑条、
+    内容带 168px；原直拉 resize=train/serve 图像失配。真机取图路径统一。"""
+    h, w = img.shape[:2]
+    _s = 224.0 / max(h, w)
+    _nh, _nw = round(h * _s), round(w * _s)
+    _cv = np.zeros((224, 224, 3), dtype=np.uint8)
+    _y, _x = (224 - _nh) // 2, (224 - _nw) // 2
+    _cv[_y:_y + _nh, _x:_x + _nw] = cv2.resize(img, (_nw, _nh))
+    return _cv
+
+
 def grab(robot, cam, tries=6):
     for k in range(tries):
         d = robot.get_rgb_data(getattr(SensorType, cam))
@@ -93,7 +106,7 @@ print(f"模型加载 {time.time()-t0:.1f}s", flush=True)
 obs = {}
 for key, img in live_raw.items():
     obs[key] = np.ascontiguousarray(
-        cv2.cvtColor(cv2.resize(img, (224, 224)), cv2.COLOR_BGR2RGB))
+        cv2.cvtColor(letterbox224(img), cv2.COLOR_BGR2RGB))
 state_n = normalize_state(st, ns)
 
 chunks = []

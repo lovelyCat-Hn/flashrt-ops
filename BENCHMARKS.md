@@ -378,3 +378,36 @@ cache_frames=1、合成观测（随机图×3+1px 平移扰动）、种子 202610
 | 表 7-x 闭环 | `~/holy/scripts/inference/run_g1_loop.py --nav-suspend [--exec] --n-action-steps 25 --steps-per-command 25 --pace 0.35 --pace-div 1.5`（⚠ `--exec` 驱臂） |
 | 表 8-x RTC 引导消融 | `~/miniforge3/envs/flash_pyrt311/bin/python ~/holy/scripts/eval/rtc_ablation.py 12 --out ~/holy/evidence/20261009_rtc_guided_ablation` |
 | 原始输出 | `evidence/20261006-07_quant_kv_ablation/`（quant）；`evidence/20261009_rtc_guided_ablation/`（RTC）；闭环日志 `logs/loop_*.log` |
+
+## 十、夹爪物理速度标定（2026-10-13，grip_speed_bench.py）
+
+零臂运动单爪台架：单条绝对指令（is_blocking=False，speed 0.15 m/s，effort 30 N）
+0.5↔120 mm 全程，20 Hz 轮询 get_gripper_state（含 GripperState.timestamp_ns 直测
+回读新鲜度）。左爪、4 程（开/合 ×2）、status 全 SUCCESS。
+
+**表 10-1 单指令全旧行为（n=4 程）**　条件：only_pick manifest 标定
+wmin/wmax=0.0005/0.1200 m，行程 119.5 mm，理论行程时长=0.80 s
+
+| 量 | 值（4 程一致） | 备注 |
+|---|---|---|
+| T90 达程 | 1.67 / 1.72 / 1.71 / 1.72 s | = 起步死区 ~0.9 s + 运动段 ~0.8 s |
+| 运动段时长 | ≈0.8 s | 与 width_span/speed 理论值吻合 |
+| 回读峰值速度 | 0.150 m/s（4/4） | **伺服精确遵守速度帽** |
+| 起步死区（指令→首动） | ~0.9 s（4/4，曲线 0.8 s 时仍静止） | 恒定，机制黑盒 |
+| 回读时戳滞后 | p50 0.01 / max 0.03 s | **状态通道新鲜** |
+| is_moving=True | 25-26/120 拍 | 仅运动段为 True，窗口语义正常 |
+
+⚠ 注脚：① 起步死区 ~0.9 s 为指令到底层生效的恒定延迟（来源未查，黑盒）；
+运动中重发/换向行为未测。② **10-05「SDK 爪回读滞后 6.3-8s」翻案**：本次时戳
+直测 p50 10 ms——当时测得的"滞后"应为爪物理未动/蠕动期的真实读数被误读为通
+道滞后；生产规则 `--grip-state-cmd` 不变（闭环经验有效）。③ 闭环「爪开得慢」
+定案=命令侧：模型 0.35 s/轮重发 + 斜坡/折返（182005 跑 103→3→80→27 mm）vs
+物理 1.7 s/程 → 爪追低通包络；SDK/伺服执行链无罪。
+
+复现：
+```
+LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
+~/miniforge3/envs/flash_pyrt311/bin/python \
+    ~/holy/scripts/test/grip_speed_bench.py --side left --speed 0.15
+```
+原始件：`evidence/grip_speed_bench/20261013-092817_left_spd0.15.csv`

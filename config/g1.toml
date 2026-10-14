@@ -14,12 +14,14 @@
 # echo 机 = pi05_g1_ft（2026-09-23/24 全部真机验证用它）；
 # 另一设备 = pi05_g1_deploy——各机以本文件为准。
 ckpt = "/home/galbot/holy/models/pi05_g1_onlypick_deploy"
-# 当前=pick 任务（2026-10-10 切回：在役权重 only_pick；闭环必带 --grip-state-cmd，
+# 当前=pick 任务（2026-10-12 切回：在役权重 only_pick；闭环必带 --grip-state-cmd，
 # place 线不需要——10-08 判读记忆有案；包络随 <ckpt>/joint_envelope.json 自动切换）。
 # 可切回三键存档：
-#   place 任务（10-09 复测线，native/RTC 冒烟与三态 A/B 用）：ckpt=pi05_g1_place_deploy
+#   place 任务（10-12 复验线）：ckpt=pi05_g1_place_deploy
 #     + place 句 + pi05_g1_place_deploy/episode_start_task0.json（33% 持物起始语义）。
 #     ⚠ 持物物理 place 复验挂着（全天空爪排练的空爪疑云未销案）。
+#     ⚠ place 闭环不带 --grip-state-cmd（33% 持物起步，滞后窗内回读恰好是对的，
+#       喂指令值反而与训练分布相反——10-12 判读）。
 #   pick 注：该 ckpt action stats 为绝对角量级（前两代=delta 量级）——已判明系训练
 #     框架把 stats 取样挪到 relative 转换之前，targets 仍 delta（10-08 只读探针：
 #     首步臂维全部毫弧度级增量），部署链路 BASE_ARM+delta 语义不变。
@@ -33,12 +35,16 @@ prompt = "Left arm pick up A. Right arm pick up A."
 
 [warmup]
 speed = 0.15        # 臂/头关节速度，rad/s（腿固定 0.2 rad/s 不在此调）
-skip_zero = false   # true=跳过段①零位（已在工作位附近时）
+skip_zero = true    # 2026-10-12 起默认跳过段①零位（move_whole_body_joint_zero 走
+                    # 规划器+碰撞检查，大偏移姿态常内部 TIMEOUT 臂停中途，9-23 实录；
+                    # 段② 关节直控不经规划器）。折叠/收拢等大偏移姿态需零位时
+                    # 命令行 --no-skip-zero 显式开回
 skip_leg  = false   # true=跳过段②b 躯干/腿对齐
 # 目标位姿文件（g1_pose_extract.py 从数据集起始帧生成的 23 维中位；
 # 优先级 --pose-file > 这里 > 部署目录 episode_start_task0.json 零配置发现）。
 # 手调初始位姿：直接改 json 的 start_pose，或生成变体文件换这一行指向。
 pose_file = "/home/galbot/holy/models/pi05_g1_onlypick_deploy/episode_start_task0.json"
+# pick 任务起始（0% 闭爪，2026-10-12 切回）。
 # place 任务存档（33% 持物起始）：
 #   "/home/galbot/holy/models/pi05_g1_place_deploy/episode_start_task0.json"
 
@@ -76,10 +82,26 @@ pace_div = 1.5      # 配速系数。v2 时代 div 饱和三档零差是"轮时�
                     # 纪录，代价=导程残差 p50 79/max 283 mrad、8/37 段≥100
                     # （v2 1.33× 时 p50 30-40）——臂持续吃滞后，持物复验前保留观察。
                     # div 兼覆盖率 1/div 与滞后滤波
-near_div = 2        # 近距阻尼：导程<near_gap 时配速系数改用此值——单调几何收敛
-                    # （永不过冲）+滤模型放置位犹豫摆幅；9/30 L 释放段真机验证：
-                    # 干净衰减进释放、无振荡。0=关闭
+near_div = 1.85     # 近距阻尼：导程<near_gap 时配速系数改用此值——单调几何收敛
+                    # （永不过冲）+滤模型放置位犹豫摆幅。2026-10-12 用户真机定案
+                    # 1.85：0=关闭实测抓取飘逸（阻尼的过冲防护是真需求）；旧 2
+                    # 有效但偏滞。1.85 每窗走导程 54%（2=50%），近区臂速 +8%。
+                    # 9/30 L 释放段真机验证：干净衰减进释放、无振荡
 near_gap = 0.06     # 近距阻尼触发导程，rad（60 mrad）
+near_bypass = 15    # 抓取事件（任一爪开→合穿越）后近阻尼旁路轮数：L 抓住后的
+                    # 返回/后撤段强制全速（ep0 后撤窗 ~4s≈11 轮@v3，15 留余量），
+                    # 到期自动交还常规判定；place 持物接近放置段的阻尼不受影响
+                    # （2026-10-12，用户需求"抓住后快点推出阻尼"；0=关闭）
+near_n = 0          # 近窄轮（0=只动配速不动步宽）：近阻尼触发时本轮配额/指令
+                    # 宽度收缩为 N 步（spc 联动=min(spc,N)，与 near_div 同窗生效，
+                    # 每轮轮首重置、退出近态自动回全宽）——每轮吃最新观测重规划的
+                    # 短导程，目标链贴臂无滞后税，代价=时间线变慢 ~n/N。
+                    # ⚠ spc15 工作点近态占大头（10-10 实测 118/131 轮），开它
+                    # ≈全程慢放；更适合 v3 型快巡航做末段精刹（10-13 新增）
+near_exit = 0       # 近态滞回退出阈值 rad（0=2×near_gap=0.12）：进态用 near_gap、
+                    # 退态用本值。10-13 首跑实录：单阈值时接近段 25 步增量在
+                    # 60 mrad 两侧逐轮翻转=窄↔宽速度方波往复摆动（轮 9-21 完美
+                    # 交替 13 轮，loop_20261013_100407），滞回后整段稳定驻留近态
 cache_frames = 1    # K/V 时序复用周期：1=每帧全量（默认，恒定）。2 已判死（9/30
                     # 闭环 A/B+结构判读）：state 进 prompt → 每轮 set_prompt 重置
                     # 前缀计数，永远全量跑=纯空转；且绕过重置=模型拿陈旧本体状态

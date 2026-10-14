@@ -25,7 +25,8 @@ BUILTIN = {
     },
     "warmup": {
         "speed": 0.15,        # 臂/头关节速度 rad/s（腿固定 0.2 rad/s）
-        "skip_zero": False,
+        "skip_zero": True,    # 2026-10-12 默认跳过零位段（规划器 TIMEOUT 坑，9-23 实录；
+                              # 折叠/收拢姿态需零位时 --no-skip-zero 显式开）
         "skip_leg": False,
     },
     "execute": {
@@ -50,9 +51,16 @@ BUILTIN = {
         "pace_div": 1.5,          # v2 时代 div 饱和三档零差是"轮时间钉在水位"下的
                                   # 结论；v3 pace 活了 div 才开始有意义。1.5=落盒
                                   # t+10.0s 纪录，代价=导程残差 p50 79/max 283 mrad
-        "near_div": 2,            # 近距阻尼：导程<near_gap 时改用此系数（单调收敛+
-                                  # 滤放置犹豫摆幅；9/30 L 释放段真机验证）
+        "near_div": 1.85,         # 近距阻尼：导程<near_gap 时改用此系数（单调收敛+
+                                  # 滤放置犹豫摆幅）。10-12 用户定案 1.85：旧 2 偏滞，
+                                  # 0=关闭抓取飘逸（与 g1.toml 同源同步改）
         "near_gap": 0.06,         # 近距阻尼触发导程，rad（60 mrad）
+        "near_bypass": 15,        # 抓取事件（开→合穿越）后近阻尼旁路轮数（10-12
+                                  # 新增：L 抓住后返回段全速，见 config [loop] 注）
+        "near_n": 0,              # 近窄轮：近态配额/步宽缩到 N 步（0=只动配速，
+                                  # 10-13 新增，轮首重置退出即回全宽）
+        "near_exit": 0,           # 近态滞回退出阈值 rad（0=2×near_gap；10-13
+                                  # 单阈值泵动往复摆动实录后的修复）
         "cache_frames": 1,        # 1=每帧全量（恒定）。2 已判死（9/30）：state 进
                                   # prompt 每轮重置前缀计数=纯空转，勿再试
         "max_excursion": 3.0,     # rad；按数据集包络重标（合法抓取 max 2.785，
@@ -100,9 +108,9 @@ _RENAMED_LOOP_KEYS = {
 }
 _KNOWN_LOOP_KEYS = {
     "rounds", "n_action_steps", "steps_per_command", "delta_max", "speed",
-    "pace", "pace_div", "near_div", "near_gap", "cache_frames",
-    "max_excursion", "settle", "settle_frac", "switch_dist", "chunk_mode",
-    "traj_dt", "catch_timeout",
+    "pace", "pace_div", "near_div", "near_gap", "near_bypass", "near_n",
+    "near_exit", "cache_frames", "max_excursion", "settle", "settle_frac",
+    "switch_dist", "chunk_mode", "traj_dt", "catch_timeout",
 }
 
 

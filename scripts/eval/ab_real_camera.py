@@ -49,6 +49,19 @@ VIEWS = [
 CKPT = "/home/galbot/holy/models/pi05_lerobot_base"
 
 
+def letterbox224(img):
+    """等比缩放长边到 224 + 上下黑条——对齐训练数据集变换（2026-10-12 实锤：
+    pick_place_balence 三视角训练帧全部 letterbox 224，上下 28px 纯黑条、
+    内容带 168px；原直拉 resize=train/serve 图像失配。真机取图路径统一。"""
+    h, w = img.shape[:2]
+    _s = 224.0 / max(h, w)
+    _nh, _nw = round(h * _s), round(w * _s)
+    _cv = np.zeros((224, 224, 3), dtype=np.uint8)
+    _y, _x = (224 - _nh) // 2, (224 - _nw) // 2
+    _cv[_y:_y + _nh, _x:_x + _nw] = cv2.resize(img, (_nw, _nh))
+    return _cv
+
+
 def grab_one(robot) -> dict | None:
     out = {}
     for st, key in VIEWS:
@@ -63,7 +76,7 @@ def grab_one(robot) -> dict | None:
         img = cv2.imdecode(np.frombuffer(d["data"], np.uint8), cv2.IMREAD_COLOR)
         if img is None:
             return None
-        img = cv2.resize(img, (224, 224))
+        img = letterbox224(img)
         out[key] = np.ascontiguousarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
     return out
 
