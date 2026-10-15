@@ -211,7 +211,11 @@ class PhaseGate:
                 # 判据带窗假性连续）；窗随即清零=安全向
                 self.last_mm[s] = None if m.group(1) == "?" else float(m.group(1))
             mc = CMD_VAL[s].search(line)
-            self.last_cmd[s] = float(mc.group(1)) if mc else None
+            if mc:                      # 与实宽同纪律：非爪行（轮头/指令/
+                self.last_cmd[s] = float(mc.group(1))   # 耗时行）不得冲掉
+                #       上次指令——v4.1 首版此处无条件重写，每轮 4/5 非爪行
+                #       把 last_cmd 冲成 None→判据恒 False→143851 真机不触发
+                #       （全行流重演破案：last_mm 对、last_cmd 全 None）
         if self.fired:
             return True
         if all(self._in_band(self.last_mm.get(s), self.last_cmd.get(s))
