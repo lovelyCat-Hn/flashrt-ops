@@ -13,9 +13,16 @@
 # 2026-09-29 norm_align_check 全绿）；
 # echo 机 = pi05_g1_ft（2026-09-23/24 全部真机验证用它）；
 # 另一设备 = pi05_g1_deploy——各机以本文件为准。
-ckpt = "/home/galbot/holy/models/pi05_g1_onlypick_deploy"
-# 当前=pick 任务（2026-10-12 切回：在役权重 only_pick；闭环必带 --grip-state-cmd，
-# place 线不需要——10-08 判读记忆有案；包络随 <ckpt>/joint_envelope.json 自动切换）。
+ckpt = "/home/galbot/holy/models/pi05_g1_sft1012_dropout20_deploy"
+# 当前=place 任务·B 侧（2026-10-15 切：sft_1012 头裁剪版权重独立 place 测试；
+# A/B 专用配置走 scripts/ab_test/1015_headzoom_dropout20/，本键只作默认）。
+# place 闭环不带 --grip-state-cmd（33% 持物起步，滞后窗内回读恰好是对的，
+# 喂指令值反而与训练分布相反——10-12 判读）。
+# ⚠ B 权重 only_place 训练任务串未与同事核对（挂账），下句暂用老 only_place
+#   原句；串不同时行为会 OOD（13:18 全流程跑 R 爪 place 相 25 轮不放=疑似应验）。
+# ── pick 三键存档（2026-10-12 切回过：在役 only_pick）──
+#   ckpt=pi05_g1_onlypick_deploy + pick 句 + onlypick/episode_start_task0.json
+#   （0% 闭爪起始）；闭环必带 --grip-state-cmd（10-05/10-08 两次应验）。
 # 可切回三键存档：
 #   place 任务（10-12 复验线）：ckpt=pi05_g1_place_deploy
 #     + place 句 + pi05_g1_place_deploy/episode_start_task0.json（33% 持物起始语义）。
@@ -29,9 +36,10 @@ ckpt = "/home/galbot/holy/models/pi05_g1_onlypick_deploy"
 #     norm_align_check 全绿 往返 6.2e-06；起始位姿/包络沿用 pick 工位件。）
 #   旧 pick 权重（pi05_g1_040000）：ckpt=pi05_g1_pick_deploy，句/位姿同 pick 存档。
 # prompt 必须是训练 tasks.parquet 里的原句：
-prompt = "Left arm pick up A. Right arm pick up A."
-# place 任务句（only_place）：
-#   "Left arm places A in the top-left corner. Right arm places A in the top-left corner."
+prompt = "Left arm places A in the top-left corner. Right arm places A in the top-left corner."
+# pick 任务句（only_pick 在役存档）：
+#   "Left arm pick up A. Right arm pick up A."
+# ⚠ B（sft_1012）两串均待与同事核对（pick 串当前一致系巧合还是同源未验）。
 
 [warmup]
 speed = 0.15        # 臂/头关节速度，rad/s（腿固定 0.2 rad/s 不在此调）
@@ -43,10 +51,10 @@ skip_leg  = false   # true=跳过段②b 躯干/腿对齐
 # 目标位姿文件（g1_pose_extract.py 从数据集起始帧生成的 23 维中位；
 # 优先级 --pose-file > 这里 > 部署目录 episode_start_task0.json 零配置发现）。
 # 手调初始位姿：直接改 json 的 start_pose，或生成变体文件换这一行指向。
-pose_file = "/home/galbot/holy/models/pi05_g1_onlypick_deploy/episode_start_task0.json"
-# pick 任务起始（0% 闭爪，2026-10-12 切回）。
-# place 任务存档（33% 持物起始）：
-#   "/home/galbot/holy/models/pi05_g1_place_deploy/episode_start_task0.json"
+pose_file = "/home/galbot/holy/models/pi05_g1_place_deploy/episode_start_task0.json"
+# place 任务起始（33% 持物语义，2026-10-15 切；物理位姿，各权重通用）。
+# pick 任务存档（0% 闭爪起始）：
+#   "/home/galbot/holy/models/pi05_g1_onlypick_deploy/episode_start_task0.json"
 
 [execute]           # run_g1_execute（3 步 smoke）
 steps = 3           # 执行 chunk 前 K 步，步（≤10）
