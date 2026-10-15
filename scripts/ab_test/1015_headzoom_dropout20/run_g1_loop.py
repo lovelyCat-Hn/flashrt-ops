@@ -73,7 +73,6 @@ import argparse
 import atexit
 from collections import deque
 import functools
-import g1_config  # noqa: E402  同目录共享配置（CLI > config/g1.toml > 内置默认）
 import json
 import os
 import pathlib
@@ -86,6 +85,10 @@ import threading
 import time
 import tty
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "inference"))
+import g1_config  # noqa: E402  共享配置（CLI > config/g1.toml > 内置默认）。
+# A 侧靠「脚本同目录自动入径」找到 inference/g1_config.py，B 侧深两层须显式插；
+# g1_config 自身按 __file__ 定位 config/g1.toml，不随调用方目录变。
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "g1"))
 import g1_warm_core  # noqa: E402  warm 复位共享核心（--post-gate 折叠段与 warmup 共用）
 
