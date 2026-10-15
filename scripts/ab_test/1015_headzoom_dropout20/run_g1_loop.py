@@ -3,13 +3,15 @@
 
 【B 侧脚本，2026-10-15】A/B 对比：A=scripts/inference/run_g1_loop.py（原样），
 本脚本唯一差异=头相机观测追加「训练同款裁剪放大」（head_training_crop，
-见 letterbox224 下方块）——sft_1012 数据（colleague clean_ready_224）训练
-视频头图经 image_preprocessor.py 的 head_training_crop 处理（letterbox224
-后裁 [126:214, 52:172] → Lanczos4 拉回 164×224 ≈1.87× 放大 → 上下补 30px
-黑条），推理须复现同变换否则 train/serve 图像分布失配。配对权重
-models/pi05_g1_sft1012_dropout20_deploy（stats 与 onlypick 逐维逐位一致，
-10-15 核对）。--no-head-crop 可关（同权重自检 crop 差异）。其余逐行同 A。
-实验记录见本目录 README.md。
+见 letterbox224 下方块）——sft_1012 数据（colleague clean_ready_224）的
+pick 任务训练视频头图经 image_preprocessor.py 的 head_training_crop 处理
+（letterbox224 后裁 [126:214, 52:172] → Lanczos4 拉回 164×224 ≈1.87× 放大
+→ 上下补 30px 黑条），推理须复现同变换否则 train/serve 图像分布失配。
+⚠ 分任务处理（2026-10-15 同事确认）：place 任务训练图像【无】裁剪（原样
+letterbox）——故二相切相处按 --phase2-no-head-crop 关裁剪；单独跑 place
+任务用 --no-head-crop。配对权重 models/pi05_g1_sft1012_dropout20_deploy
+（stats 与 onlypick 逐维逐位一致，10-15 核对）。--no-head-crop 可关
+（同权重自检 crop 差异）。其余逐行同 A。实验记录见本目录 README.md。
 
 推理迟到（本轮配额步消费完而下块未就绪）时的动作策略 --late-action 二态：
   hold（默认）：hold 最后目标单调收敛（几何逼近永不过冲），轮询早退（推理
@@ -252,6 +254,11 @@ ap.add_argument("--phase2-pace", type=float, default=None,
 ap.add_argument("--phase2-pace-div", type=float, default=None,
                 help="切相后 place 轮配速系数（默认沿用；0.43 那套配 1.65，"
                      "9-30 a25a59c 定案）")
+ap.add_argument("--phase2-no-head-crop", action="store_true",
+                help="切相进 place 轮时关头图裁剪——sft_1012 分任务图像处理"
+                     "（2026-10-15 同事确认：pick 训练=头裁剪、place 训练="
+                     "原样 letterbox），place 轮观测须回原样。单独跑 place "
+                     "任务（无二相）直接用 --no-head-crop")
 args = ap.parse_args()
 
 # ── 全文日志落盘：q 退出走 os._exit 不刷缓冲（09-23 坑），故逐行强制 flush ──
@@ -260,7 +267,7 @@ _log_path = args.log_file or str(
     time.strftime("loop_%Y%m%d_%H%M%S.log"))
 pathlib.Path(_log_path).parent.mkdir(parents=True, exist_ok=True)
 print(f"[B] sft1012 头图裁剪放大: {'开' if args.head_crop else '关'}"
-      f"（--no-head-crop 可关）")
+      f"（--no-head-crop 可关；分任务处理——place 相经 --phase2-no-head-crop 关）")
 
 
 class _Tee:
@@ -1301,6 +1308,9 @@ def _switch_to_phase2():
     # （job 在下方用 PH2["prompt"] 重建）
     args.grip_state_cmd = False     # place 轮不喂指令值：持物签名 33.5% 会把
     #                               释放序列锁死（10-12 判读；独立 place 段同款）
+    if args.phase2_no_head_crop:    # sft_1012 place 训练图像无裁剪（10-15 同事
+        args.head_crop = False      # 确认）——place 轮观测回原样 letterbox
+        print("[phase2] 头图裁剪已关（place 训练=原样 letterbox）", flush=True)
     if args.phase2_pace is not None:
         args.pace = args.phase2_pace        # place 相导航栈醒着（二相设计如
     if args.phase2_pace_div is not None:    # 此），pace 显式传大窗盖住水位

@@ -2,11 +2,13 @@
 """pick→复位→横移→place 主编排器。
 
 【B 侧脚本，2026-10-15】A/B 对比（同目录 README.md）：本编排器与 A 侧
-scripts/inference/run_g1_task_pickplace.py 的差异只有三处——①LOOP_PY 解析到
+scripts/inference/run_g1_task_pickplace.py 的差异只有四处——①LOOP_PY 解析到
 同目录的 B 版 run_g1_loop.py（头图训练裁剪放大，见其文件头）；②PICK_CKPT=
-pi05_g1_sft1012_dropout20_deploy（sft_1012 头裁剪版权重）；③HOLY 深一层。
-⚠ --dual-load 逃生门对本对比无意义（旧 place 权重无头裁剪谱系），勿用；
-place 相=单模型切 prompt 档（默认），B 侧 place 轮同样吃头裁剪观测。
+pi05_g1_sft1012_dropout20_deploy（sft_1012 头裁剪版权重）；③HOLY 深一层；
+④分任务图像处理（2026-10-15 同事确认：pick 训练=头裁剪、place 训练=原样
+letterbox）——默认给 loop 注入 --phase2-no-head-crop（二相切相时关裁剪）/
+--no-head-crop（place-only 会话），--place-head-crop 逃生门保留裁剪。
+⚠ --dual-load 逃生门对本对比无意义（旧 place 权重无头裁剪谱系），勿用。
 挂账：B 训练 task 原句待同事确认，确认不同则 --pick-args 需带 --prompt。
 
 【默认二相档（2026-10-14，--until full）】全流程单 loop 子进程：pick 门触发
@@ -361,12 +363,20 @@ def stage_loop_cmd(args, which):
                 if args.dual_load:
                     base += ["--phase2-ckpt", str(args.place_ckpt)]
                 base += ["--phase2-prompt", args.place_prompt]
+                if not args.place_head_crop:
+                    # sft_1012 place 训练图像无裁剪（10-15 同事确认）——切相
+                    # 时 loop 侧关 crop（--place-head-crop 逃生门保留裁剪）
+                    base += ["--phase2-no-head-crop"]
         extra = shlex.split(args.pick_args or "")
     else:
         base = [str(LOOP_PY), "--ckpt", str(args.place_ckpt), "--prompt", args.place_prompt]
         if not args.no_nav_suspend:
             base += ["--nav-suspend"]
         base += ["--exec"]     # place 不带 grip-state-cmd（10-12 判读）
+        if not args.place_head_crop:
+            # place-only 会话全程即 place 任务：训练无头裁剪（10-15 同事
+            # 确认），直接 --no-head-crop
+            base += ["--no-head-crop"]
         extra = shlex.split(args.place_args or "")
     return base + extra
 
@@ -465,6 +475,12 @@ def main():
                          "ckpt+建引擎，折叠后换 model/ns/包络切相。10-14 定案"
                          "默认单模型（0930 权重=pick+place 合并训练，train_"
                          "config 实锤）只换 prompt，本参数留作 A/B/回退")
+    ap.add_argument("--place-head-crop", action="store_true",
+                    help="逃生门：place 相保留头图裁剪。默认关——sft_1012 分"
+                         "任务图像处理（2026-10-15 同事确认：pick 训练=头裁剪、"
+                         "place 训练=原样 letterbox），编排器默认给 loop 注入 "
+                         "--phase2-no-head-crop（二相切相）/ --no-head-crop"
+                         "（place-only 会话）")
     args = ap.parse_args()
     if args.until == "full" and args.no_fold:
         raise SystemExit("--until full（二相全流程）需要折叠档——--no-fold 时 "

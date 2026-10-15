@@ -18,6 +18,9 @@ ckpt = "/home/galbot/holy/models/pi05_g1_sft1012_dropout20_deploy"
 # A/B 专用配置走 scripts/ab_test/1015_headzoom_dropout20/，本键只作默认）。
 # place 闭环不带 --grip-state-cmd（33% 持物起步，滞后窗内回读恰好是对的，
 # 喂指令值反而与训练分布相反——10-12 判读）。
+# ⚠ B 权重分任务图像处理（2026-10-15 同事确认）：pick 训练=头图裁剪放大、
+#   place 训练=原样 letterbox——单独跑 B place 须用 ab_test B loop 并带
+#   --no-head-crop（13:18 全流程 place 相 R 爪不放主嫌疑=place 相错吃裁剪图）。
 # ⚠ B 权重 only_place 训练任务串未与同事核对（挂账），下句暂用老 only_place
 #   原句；串不同时行为会 OOD（13:18 全流程跑 R 爪 place 相 25 轮不放=疑似应验）。
 # ── pick 三键存档（2026-10-12 切回过：在役 only_pick）──
