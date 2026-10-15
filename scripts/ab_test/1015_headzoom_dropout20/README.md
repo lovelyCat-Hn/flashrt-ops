@@ -88,4 +88,9 @@ LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
 
 ## 结论
 
-（跑完回填）
+- **2026-10-15 单任务 place（B loop `--no-head-crop` + place·B 三键）：通过**
+  ——分任务 crop 修正生效；13:18 全流程 place 相 R 爪 25 轮不放破案=
+  place 相错吃裁剪图（train/serve 失配）。place 句（老 only_place 原句）
+  行为背书可用。
+- pick 句亦被 13:18 pick 相成功（R 持物 35mm、fold 门触发）背书。
+- 全流程 pick→place 复跑（编排器已自动分任务注入 crop）待跑。
