@@ -19,7 +19,8 @@ loop 进程——会话进程私有，编排器没有手。
            【结束判据=本编排器的灵魂，v4 物理持物带】loop 每轮爪行带【实 X.Xmm】
            物理回读（10-13 爪标定：回读新鲜 p50 10ms）；全部监听侧实宽连续
            --pick-stable-s 落在持物带 [--held-min-mm,--held-max-mm]（默认
-           12-80；空爪闭合≈0-2mm 不进带）→ 向子进程 stdin 写 'q'（走 loop
+           12-80；v4.1 再交指令≤--pick-cmd-close-pct，治开合过渡态实宽
+           落带误触发 141150）→ 向子进程 stdin 写 'q'（走 loop
            已验证的 q 退出路径，nav-suspend 自动 CONT）。
            ⚠ 指令闭合≠抓住（143656 实证空爪闭合指令 0-3.5% 照样持续，
            v2/v3 的穿越门+静默兜底全被空爪骗到）——门只认物理实宽，
@@ -124,44 +125,73 @@ SHIFT_YAW_DEG = 1.068
 # 字符类排除对方侧大写字母+ '['：防某侧缺括号时滑段错配到另一侧的值
 PHYS_VAL = {"R": re.compile(r"\bR\s+[\d.]+%[^[\nL]*\[实\s*([\d.]+|\?)mm"),
             "L": re.compile(r"\bL\s+[\d.]+%[^[\nR]*\[实\s*([\d.]+|\?)mm")}
+# 爪行指令百分数（行内 R 71.1%→85mm 的第一个数=模型指令目标%）。
+# v4.1 交集判据用：开合过渡态（开爪爬坡）实宽会落在持物带内（141150 实录：
+# R 开爪爬坡停在 15.5mm×4 拍 ≈3.7s>2s 窗，L 已持物→门误触发折叠），但该态
+# 指令必然高（71-83%）；真持物时指令≈0-5%。物理带∩指令低=四态全覆盖。
+CMD_VAL = {"R": re.compile(r"\bR\s+([\d.]+)%"),
+           "L": re.compile(r"\bL\s+([\d.]+)%")}
 
 
 class PhaseGate:
-    """任务相位门 v4（10-13 143656 后定案：物理持物带，指令一律不认）。
+    """任务相位门 v4.1（2026-10-15：物理带 ∩ pick 指令低，交集判据）。
 
     演进史一句话：v1 实现_bug MISS → v2/v3 指令穿越+臂静默（基于「R 从未
     穿越」误读，越做越重）→ 143656 实证空爪闭合=指令 0-3.5% 照样持续，
-    穿越/闭合/静默全被空爪骗到 → **v4 只认物理实宽**（loop send_grip 行尾
-    【实 X.Xmm】回读，10-13 爪标定：回读新鲜 p50 10ms）。
+    穿越/闭合/静默全被空爪骗到 → v4 只认物理实宽（loop send_grip 行尾
+    【实 X.Xmm】回读，10-13 爪标定：回读新鲜 p50 10ms）→ **141150 实录
+    v4 盲区：开合过渡态实宽落持物带**（R 开爪爬坡 4→15.5mm 停 4 拍
+    ≈3.7s>2s 窗，L 已持物 34mm→全侧在带→门误触发折叠，R 实际还没抓）
+    → v4.1 pick 门加指令维：物理在带 ∩ 指令≤close_max_pct。
+
+    四态覆盖（v4.1）：
+      空爪闭合 0-2mm   物理✗              → 不触发
+      开合过渡（141150）物理✓ 指令 71-83%✗ → 不触发（v4 在此翻车）
+      真持物 30-40mm   物理✓ 指令 0-5%✓   → 触发
+      掉落/放开        物理✗              → 不触发
+    v2/v3 指令门单独判死于「空爪闭合指令 0-3.5% 与持物同域」——与物理带
+    取交集后互补（物理排除空爪闭合，指令排除开合过渡）。
 
     完成判据 = 全部监听侧物理宽度连续 stable_s 落在判据带：
       pick（done_open=False）持物带 [--held-min-mm, --held-max-mm]
            默认 12-80mm：空爪闭合≈0-2mm 不进带→不触发→段预算中止
            （=「没抓住就别停」，用户定案）；持物≈30-40mm（数据集撑 33.5%
-           语义）；张开着也不进带（>80）。
+           语义）；张开着也不进带（>80）。再交指令≤close_max_pct
+           （0=关闭退回纯物理带=v4）。
       place（done_open=True）释放带 ≥ --open-min-mm（默认 60mm；
-           放开≈90-120mm）。
-    实宽读不到（[实 ?]/行缺失）→ 按不满足处理（安全向：宁可超时中止
-    不误触发）。判据带连续窗，任何一轮出带即清零重计。
+           放开≈90-120mm）。指令维不参与（释放=指令高，交叉方向相反，
+           释放带与开爪爬坡的重叠本就无害——臂已静默，早触发 ≤1 轮）。
+    实宽/指令读不到（[实 ?]/行缺失/无 %）→ 按不满足处理（安全向：宁可
+    超时中止不误触发）。判据带连续窗，任何一轮出带即清零重计。
     """
 
     def __init__(self, sides, done_open, stable_s,
-                 held_min_mm=12.0, held_max_mm=80.0, open_min_mm=60.0):
+                 held_min_mm=12.0, held_max_mm=80.0, open_min_mm=60.0,
+                 close_max_pct=0.0):
         self.sides = list(sides)
         self.done_open = done_open          # False=pick（完成=持续持物）
         self.stable_s = stable_s
         self.held_min_mm, self.held_max_mm = held_min_mm, held_max_mm
         self.open_min_mm = open_min_mm
+        self.close_max_pct = close_max_pct  # pick 指令上限%（0=v4 纯物理带）
         self.last_mm = {}                   # 侧 → 最近物理实宽 mm（None=未知）
+        self.last_cmd = {}                  # 侧 → 最近指令 %（None=未知）
         self.t_ok = None                    # 全侧在带连续窗起点
         self.fired = False
 
-    def _in_band(self, v):
+    def _in_band(self, v, cmd=None):
         if v is None:
             return False                    # 回读缺失=不满足（安全向）
         if self.done_open:
             return v >= self.open_min_mm
-        return self.held_min_mm <= v <= self.held_max_mm
+        if not (self.held_min_mm <= v <= self.held_max_mm):
+            return False
+        if self.close_max_pct > 0:
+            # 开合过渡消歧：开爪爬坡实宽可能落带内但指令必高；指令读不
+            # 到=不满足（安全向，与实宽缺失同纪律）
+            if cmd is None or cmd > self.close_max_pct:
+                return False
+        return True
 
     def feed(self, line, now):
         for s in self.sides:
@@ -170,9 +200,12 @@ class PhaseGate:
                 # [实 ?]=回读失败→显式归 None（不沿用旧宽：陈旧值会让
                 # 判据带窗假性连续）；窗随即清零=安全向
                 self.last_mm[s] = None if m.group(1) == "?" else float(m.group(1))
+            mc = CMD_VAL[s].search(line)
+            self.last_cmd[s] = float(mc.group(1)) if mc else None
         if self.fired:
             return True
-        if all(self._in_band(self.last_mm.get(s)) for s in self.sides):
+        if all(self._in_band(self.last_mm.get(s), self.last_cmd.get(s))
+               for s in self.sides):
             if self.t_ok is None:
                 self.t_ok = now
         else:
@@ -404,6 +437,11 @@ def main():
     ap.add_argument("--pick-stable-s", type=float, default=2.0,
                     help="门秒数：全部监听侧实宽在判据带内需连续满足"
                          "（10-13 用户定案『持续抓住 ~2s 才算』；3s 判长）")
+    ap.add_argument("--pick-cmd-close-pct", type=float, default=25.0,
+                    help="v4.1 交集判据：pick 门要求物理在带 且 该侧指令%%"
+                         "≤本值（开爪爬坡实宽会落持物带但指令 71-83%%=高，"
+                         "141150 误触发实录；持物时指令≈0-5%%。0=退回 v4 "
+                         "纯物理带）")
     ap.add_argument("--held-min-mm", type=float, default=12.0,
                     help="pick 持物带下限 mm（空爪闭合≈0-2mm 不进带=不触发；"
                          "持物≈30-40mm=数据集撑 33.5%% 语义）")
@@ -539,7 +577,8 @@ def main():
             gate = PhaseGate(["R", "L"], done_open=False,
                              stable_s=args.pick_stable_s,
                              held_min_mm=args.held_min_mm,
-                             held_max_mm=args.held_max_mm)
+                             held_max_mm=args.held_max_mm,
+                             close_max_pct=args.pick_cmd_close_pct)
             # 折叠档：门触发注入 'r'（loop 折叠 reset 后 rc=0）；成功判据
             # 收紧为 rc==0——rc=2=折叠前 q 退、rc=4=折叠中途 q（急停），
             # 都不放行进 place。预算加折叠段（摆臂 ~15s + 定位闸 ~90s
