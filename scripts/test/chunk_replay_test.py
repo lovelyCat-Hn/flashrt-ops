@@ -118,6 +118,20 @@ ap.add_argument("--cmd-first-only", action="store_true",
                 help="仅首组合步（在役 --cmd-every N --cmd-first-only 同义，"
                      "须配 --merge >1；与 --blend 互斥）：每块拍 0 发一条组末行"
                      "（rows[N−1]，占 N 拍）消块界，组后回逐行 30Hz 流式密随")
+ap.add_argument("--entry-match", action="store_true",
+                help="入口动态匹配（用户 10-17 提案；与 install-offset/skip-retrace/"
+                     "cmd-first-only/blend/glide/merge>1 全互斥）：新块到来读臂"
+                     "实际关节位，①只取顺运动方向前进侧（反向行=摆幅来源，剔除）；"
+                     "②前进侧里选 gap 最接近稳态导程 g₀ 的行做接入行——"
+                     "set_joint_commands 速度∝gap 引擎自算不可控，衔接首拍 gap "
+                     "对齐上一块末尾=接缝两侧速度连续（固定合步 1/4 首拍 gap≈"
+                     "4 行距恰落稳态带内=其手感好的机制解释，本模式是其动态精确化）")
+ap.add_argument("--entry-dir-tol", type=float, default=0.002,
+                help="方向容差 rad（默认 0.002=2 mrad）：关节 |末目标−实际| 低于此"
+                     "值视为静止不约束方向；行反向超过此容差才判违约")
+ap.add_argument("--entry-gap-win", type=int, default=4,
+                help="稳态导程 g₀ 中位数窗口（默认 4 拍）：取上一块末尾最近 N 个"
+                     "实发拍的导程中位数（免发拍不计入；单拍值受模型抖动污染）")
 ap.add_argument("--max-excursion", type=float, default=3.0,
                 help="偏离起始位护栏 rad（任一关节超限即停）")
 ap.add_argument("--envelope", type=str, default=None,
@@ -138,6 +152,18 @@ if args.cmd_first_only and args.blend:
 if args.install_offset > 0 and args.skip_retrace:
     raise SystemExit("--install-offset 与 --skip-retrace 互斥（同为换块跳行策略，"
                      "install-offset=在役跳帧安装口径，skip-retrace=回溯段研究口径）")
+if args.entry_match:
+    _bad = [n for n, on in (("--install-offset", args.install_offset > 0),
+                            ("--skip-retrace", bool(args.skip_retrace)),
+                            ("--cmd-first-only", args.cmd_first_only),
+                            ("--blend", args.blend),
+                            ("--glide", args.glide > 0)) if on]
+    if _bad:
+        raise SystemExit(f"--entry-match 与 {','.join(_bad)} 互斥：入口匹配统一了"
+                         "跳帧/锚定/合步三机制（陈旧行要么方向违约要么 gap 不匹配）")
+    if MERGE > 1:
+        raise SystemExit("--entry-match 只配逐行直发（--merge 1）——合步量由入口行"
+                         "动态承担，不再写死")
 
 # ── 日志全文落盘（q 退出走 os._exit 不刷缓冲，逐行 flush）──
 _log_path = str(_ROOT / "logs" / time.strftime("chunk_replay_test_%Y%m%d_%H%M%S.log"))
@@ -412,6 +438,7 @@ _mode_send = ("每行一令直发" if MERGE == 1
               + ("·仅首组，组后流式" if args.cmd_first_only
                  else f"（每 {MERGE} 行一令，间隔 {MERGE} 拍）")) \
     + (f" | 跳帧安装@{args.install_offset}" if args.install_offset > 0 else "") \
+    + (" | 入口动态匹配" if args.entry_match else "") \
     + (" | 跳回溯段" if args.skip_retrace else "") \
     + (f" | 滑入{args.glide}拍" if args.glide > 0 else "") \
     + (" | 前向搭接" if args.blend else "")
@@ -483,6 +510,8 @@ n_skip = 0
 n_drop = 0
 errs = []
 acts = []
+entries = []        # 入口匹配选中的行号（--entry-match 汇总用）
+_gap_hist = []      # 实发拍导程滚动历史（g₀ 稳态导程估计源；免发拍不入）
 _prev_ach = None
 last_tgt = None
 for bi, tgt_blk in enumerate(BLOCKS):
@@ -493,7 +522,36 @@ for bi, tgt_blk in enumerate(BLOCKS):
     if ENV_LO14 is not None:
         rows = np.clip(rows, ENV_LO14, ENV_HI14)    # 直发口径钳行（主脚本帧级同款）
     _skip_note = ""
-    if args.install_offset > 0 and bi > 0:
+    if args.entry_match and bi > 0 and last_tgt is not None:
+        # ── 入口动态匹配：方向硬约束 + 导程匹配（用户 10-17 提案）──
+        # 基准=臂当前实际位 cur（非上块计划位，指令与实际有追踪误差）；
+        # 方向=sign(末目标−实际)，|差|≤容差的关节视为静止不约束；
+        # 可行行=所有运动关节均不反向（反向行=关节回摆=摆幅来源）；
+        # 入口=可行行中 max 关节 gap 最接近 g₀（上一块末尾稳态导程）的行。
+        if _gap_hist:
+            _g0 = float(np.median(_gap_hist[-args.entry_gap_win:]))
+            _dir = last_tgt - cur
+            _mov = np.abs(_dir) > args.entry_dir_tol
+            _ds = np.sign(_dir)
+            _rel = rows - cur[None]                       # (50,14)
+            _viol = (_mov[None, :]
+                     & ((_rel * _ds[None, :]) < -args.entry_dir_tol)).any(axis=1)
+            _cand = np.where(~_viol)[0]
+            _gaps = np.max(np.abs(_rel), axis=1)
+            if len(_cand):
+                _entry = int(_cand[np.argmin(np.abs(_gaps[_cand] - _g0))])
+                rows = rows[_entry:_entry + SWAPS[bi]]    # 消费窗整体右移到入口
+                _skip_note = (f" | 入口匹配 j={_entry}"
+                              f"（g₀={_g0 * 1000:.1f} gap={_gaps[_entry] * 1000:.1f}"
+                              f" mrad，可行行 {len(_cand)}/{len(_rel)}）")
+                entries.append(_entry)
+            else:
+                rows = rows[:SWAPS[bi]]
+                _skip_note = " | 入口匹配落空（全块方向违约）→行 0"
+        else:
+            rows = rows[:SWAPS[bi]]
+            _skip_note = " | 入口匹配缺 g₀（上块全免发）→行 0"
+    elif args.install_offset > 0 and bi > 0:
         _off = min(args.install_offset, len(rows) - 1)
         rows = rows[_off:_off + SWAPS[bi]]           # 跳帧安装=消费窗整体右移
         _skip_note = (f" | 跳帧安装{SWAPS[bi]}行@偏移{_off}"
@@ -657,6 +715,8 @@ for bi, tgt_blk in enumerate(BLOCKS):
                 _teardown()
                 os._exit(4)
             _fr_s = f"1令@{args.fps}Hz"
+            _gap_hist.append(gap0)                   # g₀ 源：只记实发拍（免发=已追平）
+            del _gap_hist[:-32]                      # 有界滚动
         last_tgt = tgt.copy()
         ach = read_joints()
         if _prev_ach is not None:
@@ -679,11 +739,15 @@ for bi, tgt_blk in enumerate(BLOCKS):
         # 真实闭环换块瞬间衔接（落地即换，无窗）
 
 fin = read_joints()
+_entry_s = (f" | 入口行 min/p50/max {min(entries)}/{int(np.percentile(entries, 50))}"
+            f"/{max(entries)}（匹配 {len(entries)}/{n_blocks - 1} 块）"
+            if entries else "")
 print(f"\n== 汇总 == 块 {n_blocks} | 合步 {MERGE} | 免发 {n_skip} | 丢拍重锚 {n_drop}"
       f" | 残差 mean {np.mean(errs):.1f} p95 {np.percentile(errs, 95):.1f}"
       f" max {np.max(errs):.1f} mrad"
       f" | 动/令 mean {np.mean(acts):.1f} mrad"
-      f" | 等效臂速 mean {np.mean(acts) / (MERGE * TICK):.0f}"
+      + _entry_s
+      + f" | 等效臂速 mean {np.mean(acts) / (MERGE * TICK):.0f}"
       f" p95 {np.percentile(acts, 95) / (MERGE * TICK):.0f} mrad/s"
       f" | 最终偏离起始位 {float(np.max(np.abs(fin - start_pos))) * 1000:.0f} mrad"
       f"（护栏 {args.max_excursion * 1000:.0f}）"
