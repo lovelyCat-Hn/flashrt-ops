@@ -129,6 +129,9 @@ ap.add_argument("--entry-match", action="store_true",
 ap.add_argument("--entry-dir-tol", type=float, default=0.002,
                 help="方向容差 rad（默认 0.002=2 mrad）：关节 |末目标−实际| 低于此"
                      "值视为静止不约束方向；行反向超过此容差才判违约")
+ap.add_argument("--entry-gap-win", type=int, default=4,
+                help="稳态导程 g₀ 中位数窗口（默认 4 拍）：取上一块末尾最近 N 个"
+                     "实发拍的导程中位数（免发拍不计入；单拍值受模型抖动污染）")
 ap.add_argument("--entry-gap-min", type=float, default=0.008,
                 help="g₀ 夹紧下限 rad（默认 0.008=8 mrad，--entry-match 用）")
 ap.add_argument("--entry-gap-max", type=float, default=0.035,
