@@ -9,8 +9,26 @@ __pycache__/
 *.tar.gz
 
 # ── 杂项 ──
-.vscode/
+.vscode/*
+!.vscode/settings.json
 *.swp
+
+# ── C/C++ 产物（对齐 tqyh standard 规范）──
+*.d
+*.slo
+*.lo
+*.o
+*.obj
+*.gch
+*.pch
+*.dylib
+*.dll
+*.lai
+*.la
+*.a
+*.exe
+*.out
+*.app
 
 # ── 数据/教学材料不进仓 ──
 datasets/

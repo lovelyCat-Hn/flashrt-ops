@@ -1,0 +1,53 @@
+{
+  // 禁用微软 IntelliSense，让 clangd 接管
+  "C_Cpp.intelliSenseEngine": "disabled",
+  "C_Cpp.autocomplete": "disabled",
+  "C_Cpp.errorSquiggles": "disabled",
+  "clangd.path": "/usr/bin/clangd",
+  "clangd.arguments": [
+    "--clang-tidy",
+    "--compile-commands-dir=${workspaceFolder}",
+    "--header-insertion=iwyu",
+    "--completion-style=detailed",
+    "--background-index",
+    "--extra-arg=-DINTERFACE_TYPE_ROS1",
+    "--query-driver=/usr/bin/gcc,/usr/bin/g++,/usr/bin/clang,/usr/bin/clang++"
+  ],
+  "cmake.buildDirectory": "${workspaceFolder}/build",
+  "cmake.configureSettings": {
+    "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+    "CMAKE_CXX_STANDARD": "17",
+    "CMAKE_CXX_STANDARD_REQUIRED": "ON",
+    "INTERFACE_TYPE": "ROS1"
+  },
+  "cmake.parallelJobs": 8,
+  "cmake.copyCompileCommands": "${workspaceFolder}/compile_commands.json",
+  "files.exclude": {
+    "**/venv": true,
+    "**/.venv": true,
+    "**/site-packages": true,
+    "**/build": true,
+    "**/bin": true,
+    "**/obj": true,
+    "**/*.egg-info": true
+  },
+  "search.exclude": {
+    "**/venv": true,
+    "**/.venv": true,
+    "**/site-packages": true,
+    "**/build": true
+  },
+  // ========== 保存时自动格式化 ==========
+  "editor.formatOnSave": true,
+  // ========== clang-format 具体配置 ==========
+  // clang-format 路径
+  "C_Cpp.clang_format_path": "/usr/bin/clang-format",
+  // 使用 .clang-format 配置文件
+  "C_Cpp.clang_format_style": ".clang-format",
+  // 默认样式
+  "C_Cpp.clang_format_fallbackStyle": "Google",
+  // ========== 其他语言也启用保存格式化 ==========
+  "editor.formatOnSaveTimeout": 1500, // 格式化超时时间（毫秒）
+  "files.autoSave": "afterDelay", // 可选：自动保存
+  "files.autoSaveDelay": 1000 // 自动保存延迟
+}

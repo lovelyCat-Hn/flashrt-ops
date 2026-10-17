@@ -1,0 +1,95 @@
+# .clang-tidy
+# ROS 2 推荐静态检查配置
+# 启用 Google 风格 + C++ Core Guidelines 检查
+
+---
+HeaderFilterRegex: '^((?!drogon|external|build|models).)*$'
+
+Checks: >
+  *,
+  -altera-*,
+  -android-*,
+  -fuchsia-*,
+  -llvmlibc-*,
+  -zircon-*,
+  -abseil-*,
+  -darwin-*,
+  -objc-*,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -readability-magic-numbers,
+  -google-runtime-references,
+  -hicpp-no-array-decay,
+  -hicpp-vararg,
+  -hicpp-uppercase-literal-suffix,
+  -hicpp-explicit-conversions,
+  -hicpp-deprecated-headers,
+  -google-default-arguments,
+  -google-explicit-constructor,
+  -google-readability-todo,
+  -llvm-header-guard,
+  -llvm-include-order,
+  -modernize-use-trailing-return-type,
+  -modernize-avoid-c-arrays,
+  -cppcoreguidelines-avoid-c-arrays,
+  -hicpp-avoid-c-arrays,
+  -cert-dcl21-cpp,
+  -fuchsia-default-arguments-calls,
+  -performance-no-int-to-ptr,
+  -readability-uppercase-literal-suffix,
+  -bugprone-reserved-identifier,
+  -cert-dcl37-c,
+  -cert-dcl51-cpp,
+  -cert-dcl54-cpp,
+  -cppcoreguidelines-macro-usage,
+  -hicpp-special-member-functions,
+  -misc-non-private-member-variables-in-classes,
+  -cppcoreguidelines-non-private-member-variables-in-classes,
+  -readability-convert-member-functions-to-static,
+  -altera-struct-pack-align,
+  -altera-unroll-loops,
+  -concurrency-*,
+  -cppcoreguidelines-owning-memory,
+  -google-build-using-namespace,
+  -hicpp-use-auto,
+  -modernize-use-auto,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-bounds-constant-array-index,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-type-vararg,
+  -cppcoreguidelines-pro-type-union-access,
+  -cppcoreguidelines-pro-type-reinterpret-cast,
+  -cppcoreguidelines-pro-type-const-cast,
+  -cppcoreguidelines-pro-type-cstyle-cast,
+  -cppcoreguidelines-special-member-functions,
+  -performance-unnecessary-value-param,
+  -performance-*,
+  -llvm-*,
+  -clang-analyzer-*,
+  google-*,
+  cppcoreguidelines-*,
+  performance-*,
+  readability-*,
+  bugprone-*,
+  modernize-*,
+  hicpp-*,
+  misc-*
+
+# 将核心检查视为错误（适合 CI）
+WarningsAsErrors: >
+  cppcoreguidelines-*,
+  google-*
+
+# 格式化风格：使用同目录下的 .clang-format
+FormatStyle: file
+
+# 检查选项配置
+CheckOptions:
+  - key: readability-identifier-length.MinimumVariableNameLength
+    value: 1
+  - key: readability-identifier-length.MinimumParameterNameLength
+    value: 1
+  - key: readability-identifier-length.MinimumLoopCounterNameLength
+    value: 1
+
+# 额外参数
+ExtraArgs: []
