@@ -40,14 +40,20 @@ def stat(mat):
 
 def load(chunks_dir):
     files = sorted(pathlib.Path(chunks_dir).glob("chunk_*.npz"))
-    if len(files) < 2:
-        raise SystemExit(f"至少要 2 个 chunk，{chunks_dir} 只有 {len(files)}")
-    ch, base = [], None
+    ch, base, bad = [], None, []
     for f in files:
-        d = np.load(f)
-        ch.append(d["chunk"].astype(float))
+        try:
+            d = np.load(f)
+            ch.append(d["chunk"].astype(float))
+        except Exception:                     # q 中断写坏的尾块，跳过
+            bad.append(f.name)
+            continue
         if base is None:
             base = d["base_arm"].astype(float)   # 首块的绝对基准（回放从臂位起步用）
+    if bad:
+        print(f"⚠ 跳过坏文件 {len(bad)} 个（q 中断截断）: {', '.join(bad[:3])}…")
+    if len(ch) < 2:
+        raise SystemExit(f"至少要 2 个完好 chunk，{chunks_dir} 只有 {len(ch)}")
     return ch, base
 
 
