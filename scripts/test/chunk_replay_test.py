@@ -143,6 +143,14 @@ ap.add_argument("--entry-dir-frac", type=float, default=0.5,
                 help="主导向关节阈值（默认 0.5）：只约束 |方向| ≥ frac×max|方向| "
                      "的关节；全关节门被模型抖动打死（任一关节转向即全块违约，"
                      "首跑 13/26 块退行 0），转向中的小关节豁免")
+ap.add_argument("--seam-alpha", type=float, default=0.0,
+                help="接缝窗 EMA α 起点（默认 0=关，用主 α）：块边界后 α 从此值"
+                     "线性爬回主 α（历时 --seam-beats 拍，阶梯勿平切——硬切回主值"
+                     "会把积压滞后一次放出成新凸点，离线实证 11.7 vs 阶梯 9.4）。"
+                     "块首 EMA 衰减尾（171124 实测拍0-2 |Δcmd| 17.5/15.0/10.5 vs "
+                     "块内 mean 1.8）=残存接缝脉冲主体，此杠杆削峰稳态零税")
+ap.add_argument("--seam-beats", type=int, default=4,
+                help="接缝窗拍数=α 爬坡长（默认 4）；--seam-alpha 0 时无效")
 ap.add_argument("--hold-ms", type=float, default=330.0,
                 help="块间静止窗 ms（默认 330=历史口径）。⚠接缝 A/B 建议 0：固定"
                      "消费行数模式下 hold 让臂每块从静止零起步=人为顿挫节奏，"
@@ -420,14 +428,26 @@ def build_rows(cur, tgt_blk, ema_init=None):
         rows[kk] = prev
     if args.ema_alpha > 0:
         a = float(args.ema_alpha)
-        if ema_init is None:
-            acc = rows[0]
-        else:
-            acc = a * rows[0] + (1.0 - a) * np.asarray(ema_init, np.float32)
-            rows[0] = acc
-        for kk in range(1, len(rows)):
-            acc = a * rows[kk] + (1.0 - a) * acc
-            rows[kk] = acc
+        # 接缝窗 α 阶梯：边界后从 seam_alpha 线性爬回主 α（seam_beats 拍），
+        # 削块首衰减尾峰值且无硬切交接凸点（离线对比 10-17）；仅跨块携带
+        # 时生效（首块无接缝可言），稳态（爬坡完成）与主 α 逐位一致
+        a_seam = float(args.seam_alpha) if args.seam_alpha > 0 else a
+        n_seam = max(1, int(args.seam_beats))
+        for kk in range(len(rows)):
+            if ema_init is not None and a_seam < a:
+                a_k = a_seam + (a - a_seam) * min(kk, n_seam) / n_seam
+            else:
+                a_k = a
+            if kk == 0:
+                if ema_init is None:
+                    acc = rows[0]
+                else:
+                    acc = a_k * rows[0] + (1.0 - a_k) * np.asarray(ema_init,
+                                                                   np.float32)
+                    rows[0] = acc
+            else:
+                acc = a_k * rows[kk] + (1.0 - a_k) * acc
+                rows[kk] = acc
     return rows
 
 
@@ -455,6 +475,8 @@ _mode_send = ("每行一令直发" if MERGE == 1
                  else f"（每 {MERGE} 行一令，间隔 {MERGE} 拍）")) \
     + (f" | 跳帧安装@{args.install_offset}" if args.install_offset > 0 else "") \
     + (" | 入口动态匹配" if args.entry_match else "") \
+    + (f" | 接缝α{args.seam_alpha}→{args.ema_alpha}/{args.seam_beats}拍"
+       if args.seam_alpha > 0 and args.ema_alpha > 0 else "") \
     + (" | 跳回溯段" if args.skip_retrace else "") \
     + (f" | 滑入{args.glide}拍" if args.glide > 0 else "") \
     + (" | 前向搭接" if args.blend else "")
