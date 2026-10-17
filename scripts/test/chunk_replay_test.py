@@ -107,7 +107,17 @@ ap.add_argument("--tfs-ms", type=float, default=0.0,
                 help="time_from_start_s 毫秒：0=尽快到达（官方流式示例同值）")
 ap.add_argument("--ema-alpha", type=float, default=0.0,
                 help="行目标 EMA 低通系数（0=关，默认；主脚本同义）："
-                     "rows[k]←α·raw[k]+(1−α)·rows[k−1]，滤换块锚后小回退")
+                     "rows[k]←α·raw[k]+(1−α)·rows[k−1]，滤换块锚后小回退；"
+                     "滤波态跨块携带（从上块末下发目标重播=主脚本 161933 修正同款）")
+ap.add_argument("--install-offset", type=int, default=0,
+                help="跳帧安装模拟（0=关，默认；与 --skip-retrace 互斥）：换块后"
+                     "新块从第 N 行起取消费窗（rows[N:N+消费行数]）——复现在役"
+                     "水位 0+skip-install 的墙钟槽位接入（seam_matrix 10-17 判定 "
+                     "off≈消费行数接缝 p90 −62%）。0=帧 0 重锚（新块首行接入）")
+ap.add_argument("--cmd-first-only", action="store_true",
+                help="仅首组合步（在役 --cmd-every N --cmd-first-only 同义，"
+                     "须配 --merge >1；与 --blend 互斥）：每块拍 0 发一条组末行"
+                     "（rows[N−1]，占 N 拍）消块界，组后回逐行 30Hz 流式密随")
 ap.add_argument("--max-excursion", type=float, default=3.0,
                 help="偏离起始位护栏 rad（任一关节超限即停）")
 ap.add_argument("--envelope", type=str, default=None,
@@ -120,6 +130,14 @@ args = ap.parse_args()
 
 TICK = 1.0 / args.fps
 MERGE = max(1, args.merge)
+if args.cmd_first_only and MERGE <= 1:
+    raise SystemExit("--cmd-first-only 须配 --merge > 1（否则无合步组可言）")
+if args.cmd_first_only and args.blend:
+    raise SystemExit("--cmd-first-only 与 --blend 互斥：首组并粗 vs 块首重铺细步，"
+                     "方向相反（主脚本同款互斥）")
+if args.install_offset > 0 and args.skip_retrace:
+    raise SystemExit("--install-offset 与 --skip-retrace 互斥（同为换块跳行策略，"
+                     "install-offset=在役跳帧安装口径，skip-retrace=回溯段研究口径）")
 
 # ── 日志全文落盘（q 退出走 os._exit 不刷缓冲，逐行 flush）──
 _log_path = str(_ROOT / "logs" / time.strftime("chunk_replay_test_%Y%m%d_%H%M%S.log"))
@@ -346,8 +364,12 @@ else:
         "  （盒配错任务=护栏形同虚设，宁停勿猜）")
 
 
-def build_rows(cur, tgt_blk):
-    """链式限幅（主脚本 build_rows 同构：每行从当前位向绝对目标 ≤±delta-max）。"""
+def build_rows(cur, tgt_blk, ema_init=None):
+    """链式限幅（主脚本 build_rows 同构：每行从当前位向绝对目标 ≤±delta-max）。
+
+    ema_init：上块末下发目标（EMA 跨块携带=主脚本 161933 修正同款——滤波态
+    不在块界重置，接缝阶跃被抹成从旧目标出发的斜坡；None=首块从 rows[0] 起）。
+    """
     rows = np.empty_like(tgt_blk)
     prev = np.asarray(cur, dtype=np.float32)
     for kk in range(len(tgt_blk)):
@@ -356,7 +378,11 @@ def build_rows(cur, tgt_blk):
         rows[kk] = prev
     if args.ema_alpha > 0:
         a = float(args.ema_alpha)
-        acc = rows[0]
+        if ema_init is None:
+            acc = rows[0]
+        else:
+            acc = a * rows[0] + (1.0 - a) * np.asarray(ema_init, np.float32)
+            rows[0] = acc
         for kk in range(1, len(rows)):
             acc = a * rows[kk] + (1.0 - a) * acc
             rows[kk] = acc
@@ -382,7 +408,10 @@ def send_row(fr):
 
 
 _mode_send = ("每行一令直发" if MERGE == 1
-              else f"合步 {MERGE}（每 {MERGE} 行一令，间隔 {MERGE} 拍）") \
+              else f"合步 {MERGE}"
+              + ("·仅首组，组后流式" if args.cmd_first_only
+                 else f"（每 {MERGE} 行一令，间隔 {MERGE} 拍）")) \
+    + (f" | 跳帧安装@{args.install_offset}" if args.install_offset > 0 else "") \
     + (" | 跳回溯段" if args.skip_retrace else "") \
     + (f" | 滑入{args.glide}拍" if args.glide > 0 else "") \
     + (" | 前向搭接" if args.blend else "")
@@ -443,7 +472,9 @@ else:
 
 WATCH.pause()
 input(f"\n⚠ 将回放保存轨迹 {n_blocks} 块 × 50 行（无推理，纯 set_joint_commands "
-      f"直发" + (f"，合步 {MERGE}" if MERGE > 1 else "")
+      f"直发" + (f"，合步 {MERGE}" + ("·仅首组" if args.cmd_first_only else "")
+                if MERGE > 1 else "")
+      + (f"，跳帧安装@{args.install_offset}" if args.install_offset > 0 else "")
       + "；急停就绪后回车开始）...")
 WATCH.resume()
 
@@ -456,12 +487,20 @@ _prev_ach = None
 last_tgt = None
 for bi, tgt_blk in enumerate(BLOCKS):
     cur = read_joints()
-    rows = build_rows(cur, tgt_blk)
+    rows = build_rows(cur, tgt_blk,
+                      ema_init=(last_tgt if (bi > 0 and args.ema_alpha > 0)
+                                else None))
     if ENV_LO14 is not None:
         rows = np.clip(rows, ENV_LO14, ENV_HI14)    # 直发口径钳行（主脚本帧级同款）
-    rows = rows[:SWAPS[bi]]                          # 换块弃尾（auto=复现真实消费行数）
-    _n_raw = len(rows)
     _skip_note = ""
+    if args.install_offset > 0 and bi > 0:
+        _off = min(args.install_offset, len(rows) - 1)
+        rows = rows[_off:_off + SWAPS[bi]]           # 跳帧安装=消费窗整体右移
+        _skip_note = (f" | 跳帧安装{SWAPS[bi]}行@偏移{_off}"
+                      f"（行{_off}-{_off + SWAPS[bi] - 1}）")
+    else:
+        rows = rows[:SWAPS[bi]]                      # 换块弃尾（auto=复现真实消费行数）
+    _n_raw = len(rows)
     if args.skip_retrace and bi > 0:
         if args.skip_retrace == "delay":
             _skip = int(np.ceil(META[bi]["infer_ms"] / (TICK * 1000.0)))
@@ -578,7 +617,13 @@ for bi, tgt_blk in enumerate(BLOCKS):
             print(f"  滑{gk:2d}/{args.glide}: |Δcmd| {d_mrad:5.1f} mrad"
                   f" | 导程 {gap0 * 1000:5.1f} → {_fr_s}"
                   f" | 动 {act:4.1f} 残差 {err:4.1f} mrad")
-    for kk in range(_n_blend, len(rows), MERGE):
+    _stride = 1 if args.cmd_first_only else MERGE
+    for kk in range(_n_blend, len(rows), _stride):
+        _merged = args.cmd_first_only and kk == _n_blend   # 仅首组合步：块内首拍并组
+        _silent = args.cmd_first_only and not _merged \
+            and (kk - _n_blend) < MERGE                    # 首组其余拍静默消费
+        if _silent:
+            continue            # 墙钟已被拍 0 的 MERGE 拍一次推进覆盖，勿再 sleep+推进
         # ── 节拍头：绝对截止；落后超 1 拍即重锚（绝不连发追赶，主脚本同款）──
         now = time.perf_counter()
         if now < _next_t:
@@ -586,11 +631,12 @@ for bi, tgt_blk in enumerate(BLOCKS):
         elif now - _next_t > TICK:
             n_drop += 1
             _next_t = now
-        _next_t += TICK * MERGE   # 合步=一令占 N 拍墙钟（同消费速率；bug 修复：
-        # 此前恒 +TICK，merge>1 实际变成 N 倍速消耗，131901/131929 两跑属此口径）
-
+        _next_t += TICK * (MERGE if _merged else _stride)  # 合步=一令占 N 拍墙钟
+        # （同消费速率；bug 修复：此前恒 +TICK，merge>1 实际变成 N 倍速消耗，
+        # 131901/131929 两跑属此口径）
         cur = read_joints()                      # 拍首读实际
-        tgt = rows[min(kk + MERGE - 1, len(rows) - 1)]   # 合步=组末行端点
+        tgt = rows[min(kk + MERGE - 1, len(rows) - 1)] \
+            if (_merged or not args.cmd_first_only) else rows[kk]   # 合步=组末行端点
         cmd_delta = ((tgt - last_tgt) if last_tgt is not None
                      else np.zeros_like(tgt))
         d_mrad = float(np.max(np.abs(cmd_delta))) * 1000
@@ -621,7 +667,10 @@ for bi, tgt_blk in enumerate(BLOCKS):
         err = float(np.max(np.abs(ach - tgt))) * 1000
         errs.append(err)
         acts.append(act)
-        print(f"  拍{kk:2d}" + (f"(行{max(0, kk - MERGE + 1)}-{kk})" if MERGE > 1 else "")
+        print(f"  拍{kk:2d}"
+              + (f"(行{max(0, kk - MERGE + 1)}-{kk})"
+                 if (MERGE > 1 and not args.cmd_first_only) else "")
+              + ("[合步]" if _merged else "")
               + f": |Δcmd| {d_mrad:5.1f} mrad"
               f" | 导程 {gap0 * 1000:5.1f} → {_fr_s}"
               f" | 动 {act:4.1f} 残差 {err:4.1f} mrad")
