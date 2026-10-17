@@ -1,0 +1,7 @@
+{
+ "ckpt": "/home/galbot/holy/models/pi05_g1_onlypick_deploy",
+ "prompt": "Left arm pick up A. Right arm pick up A.",
+ "envelope": "/home/galbot/holy/models/pi05_g1_onlypick_deploy/joint_envelope.json",
+ "delta_max": 0.05,
+ "fps": 30
+}
