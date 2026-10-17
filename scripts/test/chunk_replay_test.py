@@ -557,7 +557,11 @@ for bi, tgt_blk in enumerate(BLOCKS):
             _viol = _back.any(axis=1)                     # 主导向关节有反向=违约
             _cand = np.where(~_viol)[0]
             _gaps = np.max(np.abs(_rel), axis=1)
-            if len(_cand):
+            _jmax = len(rows) - SWAPS[bi]   # 保消费窗完整：入口过深=窗口越界截断
+            # （10-17 首跑后段轨迹变慢可行行缩到 2-12 行，j 被推到 44-48，
+            # 消费 2 拍/块=66ms 换块，节奏密度翻倍——候选限制在窗内）
+            if len(_cand) and (_cand <= _jmax).any():
+                _cand = _cand[_cand <= _jmax]
                 _entry = int(_cand[np.argmin(np.abs(_gaps[_cand] - _g0))])
                 rows = rows[_entry:_entry + SWAPS[bi]]    # 消费窗整体右移到入口
                 _skip_note = (f" | 入口匹配 j={_entry}"
@@ -567,7 +571,9 @@ for bi, tgt_blk in enumerate(BLOCKS):
                               f" mrad，可行行 {len(_cand)}/{len(_rel)}）")
                 entries.append(_entry)
             else:
-                _entry = int(np.argmin(_back.sum(axis=1)))  # 反向量最小的行（勿退行0）
+                _cand2 = np.arange(max(0, _jmax + 1))
+                _entry = int(_cand2[np.argmin(
+                    _back[:_jmax + 1].sum(axis=1))])      # 反向量最小的行（勿退行0）
                 rows = rows[_entry:_entry + SWAPS[bi]]
                 _skip_note = (f" | 入口匹配部分违约 j={_entry}"
                               f"（反向量最小 {_back.sum(axis=1)[_entry]} 关节·行）")
