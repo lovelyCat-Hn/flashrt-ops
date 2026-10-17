@@ -147,6 +147,10 @@ ap.add_argument("--entry-dir-frac", type=float, default=0.5,
                 help="主导向关节阈值（默认 0.5）：只约束 |方向|≥frac×max 的关节，"
                      "转向中的小关节豁免（全关节门被模型抖动打死，回放台首跑 "
                      "13/26 块退行 0）")
+ap.add_argument("--entry-dir-floor", type=float, default=0.005,
+                help="显著运动地板 rad（默认 5 mrad）：|参考-臂差|低于地板的关节"
+                     "不设方向门，全臂低于地板=门全免（平静段噪声关节当主导会把"
+                     "可行行清零→假回退→块内呼吸，180940 实证）；0=关地板")
 ap.add_argument("--entry-j-cap", type=int, default=12,
                 help="入口前跳深度上限（行）：超限=内容落后→退行 0（EMA 阻尼"
                      "小步）；深跳消费块尾行→下块内容更落后→棘轮（回放台 "
@@ -1436,9 +1440,11 @@ while not aborted:
         # 1-13/50、每块深跳 gap 30-117 mrad 或超上限→行 0 回拖——一冲一收
         # =摆幅（α 阶梯把深跳摊成拍1-6 的 12-13 mrad 反弹，块中 |Δcmd| 放大
         # 3×）。锚改 last_tgt（续流语义）：在计划自然跨回参考的位置接入，首拍
-        # 步长≈g₀。①顺运动方向（主导关节不倒行）②命令流单调（追账段反向
-        # 阶跃=伺服急停反转=摆动，回放台 171925 实证）③距 last_tgt≈g₀
-        # ④深跳超上限=内容落后→行 0（EMA 阻尼小步，防棘轮）。
+        # 步长≈g₀。①主导关节不退到臂后方 ②命令流单调（不把参考往回带；
+        # 追账段反向阶跃=伺服急停反转=摆动，回放台 171925 实证）③距
+        # last_tgt≈g₀ ④深跳超上限=行 0（EMA 阻尼小步，防棘轮）。
+        # 门均无符号绝对化+显著运动地板（180940 二破案，见门内注）。
+        # 匹配只含 14 臂关节维（chunk 第 7 列=夹爪，独立通道不参与）。
         if args.entry_match and last_tgt is not None and n_swapped > 1:
             _plan = BASE_ARM[None, :] + np.concatenate(
                 [chunk[:, :7], chunk[:, 8:15]], axis=1)
@@ -1452,13 +1458,24 @@ while not aborted:
                                     args.entry_gap_max))
                 _dir = last_tgt - _cur_sw
                 _mag = np.abs(_dir)
-                _dom = _mag >= args.entry_dir_frac * _mag.max()
-                _ds = np.sign(_dir)
+                # 显著运动地板（180940 二破案）：平静段参考-臂差全是几 mrad
+                # 噪声，主导集被噪声关节占满，方向门把微抖行全拒→30 行内凑不
+                # 出可行行→假回退→行0 落回计划锚点后阶梯展开进冲刺段=块内
+                # 呼吸（导程 10→42→11/块）。低于地板的关节不设门；全臂低于
+                # 地板=全部不设门（平静段只按 gap 匹配）。
+                _dom = ((_mag >= args.entry_dir_floor)
+                        & (_mag >= args.entry_dir_frac
+                           * max(float(_mag.max()), 1e-9)))
                 _rel = _plan - _cur_sw[None]
+                # 门无符号绝对化（180940 二破案）：原 _ds=sign(last_tgt−cur)
+                # 帧在臂冲过参考时反转，把「前进续流」误判为违约、可行行清零
+                # （任何跳深都救不了→假回退）。单调语义本就绝对：
+                # ①不指挥主导关节退到臂后方 ②不把参考往回带（命令流单调，
+                # 追账段反向阶跃=伺服急停反转=摆动，回放台 171925 实证）。
                 _back = (_dom[None, :]
-                         & ((_rel * _ds[None, :]) < -args.entry_dir_tol))
+                         & (_rel < -args.entry_dir_tol))
                 _back_cmd = (_dom[None, :]
-                             & (((_plan - last_tgt[None]) * _ds[None, :])
+                             & ((_plan - last_tgt[None])
                                 < -args.entry_dir_tol))
                 _viol = (_back | _back_cmd).any(axis=1)
                 _cand = np.where(~_viol)[0]
@@ -1480,8 +1497,11 @@ while not aborted:
                           f"{len(_cand)}/{len(_plan)}；余 {len(chunk)} 行）")
                 else:
                     entries.append(0)
+                    _nf = np.where(~_viol)[0]
+                    _why = (f"可行最早 j={int(_nf[0])} 仍在窗外"
+                            if len(_nf) else "全窗无可行行")
                     print(f"  [入口匹配] 前跳超上限{_jcap}→行 0"
-                          "（内容落后，EMA 阻尼小步）")
+                          f"（{_why}，EMA 阻尼小步）")
         # ── EMA 重播（10-12 真机否决修正，161933 实测拍0 p90 294.6/max 559.3）：
         # _EMA_STATE 原存整条 50 行链滤波完的链尾，而水位 10 弃尾每块只发 ~40
         # 行——状态记在旧计划未发送的尾巴上（超前已发送点 ~10 行 ≈ 数百 mrad），
