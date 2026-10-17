@@ -125,7 +125,10 @@ ap.add_argument("--entry-match", action="store_true",
                      "②前进侧里选 gap 最接近稳态导程 g₀ 的行做接入行——"
                      "set_joint_commands 速度∝gap 引擎自算不可控，衔接首拍 gap "
                      "对齐上一块末尾=接缝两侧速度连续（固定合步 1/4 首拍 gap≈"
-                     "4 行距恰落稳态带内=其手感好的机制解释，本模式是其动态精确化）")
+                     "4 行距恰落稳态带内=其手感好的机制解释，本模式是其动态精确化）。"
+                     "③命令流单调闸（171925 摆动破案）：可行行还须在上拍目标"
+                     "前进侧（主导关节）——追账段 gap 往 g₀ 匹配=把目标向后挪"
+                     "=逆着运动方向发反向阶跃=伺服急停反转；速度连续≠位置连续")
 ap.add_argument("--entry-dir-tol", type=float, default=0.002,
                 help="方向容差 rad（默认 0.002=2 mrad）：关节 |末目标−实际| 低于此"
                      "值视为静止不约束方向；行反向超过此容差才判违约")
@@ -576,7 +579,17 @@ for bi, tgt_blk in enumerate(BLOCKS):
             _rel = rows - cur[None]                       # (50,14)
             _back = (_dom[None, :]
                      & ((_rel * _ds[None, :]) < -args.entry_dir_tol))
-            _viol = _back.any(axis=1)                     # 主导向关节有反向=违约
+            # 命令流单调闸（171925 块3 往复摆动破案）：新目标还须在上拍
+            # 目标的前进侧。追账态臂全速追赶时把 gap 往 g₀ 匹配=把目标
+            # 向后挪（61.4→37.1 导程，|Δcmd| 24.2=反向阶跃）→ 逆着运动
+            # 方向发令 → 伺服急停反转=摆动。速度连续≠位置连续：追账段
+            # gap 保持不缩（入口推到越过 last_tgt 的行），稳态
+            # last_tgt≈cur 零变化。
+            _back_cmd = (_dom[None, :]
+                         & (((rows - last_tgt[None]) * _ds[None, :])
+                            < -args.entry_dir_tol))
+            _viol_mat = _back | _back_cmd
+            _viol = _viol_mat.any(axis=1)                 # 主导向关节有反向=违约
             _cand = np.where(~_viol)[0]
             _gaps = np.max(np.abs(_rel), axis=1)
             _jmax = len(rows) - SWAPS[bi]   # 保消费窗完整：入口过深=窗口越界截断
@@ -595,10 +608,10 @@ for bi, tgt_blk in enumerate(BLOCKS):
             else:
                 _cand2 = np.arange(max(0, _jmax + 1))
                 _entry = int(_cand2[np.argmin(
-                    _back[:_jmax + 1].sum(axis=1))])      # 反向量最小的行（勿退行0）
+                    _viol_mat[:_jmax + 1].sum(axis=1))])  # 反向量最小的行（勿退行0）
                 rows = rows[_entry:_entry + SWAPS[bi]]
                 _skip_note = (f" | 入口匹配部分违约 j={_entry}"
-                              f"（反向量最小 {_back.sum(axis=1)[_entry]} 关节·行）")
+                              f"（反向量最小 {_viol_mat.sum(axis=1)[_entry]} 关节·行）")
                 entries.append(_entry)
         else:
             rows = rows[:SWAPS[bi]]
