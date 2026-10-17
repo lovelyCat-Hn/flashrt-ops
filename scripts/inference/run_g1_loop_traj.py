@@ -29,6 +29,20 @@ RTC：--rtc-horizon N > 0 时启用推理侧前缀引导（同 native，FlashRT 
 搭接：--blend 执行侧前向搭接（10-12 回放台定案移植）——换块后新块前 M 行
   目标替换为"旧链末目标→rows[M−1]"直连，消回溯俯冲/块首急停；与 RTC
   正交（推理侧 vs 执行侧），叠加属双重消缝，A/B 分开评估。0=关（默认）。
+合步：--cmd-every N>1 每 N 拍并成 1 条指令（拍 k 下发组末行 rows[k+N−1]，
+  中间行只消费不发送），指令沿 30→30/N Hz、阶跃≈N 行差——臂以指数追踪
+  大导程平滑扫过，切块误差被导程淹没（A 线 spc 合步同机制；native 七跑
+  定案抖感∝指令沿频率）。默认 1=纯 30Hz 直发零变。与 --blend 互斥
+  （blend 把块首重铺细步，方向相反）。
+  ⚠ 接口铁律（10-16 用户定案）：本脚本只走 set_joint_commands 纯流式，与
+  lerobot/同事 infer_policy 执行侧保持同源——不得引入 set_joint_positions/
+  配速（那是要配速时直接用 run_g1_loop 的理由）。代价已知：流式底层=指数
+  追踪 v≈2.6×gap，合步大步每条带一个初速尖峰（20261016「一震一震」实录），
+  属接口固有，压抖靠缩小 N 或 --cmd-first-only 减少合步条数。
+  折中口径 --cmd-first-only：合步只并每块首组（rows 0..N−1 一条指令消块界，
+  该拍组差本来就小 ~12-20 mrad），其余拍回 30Hz 逐拍流式密随——均匀合步的
+  组间大步 85-105 mrad 太肥（20261016 真机实录：块界治好但误差搬进块内），
+  且流式 Pursuit 会把首组滞后自然吃回。
 参数命名对 lerobot 术语的对照：docs/lerobot-alignment.md。
 
 ⚠ 加 --exec 会连续真实驱动双臂！安全设计（与 native 同款）：
@@ -79,7 +93,9 @@ ap.add_argument("--rounds", type=int, default=None,
 ap.add_argument("--n-action-steps", type=int, default=None,
                 help="预取水位阈值：本块消费到第 K 步即触发新推理（lerobot "
                      "chunk_size_threshold 语义；≤ --chunk-size；"
-                     "config [loop].n_action_steps；v3 里它是消费配额，这里只定换块时机）")
+                     "config [loop].n_action_steps；v3 里它是消费配额，这里只定换块时机）。"
+                     "0=换块即预取（本块第 0 步下发后立即起跑下一块推理，块长≈推理"
+                     "时延；须配 --skip-install）")
 ap.add_argument("--chunk-size", type=int, default=50,
                 help="chunk 长度（lerobot chunk_size），默认 50=训练原生长度"
                      "（env FLASH_RT_PI05_ACTION_CHUNK_SIZE 自动设）")
@@ -94,6 +110,19 @@ ap.add_argument("--frames-per-row", type=int, default=1,
                      "突发下发 set_joint_commands。默认 1=纯 30Hz 直发（每 tick"
                      " 一条命令，原生 lerobot 语义；10-10 用户定案退役 240Hz 微"
                      "流）；N>1 仅留作 A/B 显式选用（8≈240Hz@30fps）")
+ap.add_argument("--cmd-every", type=int, default=1,
+                help="合步：每 N 拍并 1 条指令（拍 k 下发组末行 rows[k+N−1]，"
+                     "中间行只消费不发送），指令沿 30→30/N Hz——阶跃≈N 行差"
+                     "（链钳 ±delta-max 逐行封顶不变，合计 ≤N×50 mrad），臂以"
+                     "指数追踪大导程平滑扫过=切块误差被导程淹没（A 线 spc 合步"
+                     "同机制；native 七跑定案抖感∝指令沿频率）。默认 1=纯 30Hz"
+                     "直发零变；与 --blend 互斥")
+ap.add_argument("--cmd-first-only", action="store_true",
+                help="合步只并每块首组（rows 0..N−1 一条指令消块界，该拍组差本"
+                     "来就小 ~12-20 mrad），其余拍回 30Hz 逐拍流式密随——均匀合"
+                     "步的组间大步 85-105 mrad 太肥（20261016 实录：块界治好但"
+                     "误差搬进块内），流式 Pursuit 会把首组滞后自然吃回；须配 "
+                     "--cmd-every>1，组后爪/臂恢复逐拍")
 ap.add_argument("--burst-reserve-ms", type=float, default=6.0,
                 help="row-tick 内留给读关节/打印/换块的毫秒数：帧突发配速预算="
                      "tick−该值（默认 6）")
@@ -106,6 +135,22 @@ ap.add_argument("--ema-alpha", type=float, default=0.0,
                      "（接缝首行同样被滤，infer_policy 同款语义；10-12 判明块内"
                      "重启版对接缝无效）——接缝/深尾垃圾的执行侧兜底杠杆；首跑"
                      "先 0 判读样条本身")
+ap.add_argument("--grip-ema-alpha", type=float, default=0.0,
+                help="爪指令 EMA 低通系数（0=关，默认）：grip% 流逐拍平滑后再进"
+                     "发送判定。臂维 EMA（--ema-alpha）管不了爪：build_rows 只滤"
+                     " [:7]+[8:15]，爪维 dim7/15 直通 send_grip。⚠单独用治不了"
+                     "冻结（111901 终审：病根=每条新指令重启行程，细流仍是流）；"
+                     "与 --grip-ss 配套做去抖穿越判定，候选 0.1")
+ap.add_argument("--grip-ss", type=str, default="",
+                help="爪状态机「开阈,合阈」如 50,35（空=关，默认）：平滑后爪%"
+                     "≥开阈→置开态发一次、≤合阈→置合态发一次、带内不发；无翻转"
+                     "时平滑值漂离上次实发 ≥15 点且距上次下发 ≥2.0s 才补发一条"
+                     "（中间宽度意图）。机制依据（111901 终审）："
+                     "set_gripper_command 每条新指令把行程从头重启（起步死区 "
+                     "~0.9s，单发标定台实证），循环流 p50 间隙 2-3 拍=死区永不"
+                     "耗尽→110 条 send 全 SUCCESS 但实宽全程 0.5mm 冻结；q 停流"
+                     "静→最后一条 1.5s 走满=「q 后突然张开」。治法=少发：状态机"
+                     "每相 1-2 条，每条都拿到 ≥2s 静默行程窗")
 ap.add_argument("--starve-limit", type=float, default=2.0,
                 help="星饿安全停机阈值 s：块耗尽且推理未归超过该时长即停循环"
                      "（默认 2.0s=正常推理余量 ~6×；星饿期不下发=伺服保持）")
@@ -157,6 +202,13 @@ ap.add_argument("--dump-chunks", action="store_true",
                 help="每块推理落地时把原始 chunk（50,16）+BASE_ARM 落盘到 "
                      "logs/chunks_traj_<ts>/（供离线增量分析与回放台复喂；"
                      "包络截断前落盘=纯模型输出）")
+ap.add_argument("--dump-frames", action="store_true",
+                help="每次推理把三路 letterbox224 后的模型实际输入图落盘到 "
+                     "logs/frames_traj_<ts>/（seq_编号_视图名.png；编号即推理序，"
+                     "与日志块序一一对应，首块=0001）。排查黑帧/冻结/图像失配；"
+                     "写盘在推理后台线程、不占控制节拍。注意磁盘：~0.4MB/推理")
+ap.add_argument("--dump-frames-dir", default=None,
+                help="帧落盘目录（默认 logs/frames_traj_<ts>/，与日志同时间戳）")
 ap.add_argument("--cache-frames", type=int, default=None,
                 help="K/V 时序复用周期：1=每帧全量（默认，无损）；config [loop].cache_frames")
 ap.add_argument("--max-excursion", type=float, default=None,
@@ -175,10 +227,11 @@ ap.add_argument("--log-file", default=None,
                 help="日志文件路径（默认 <仓库>/logs/loop_native_<时间戳>.log；终端照常显示，"
                      "全文同步写文件，判读免复制）")
 ap.add_argument("--grip-state-cmd", action="store_true",
-                help="state 夹爪维(dim7/15)改喂【指令值】而非 SDK 回读：回读滞后 "
-                     "~6.3-8s 而 pick 关键窗口 ~7s——喂回读=模型全程看到冻结在起始值"
-                     "的夹爪状态（数据集 state 跟随指令仅 ~0.3-1s，10-05 判读）。"
-                     "pick 闭环必带；需 --grip；默认关=喂回读")
+                help="state 夹爪维(dim7/15)改喂【指令值】而非 SDK 回读：数据集 state "
+                     "爪维语义=跟随段记指令值（持物段=物理被撑开），喂物理回读=分布"
+                     "漂移（「回读滞后 6.3-8s」旧说已被 10-13 标定翻案：新鲜 p50 "
+                     "10ms；行为必要性 10-05/10-08 实证保留）。pick 闭环必带；"
+                     "需 --grip；默认关=喂回读")
 ap.add_argument("--envelope-margin", type=float, default=0.15,
                 help="关节包络护栏余量，rad（默认 0.15）。"
                      "包络=<ckpt>/joint_envelope.json"
@@ -207,6 +260,14 @@ if args.frames_per_row < 1:
     raise SystemExit("--frames-per-row 须 ≥ 1")
 if args.rtc_horizon < 0:
     raise SystemExit("--rtc-horizon 须 ≥ 0（0=关）")
+if args.cmd_every < 1:
+    raise SystemExit("--cmd-every 须 ≥ 1（1=纯 30Hz 直发零变）")
+if args.cmd_first_only and args.cmd_every <= 1:
+    raise SystemExit("--cmd-first-only 须配 --cmd-every > 1（否则无合步组可言）")
+if args.cmd_every > 1 and args.blend:
+    raise SystemExit("--cmd-every > 1 与 --blend 互斥：blend 把块首重铺细步"
+                     "（消块首尖峰），合步把 N 拍并 1 条大步（消指令沿密度）"
+                     "——块界两套相反策略，勿混用")
 TICK = 1.0 / args.fps
 GAP_EPS = 1e-4        # 行导程低于该值免突发（伺服保持）
 
@@ -221,6 +282,29 @@ if args.dump_chunks:
     _lp = pathlib.Path(_log_path)
     _dump_dir = _lp.with_name(_lp.stem.replace("loop_traj", "chunks_traj"))
     _dump_dir.mkdir(parents=True, exist_ok=True)
+# 帧落盘目录（--dump-frames）：同上约定；存的是 letterbox224 之后的图=模型看到的
+_frames_dir = None
+if args.dump_frames:
+    _lp = pathlib.Path(_log_path)
+    _frames_dir = pathlib.Path(
+        args.dump_frames_dir
+        or _lp.with_name(_lp.stem.replace("loop_traj", "frames_traj")))
+    _frames_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[loop-traj] 逐推理帧落盘 → {_frames_dir}")
+_frame_seq = 0
+
+
+def _dump_frames(obs):
+    """三路模型输入图落盘（letterbox224 后 RGB）。在推理 worker 里调，
+    done.set() 之后写=不推迟结果交接、不进 dur_ms；写失败静默（诊断用不阻塞）。"""
+    global _frame_seq
+    _frame_seq += 1
+    for k, im in obs.items():
+        try:
+            cv2.imwrite(str(_frames_dir / f"{_frame_seq:04d}_{k}.png"),
+                        cv2.cvtColor(im, cv2.COLOR_RGB2BGR))
+        except Exception:
+            pass
 
 
 def _dump_chunk(chunk_arr, base_arm, idx, infer_ms_val):
@@ -278,11 +362,36 @@ g1_config.apply(args, {
 })
 if args.no_grip:
     args.grip = False
+GRIP_SS = None      # --grip-ss 解析结果（开阈, 合阈）；None=关（旧 chg 门行为）。
+                    # ⚠ 初值必须在解析前且此后勿再赋 None：模块后段再置 None 会
+                    # 盖掉解析值（125953 教训：banner 先打印、循环时已被抹）
+if args.grip_ss:
+    try:
+        _o, _c = args.grip_ss.split(",")
+        GRIP_SS = (float(_o), float(_c))
+    except ValueError:
+        raise SystemExit('--grip-ss 格式：「开阈,合阈」，如 --grip-ss 50,35')
+    if not (0.0 <= GRIP_SS[1] < GRIP_SS[0] <= 100.0):
+        raise SystemExit("--grip-ss 需 0 ≤ 合阈 < 开阈 ≤ 100（带内=迟滞防抖）")
+if args.n_action_steps < 0:
+    raise SystemExit("--n-action-steps 须 ≥ 0（0=换块即预取）")
+if args.n_action_steps == 0 and not args.skip_install:
+    raise SystemExit("水位 0（换块即预取）须配 --skip-install：推理落地时新块行 0 的"
+                     "墙钟槽位必已流逝 ~10 拍，不跳帧安装=每块首拍系统性回走"
+                     "（110411 锯齿同源）")
 print(f"[loop-traj] tick {TICK * 1000:.1f} ms（{args.fps} Hz）| 轨迹流 "
       f"{args.frames_per_row} 帧/行（≈{args.fps * args.frames_per_row}Hz {args.interp}"
       f"）| 突发预算 {TICK * 1000 - args.burst_reserve_ms:.1f} ms/行"
       f" | EMA α={args.ema_alpha:g}"
-      f" | 水位 {args.n_action_steps} 步换块弃尾 | 星饿上限 {args.starve_limit}s"
+      + (f" | 爪EMA α={args.grip_ema_alpha:g}" if args.grip_ema_alpha > 0 else "")
+      + (f" | 合步 1/{args.cmd_every}"
+         + ("·仅首组，组后流式" if args.cmd_first_only else "")
+         if args.cmd_every > 1 else "")
+      + (f" | 爪状态机 {GRIP_SS[0]:g}/{GRIP_SS[1]:g}" if GRIP_SS is not None else "")
+      + (f" | 帧落盘 {_frames_dir.name}" if _frames_dir is not None else "")
+      + f" | 水位 {args.n_action_steps} 步换块弃尾"
+      + ("（换块即预取，块长≈推理时延）" if args.n_action_steps == 0 else "")
+      + f" | 星饿上限 {args.starve_limit}s"
       + (" | 跳帧安装" if args.skip_install else "")
       + (" | 偏移平移" if args.ref_offset else "")
       + (f" | RTC 引导 horizon {args.rtc_horizon}（max_w {args.rtc_max_w}）"
@@ -525,8 +634,9 @@ if args.grip:
     print(f"夹爪下发开启: 0%→{wmin} m | 100%→{wmax} m | 速度 {args.grip_speed} m/s | "
           f"力矩 {args.grip_effort} N | 变化阈值 {args.grip_chg}%")
     if args.grip_state_cmd:
-        print("⚠ state 夹爪维(7/15)喂【指令值】（--grip-state-cmd）：SDK 回读滞后 "
-              "~6.3-8s > pick 窗口 ~7s，回读=冻结起始值（10-05 四跑实证）")
+        print("⚠ state 夹爪维(7/15)喂【指令值】（--grip-state-cmd）：对齐数据集 state "
+              "爪维语义（「回读滞后 6.3-8s」旧说已被 10-13 标定翻案，回读新鲜 "
+              "p50 10ms；行为必要性 10-05/10-08 实证保留）")
 
 # 2026-09-23 tf_matrix 实证：INT8 两档（全 INT8 / 仅编码器）均毁动作质量
 # （块均 cos 0.15/0.27 vs bf16 0.98）——定档 bf16，显式锁定（详见 BENCHMARKS 附录）
@@ -612,9 +722,10 @@ def state_from_joints(vals) -> np.ndarray:
 def grip_state_cmd_override(st_raw):
     """--grip-state-cmd：state 夹爪维(7/15)改喂指令值，持物段例外（10-12 修正）。
 
-    SDK 夹爪反馈滞后 ~6.3-8s（2026-09-23 实测），pick 的关键窗口只有 ~7s——
-    跟随段喂回读=模型全程看到冻结在起始值的夹爪状态；数据集 state 跟随指令
-    仅 ~0.3-1s，故跟随段喂指令值。
+    数据集 state 爪维语义=跟随段记指令值——喂物理回读=分布漂移（模型全程
+    看到滞后/爬坡中的爪宽）。⚠「SDK 回读滞后 6.3-8s」旧说已被 10-13 标定
+    翻案（grip_speed_bench 四程：回读时戳新鲜 p50 10ms，伺服守 0.15 m/s）；
+    本旗标的行为必要性（10-05/10-08 四跑实证）不受影响。
 
     ⚠ 持物签名修正（2026-10-12 帧级实锤）：数据集「抓到物体」语义=指令 0%
     + state 被物体撑在 ~33.5%（ep0 t5.1s 起；40 集持物段 state 中位 33.5、
@@ -769,25 +880,62 @@ def env_first_violation(ch):
 def send_grip(robot, chunk_row):
     """chunk 行 dim7/dim15（0~100%）→ 标定宽度下发（超阈值才发，非阻塞）。
 
-    ⚠ SDK 夹爪反馈滞后 ~6.3s 且期间 is_moving 恒 False——本函数只发不查
-    不等待（否则拖死控制环）；终态核对放循环结束后。
+    只发不查不等待（拖死控制环）；终态核对放循环结束后。回读新鲜（10-13
+    标定 p50 10ms），实际下发拍顺带采样一次物理实宽进日志（[实 X.Xmm]），
+    爪的物理时序证据逐 send 可见。已知物理动态（同标定）：起步死区 ~0.9s +
+    0.15 m/s 帽（满程 ~0.8s）。
+    ⚠ 111901 终审：每条新指令把行程从头重启（死区重吃）——逐拍补发的指令流
+    p50 间隙 2-3 拍，死区永不耗尽 → 110 send 全 SUCCESS 实宽全程 0.5mm 冻结；
+    q 停流静→最后一条 1.5s 走满（「q 后突然张开」全案闭合）。故
+    --grip-ss 状态机=少发（每相 1-2 条、每条 ≥2s 静默窗）；无 ss 时退回旧
+    chg 门（2% 变化即发，111901 证明该模式爪会冻结——保留只为对照）。
     """
     if GRIP is None:
         return None
     if not args.do_exec:
         return "dry（不下发）"
     parts = []
+    now = time.monotonic()
     for name, dim in GRIP["names"]:
         p = float(np.clip(chunk_row[dim], 0.0, 100.0))
+        if args.grip_ema_alpha > 0:
+            prev = _GRIP_EMA.get(name)
+            p = p if prev is None else \
+                args.grip_ema_alpha * p + (1.0 - args.grip_ema_alpha) * prev
+            _GRIP_EMA[name] = p
         last = GRIP["sent"].get(name)
-        if last is not None and abs(p - last) < GRIP["chg"]:
+        why = ""
+        if GRIP_SS is not None:
+            st0 = _GRIP_SS_STATE.get(name)
+            t0, v0 = _GRIP_SS_SENT.get(name, (None, None))
+            if st0 is None:                      # 首拍定态并发一次
+                st0 = "hi" if p >= GRIP_SS[0] else "lo"
+                _GRIP_SS_STATE[name] = st0
+                why = "首拍"
+            elif p >= GRIP_SS[0] and st0 != "hi":
+                _GRIP_SS_STATE[name] = "hi"
+                why = "开阈"
+            elif p <= GRIP_SS[1] and st0 != "lo":
+                _GRIP_SS_STATE[name] = "lo"
+                why = "合阈"
+            elif (t0 is not None and abs(p - v0) >= 15.0
+                  and now - t0 >= 2.0):
+                why = "漂移补发"                 # 中间宽度意图，限频 0.5Hz
+            if not why:                          # 无翻转未到补发条件=一律不发
+                parts.append(f"{name[0].upper()} {p:.1f}%·hold")
+                continue
+        elif last is not None and abs(p - last) < GRIP["chg"]:
             parts.append(f"{name[0].upper()} {p:.1f}%·hold")
             continue
         w = GRIP["wmin"] + p / 100.0 * (GRIP["wmax"] - GRIP["wmin"])
         st = robot.set_gripper_command(getattr(G1JointGroup, name),
                                        w, GRIP["speed"], GRIP["effort"], False)
         GRIP["sent"][name] = p
-        parts.append(f"{name[0].upper()} {p:.1f}%→{w * 1000:.0f}mm "
+        if GRIP_SS is not None:
+            _GRIP_SS_SENT[name] = (now, p)
+        _gs = robot.get_gripper_state(getattr(G1JointGroup, name))
+        _phys = f" 实{_gs.width * 1000:.1f}mm" if _gs is not None else " 实?"
+        parts.append(f"{name[0].upper()} {p:.1f}%→{w * 1000:.0f}mm{_phys} "
                      f"{str(st).replace('ControlStatus.', '')}")
     return "  ".join(parts)
 
@@ -834,7 +982,7 @@ for _ in range(3):
     model.predict(grab_views(robot), prompt=args.prompt,
                   state=normalize_state(read_joints(robot, STATE_NAMES), ns))
 print("预热推理 ×3 完成（吸收惰性引擎构建）")
-WMARK = max(1, min(args.n_action_steps, args.chunk_size))   # 预取水位阈值
+WMARK = max(0, min(args.n_action_steps, args.chunk_size))   # 预取水位阈值（0=换块即预取）
 env_hits = 0                         # 包络护栏：连续越界块数（干净块清零）
 env_trunc = 0                        # 包络护栏：累计截断块数（汇总用）
 if args.rtc_horizon > 0:
@@ -847,6 +995,14 @@ INTERP = create_interpolator(args.interp, dim=14,
                              output_hz=args.fps * args.frames_per_row)
 
 _EMA_STATE = None   # 跨块连续 EMA 状态（上块末行滤波输出；None=尚无历史不滤波）
+_GRIP_EMA = {}      # 爪指令 EMA 状态（--grip-ema-alpha>0 时启用；跨块连续，爪流
+                    # 换块不弃尾——爪相位是低频意图，逐拍直通=物理包络被抖动打断）
+                    # ⚠ GRIP_SS 的初值 None 放 argparse 段（≈300 行）——若在此处再
+                    # 置 None 会把上面解析好的 --grip-ss 盖掉（125953 实录：banner
+                    # 打了 50/35 但循环里 GRIP_SS 已被本行旧赋值抹成 None，静默退
+                    # 回 chg 门=状态机整跑未生效）
+_GRIP_SS_STATE = {}  # 状态机每爪当前态 'hi'/'lo'
+_GRIP_SS_SENT = {}   # 状态机每爪 (上次实发时刻, 上次实发值)
 
 
 def build_rows(cur, prev0=None, offset=None):
@@ -931,7 +1087,10 @@ def _rtc_prefix(new_base):
     if not args.rtc_horizon or chunk is None:
         return None
     _p50 = infer_ms.percentile(0.5) if len(infer_ms) else 340.0
-    delay = max(0, min(int(round(_p50 / (TICK * 1000.0))), WMARK))
+    # 右移帽=旧块剩余行数（勿用 WMARK）：水位 0 模式下 WMARK=0 会把补偿钳没，
+    # 前缀窗口退回快照时刻=每块引导新块倒退（141706 同款）。水位 ≥1 时两帽
+    # 等价（delay≈10 < 剩余行数），在役配方行为不变。
+    delay = max(0, min(int(round(_p50 / (TICK * 1000.0))), len(chunk) - k - 1))
     j0 = k + delay
     if j0 >= len(chunk):
         return None                      # 延迟把旧块尾段吃尽 → 该块免引导
@@ -976,6 +1135,8 @@ class _PredictJob:
                 self._err = e
             self.dur_ms = (time.perf_counter() - t) * 1000
             self._done.set()
+            if _frames_dir is not None and isinstance(obs, dict):
+                _dump_frames(obs)   # 推理 worker 里写盘，tick 零代价
 
         threading.Thread(target=_run, daemon=True).start()
 
@@ -1096,7 +1257,11 @@ if args.do_exec:
     input(f"\n⚠ 将连续驱动双臂 {args.rounds} 块 × 至多 {len(chunk)} 拍"
           f"（tick {TICK * 1000:.1f} ms，轨迹流 {args.frames_per_row} 帧/行"
           f"≈{args.fps * args.frames_per_row}Hz {args.interp}，"
-          f"链式限幅 ±{args.delta_max} rad/行，"
+          + (f"指令沿 合步 1/{args.cmd_every}={args.fps / args.cmd_every:.1f}Hz"
+             f"（每 {args.cmd_every} 拍 1 条）" if args.cmd_every > 1 else
+             f"指令沿 {args.fps:g}Hz 逐拍 1 条")
+          + (f"，tfs {args.tfs_ms:g} ms" if args.tfs_ms > 0 else "")
+          + f"，链式限幅 ±{args.delta_max} rad/行，"
           f"漂移护栏 ±{args.max_excursion} rad"
           + ("，夹爪下发开启）。\n" if GRIP else ")。\n")
           + "急停就绪后回车开始，循环期间随时按 q 退出...")
@@ -1135,6 +1300,7 @@ starve_total = 0.0                   # 星饿总时长 s
 starve_worst = 0.0                   # 最长星饿段 s
 _starve_t0 = None                    # 当前星饿段起点（None=不在星饿）
 skip_sends = 0                       # 导程 <GAP_EPS 免发拍数
+merged_skips = 0                     # 合步静默拍数（cmd-every>1 只消费不发送）
 dropped_ticks = 0                    # 落后超 1 拍的重锚次数（丢拍）
 next_t = time.perf_counter()
 swap_envelope_check()
@@ -1260,69 +1426,85 @@ while not aborted:
                   "（机械臂留在原地）")
             aborted = True
     else:
-        # ── 常规拍：突发下发本行 N 帧（换块时一次性插值，见 build_block_stream）──
-        cur = read_joints(robot, ARM_NAMES)
-        tgt = rows_abs[k]
-        cmd_delta = (tgt - last_tgt) if last_tgt is not None else np.zeros_like(tgt)
-        d_mrad = float(np.max(np.abs(cmd_delta))) * 1000
-        if seam_first is None:
-            seam_first = d_mrad          # 接缝尖峰：换块首行 |Δcmd|
+        # ── 合步节流（--cmd-every N>1，默认 1=零变）：非发送拍只消费不发送，
+        # k 照常推进（参考时间线/水位/星饿/预取语义全部不动）；发送拍整组并
+        # 1 条，目标=组末行绝对位 rows[k+N−1]（帧/爪同取组末行，口径一致），
+        # 首组含块界——换块接缝修正随整组导程一并下发，不以 1 行小步暴露。
+        _is_merged = args.cmd_every > 1 and (
+            k == 0 if args.cmd_first_only else k % args.cmd_every == 0)
+        # 发送拍 = 合步拍，或（first-only 口径）组后恢复的逐拍流式拍
+        _send_this = _is_merged or (args.cmd_first_only and k >= args.cmd_every)
+        if args.cmd_every > 1 and not _send_this:
+            k += 1
+            merged_skips += 1
         else:
-            seam_rest.append(d_mrad)
-        gp = send_grip(robot, chunk[k])
-        gap0 = float(np.max(np.abs(tgt - cur)))
-        drift = float(np.max(np.abs(tgt - HOME)))
-        if drift > args.max_excursion:
-            print(f"⛔ 漂移护栏：关节最大偏离 {drift * 1000:.0f} mrad > "
-                  f"{args.max_excursion * 1000:.0f}，停止循环（机械臂留在原地）")
-            aborted = True
-            break
-        if gap0 >= GAP_EPS:
-            b = bursts[k]
-            if args.do_exec:
-                # 帧突发：绝对截止配速（预算 tick−reserve 匀速铺满整行），
-                # SDK 单帧调用超预算只体现为丢拍重锚，绝不追发
-                fdt = (TICK - args.burst_reserve_ms / 1000.0) / len(b)
-                _t_f = time.perf_counter()
-                st = None
-                for _bi, _fi in enumerate(b):
-                    _fr = frames_all[_fi]
-                    _cmds = []
-                    for _ji in range(14):
-                        _c = JointCommand()
-                        _c.position = float(_fr[_ji])   # 标准关节只消费 position
-                        _cmds.append(_c)
-                    _st = robot.set_joint_commands(_cmds, joint_names=ARM_NAMES,
-                                                   time_from_start_s=args.tfs_ms / 1000.0)
-                    if not str(_st).startswith("ControlStatus.SUCCESS"):
-                        st = _st
-                        break
-                    _t_f += fdt
-                    if _bi < len(b) - 1:
-                        _sl = _t_f - time.perf_counter()
-                        if _sl > 0:
-                            time.sleep(_sl)
-                if st is not None:
-                    print(f"⛔ 下发非 SUCCESS（{st}），停止循环")
-                    aborted = True
-                    break
+            # ── 发送拍：合步拍发组末行、流式拍发本行（全部走 set_joint_commands
+            # burst 接口；接口铁律见文件头——本脚本不碰 set_joint_positions）──
+            tgi = min(k + args.cmd_every - 1, len(rows_abs) - 1) if _is_merged else k
+            cur = read_joints(robot, ARM_NAMES)
+            tgt = rows_abs[tgi]
+            cmd_delta = (tgt - last_tgt) if last_tgt is not None else np.zeros_like(tgt)
+            d_mrad = float(np.max(np.abs(cmd_delta))) * 1000
+            if seam_first is None:
+                seam_first = d_mrad          # 接缝尖峰：换块首发 |Δcmd|
             else:
-                st = "dry"   # 干跑彩排：打印节奏与遥测，绝不下发
-            n_fr = len(b)
-        else:
-            skip_sends += 1
-            n_fr = 0
-            st = "held（导程≈0 免发）"
-        last_tgt = tgt.copy()
-        k += 1
-        ach = read_joints(robot, ARM_NAMES)
-        err = float(np.max(np.abs(ach - tgt))) * 1000
-        track_err.append(err)
-        fr_s = (f"{n_fr}帧@{args.fps * args.frames_per_row:.0f}Hz" if n_fr
-                else "· 免发 ·")
-        print(f"  拍{k - 1}: |Δcmd| {d_mrad:5.1f} mrad"
-              f" | 导程 {gap0 * 1000:5.1f} → {fr_s}"
-              f" | 残差 {err:4.1f} mrad | {gp if gp else st}")
+                seam_rest.append(d_mrad)
+            gp = send_grip(robot, chunk[tgi])
+            gap0 = float(np.max(np.abs(tgt - cur)))
+            drift = float(np.max(np.abs(tgt - HOME)))
+            if drift > args.max_excursion:
+                print(f"⛔ 漂移护栏：关节最大偏离 {drift * 1000:.0f} mrad > "
+                      f"{args.max_excursion * 1000:.0f}，停止循环（机械臂留在原地）")
+                aborted = True
+                break
+            if gap0 >= GAP_EPS:
+                b = bursts[tgi]
+                if args.do_exec:
+                    # 帧突发：绝对截止配速（预算 tick−reserve 匀速铺满整行），
+                    # SDK 单帧调用超预算只体现为丢拍重锚，绝不追发
+                    fdt = (TICK - args.burst_reserve_ms / 1000.0) / len(b)
+                    _t_f = time.perf_counter()
+                    st = None
+                    for _bi, _fi in enumerate(b):
+                        _fr = frames_all[_fi]
+                        _cmds = []
+                        for _ji in range(14):
+                            _c = JointCommand()
+                            _c.position = float(_fr[_ji])   # 标准关节只消费 position
+                            _cmds.append(_c)
+                        _st = robot.set_joint_commands(_cmds, joint_names=ARM_NAMES,
+                                                       time_from_start_s=args.tfs_ms / 1000.0)
+                        if not str(_st).startswith("ControlStatus.SUCCESS"):
+                            st = _st
+                            break
+                        _t_f += fdt
+                        if _bi < len(b) - 1:
+                            _sl = _t_f - time.perf_counter()
+                            if _sl > 0:
+                                time.sleep(_sl)
+                    if st is not None:
+                        print(f"⛔ 下发非 SUCCESS（{st}），停止循环")
+                        aborted = True
+                        break
+                else:
+                    st = "dry"   # 干跑彩排：打印节奏与遥测，绝不下发
+                n_fr = len(b)
+            else:
+                skip_sends += 1
+                n_fr = 0
+                st = "held（导程≈0 免发）"
+            last_tgt = tgt.copy()
+            k += 1
+            ach = read_joints(robot, ARM_NAMES)
+            err = float(np.max(np.abs(ach - tgt))) * 1000
+            track_err.append(err)
+            fr_s = (f"{n_fr}帧@{args.fps * args.frames_per_row:.0f}Hz" if n_fr
+                    else "· 免发 ·")
+            print(f"  拍{k - 1}: |Δcmd| {d_mrad:5.1f} mrad"
+                  f" | 导程 {gap0 * 1000:5.1f} → {fr_s}"
+                  f" | 残差 {err:4.1f} mrad"
+                  + (f" | 合步[{tgi}]" if _is_merged else "")
+                  + f" | {gp if gp else st}")
 
     # ── 出口：最后一块消费到水位（或包络截短后耗尽）──
     _w = min(WMARK, len(chunk))
@@ -1346,7 +1528,7 @@ if _starve_t0 is not None:
     starve_total += _d
     starve_worst = max(starve_worst, _d)
 if GRIP and args.do_exec:
-    time.sleep(8.0)   # 夹爪反馈滞后 ~6.3s（2026-09-23 实测），留足再读终态
+    time.sleep(8.0)   # 等爪走完最后一程再读终态（死区 0.9s+满程 0.8s，含余量）
     for name, _ in GRIP["names"]:
         gs = robot.get_gripper_state(getattr(G1JointGroup, name))
         if gs is not None:
@@ -1362,7 +1544,9 @@ if len(infer_ms):
 if len(grab_ms):
     print(f"取图+读关节: {pstats(grab_ms)}")
 if len(tick_ms):
-    print(f"tick 服务时长: {pstats(tick_ms)} | 丢拍重锚 {dropped_ticks} | 免发 {skip_sends}")
+    print(f"tick 服务时长: {pstats(tick_ms)} | 丢拍重锚 {dropped_ticks} | 免发 {skip_sends}"
+          + (f" | 合步静默 {merged_skips} 拍（cmd-every {args.cmd_every}）"
+             if args.cmd_every > 1 else ""))
 if len(round_ms):
     print(f"块耗时: {pstats(round_ms)}")
 if track_err:
@@ -1373,6 +1557,8 @@ if seam_first_all:
     print(f"接缝尖峰（换块首拍 |Δcmd|）: 均值 {np.mean(seam_first_all):.1f} | 最大 "
           f"{max(seam_first_all):.1f} mrad | 块内均值 {_intra:.1f} mrad"
           f"（RTC A/B 主指标：--rtc-horizon on 应显著压低首拍/块内比）"
+          + (f"（合步口径：首发含 {args.cmd_every} 行组差，勿与直发跑直比）"
+             if args.cmd_every > 1 else "")
           + (f" | 搭接触发 {blend_hits} 块" if args.blend else ""))
 if starve_windows or starve_ticks:
     print(f"星饿: {starve_windows} 段 / {starve_ticks} 拍 / 共 {starve_total:.1f} s"
