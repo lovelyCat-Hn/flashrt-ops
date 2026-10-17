@@ -123,6 +123,40 @@ ap.add_argument("--cmd-first-only", action="store_true",
                      "步的组间大步 85-105 mrad 太肥（20261016 实录：块界治好但"
                      "误差搬进块内），流式 Pursuit 会把首组滞后自然吃回；须配 "
                      "--cmd-every>1，组后爪/臂恢复逐拍")
+ap.add_argument("--entry-match", action="store_true",
+                help="入口动态匹配换块（10-17 回放台 entry-match 移植，用户提案；"
+                     "与 --skip-install/--ref-offset/--blend/--cmd-every>1/"
+                     "--cmd-first-only 互斥——本模式取代时钟跳帧，按位姿选行）："
+                     "新块到来读臂实际关节位，①顺运动方向（主导关节不倒行）；"
+                     "②命令流单调（新目标须在上拍目标前进侧——追账段 gap 往小"
+                     "匹配=反向阶跃=伺服急停反转，171925 实证）；③首拍导程对齐"
+                     "稳态导程 g₀（近 N 次实发中位夹紧带 [min,max]）=接缝两侧"
+                     "速度连续；④前跳超 --entry-j-cap=内容落后→退行 0（EMA "
+                     "阻尼小步），防开环深跳棘轮；闭环新鲜重规划下内容落后罕见")
+ap.add_argument("--entry-dir-tol", type=float, default=0.002,
+                help="方向容差 rad（默认 2 mrad）：低于此值视为静止不约束方向")
+ap.add_argument("--entry-gap-win", type=int, default=4,
+                help="稳态导程 g₀ 中位窗口（默认 4 次实发；免发拍不计）")
+ap.add_argument("--entry-gap-min", type=float, default=0.008,
+                help="g₀ 夹紧下限 rad（默认 8 mrad）")
+ap.add_argument("--entry-gap-max", type=float, default=0.035,
+                help="g₀ 夹紧上限 rad（默认 35 mrad）：⚠必须——参考速度常快于臂"
+                     "追踪，块内导程单调恶化会经中位窗污染 g₀ 形成正反馈"
+                     "（回放台首跑实证 j=11→46、gap 29→138 失控）")
+ap.add_argument("--entry-dir-frac", type=float, default=0.5,
+                help="主导向关节阈值（默认 0.5）：只约束 |方向|≥frac×max 的关节，"
+                     "转向中的小关节豁免（全关节门被模型抖动打死，回放台首跑 "
+                     "13/26 块退行 0）")
+ap.add_argument("--entry-j-cap", type=int, default=12,
+                help="入口前跳深度上限（行）：超限=内容落后→退行 0（EMA 阻尼"
+                     "小步）；深跳消费块尾行→下块内容更落后→棘轮（回放台 "
+                     "172802 实证 j 爬到 39、残差 25.5→41）")
+ap.add_argument("--seam-alpha", type=float, default=0.0,
+                help="接缝窗 EMA α 起点（0=关，默认=主 α）：换块后前 --seam-beats "
+                     "拍 α 从此值线性爬回主 α（阶梯勿平切——硬切会把积压滞后"
+                     "一次放出成新凸点）。削块首 EMA 衰减尾峰值，稳态零税")
+ap.add_argument("--seam-beats", type=int, default=4,
+                help="接缝窗拍数=α 爬坡长（默认 4）；--seam-alpha 0 时无效")
 ap.add_argument("--burst-reserve-ms", type=float, default=6.0,
                 help="row-tick 内留给读关节/打印/换块的毫秒数：帧突发配速预算="
                      "tick−该值（默认 6）")
@@ -253,6 +287,19 @@ args = ap.parse_args()
 
 if args.ref_offset and not args.skip_install:
     raise SystemExit("--ref-offset 须与 --skip-install 同用（偏移定义在新计划行 0 上）")
+if args.entry_match:
+    if args.skip_install or args.ref_offset:
+        raise SystemExit("--entry-match 与 --skip-install/--ref-offset 互斥"
+                         "（入口匹配按位姿选行，取代时钟跳帧）")
+    if args.blend:
+        raise SystemExit("--entry-match 与 --blend 互斥（同回放台口径）")
+    if args.cmd_every > 1 or args.cmd_first_only:
+        raise SystemExit("--entry-match 与合步（--cmd-every>1/--cmd-first-only）"
+                         "互斥（同回放台口径；动态入口取代写死合步）")
+    if args.ema_alpha <= 0:
+        raise SystemExit("--entry-match 须配 --ema-alpha>0：方向/导程判据作用在"
+                         "滤波后的行序列上，裸行序列的模型抖动会打死方向门"
+                         "（回放台 v1 教训）")
 if args.fps > 40:
     raise SystemExit(f"--fps {args.fps} > 40 拒绝：tick {1000 / args.fps:.1f}ms 低于"
                      "取图+SDK 硬开销 ~25ms，必然连续丢拍")
@@ -375,10 +422,11 @@ if args.grip_ss:
         raise SystemExit("--grip-ss 需 0 ≤ 合阈 < 开阈 ≤ 100（带内=迟滞防抖）")
 if args.n_action_steps < 0:
     raise SystemExit("--n-action-steps 须 ≥ 0（0=换块即预取）")
-if args.n_action_steps == 0 and not args.skip_install:
-    raise SystemExit("水位 0（换块即预取）须配 --skip-install：推理落地时新块行 0 的"
-                     "墙钟槽位必已流逝 ~10 拍，不跳帧安装=每块首拍系统性回走"
-                     "（110411 锯齿同源）")
+if args.n_action_steps == 0 and not (args.skip_install or args.entry_match):
+    raise SystemExit("水位 0（换块即预取）须配 --skip-install 或 --entry-match："
+                     "推理落地时新块行 0 的墙钟槽位必已流逝 ~10 拍，不跳帧安装"
+                     "=每块首拍系统性回走（110411 锯齿同源）；entry-match 按"
+                     "位姿选行达到同一目的（不消费历史槽位）")
 print(f"[loop-traj] tick {TICK * 1000:.1f} ms（{args.fps} Hz）| 轨迹流 "
       f"{args.frames_per_row} 帧/行（≈{args.fps * args.frames_per_row}Hz {args.interp}"
       f"）| 突发预算 {TICK * 1000 - args.burst_reserve_ms:.1f} ms/行"
@@ -393,6 +441,10 @@ print(f"[loop-traj] tick {TICK * 1000:.1f} ms（{args.fps} Hz）| 轨迹流 "
       + ("（换块即预取，块长≈推理时延）" if args.n_action_steps == 0 else "")
       + f" | 星饿上限 {args.starve_limit}s"
       + (" | 跳帧安装" if args.skip_install else "")
+      + (f" | 入口动态匹配(跳深≤{args.entry_j_cap})"
+         if args.entry_match else "")
+      + (f" | 接缝α{args.seam_alpha}→{args.ema_alpha}/{args.seam_beats}拍"
+         if args.seam_alpha > 0 and args.ema_alpha > 0 else "")
       + (" | 偏移平移" if args.ref_offset else "")
       + (f" | RTC 引导 horizon {args.rtc_horizon}（max_w {args.rtc_max_w}）"
          if args.rtc_horizon > 0 else " | RTC 关")
@@ -1005,7 +1057,7 @@ _GRIP_SS_STATE = {}  # 状态机每爪当前态 'hi'/'lo'
 _GRIP_SS_SENT = {}   # 状态机每爪 (上次实发时刻, 上次实发值)
 
 
-def build_rows(cur, prev0=None, offset=None):
+def build_rows(cur, prev0=None, offset=None, seam=False):
     """chunk delta 块 → 链式限幅行目标（14 维，右臂在前）。
 
     ⚠ 2026-09-23 语义修正（同母本 plan_step）：训练管线
@@ -1018,6 +1070,9 @@ def build_rows(cur, prev0=None, offset=None):
     2026-10-12 对照判明块内重启版对接缝无效）：新块 rows[0] 先与上块末行滤波
     输出混合再起链，接缝首行同样被滤；首块/循环起点无历史即以 rows[0] 播种。
     滤波对象=链钳后的绝对行目标（与同事"钳位→滤波"同序），凸组合仍在包络内。
+    seam=True：接缝窗 α 阶梯（10-17 回放台移植）——换块后前 --seam-beats 拍
+    α 从 --seam-alpha 线性爬回主 α，削块首衰减尾峰值、稳态零税；仅跨块
+    有历史时生效（首块无接缝）。缺省 False=原口径逐位不变。
     """
     global _EMA_STATE
     rows = np.empty((len(chunk), 14), dtype=np.float32)
@@ -1034,17 +1089,28 @@ def build_rows(cur, prev0=None, offset=None):
         rows[kk] = prev
     if args.ema_alpha > 0:
         a = float(args.ema_alpha)
-        acc = rows[0] if _EMA_STATE is None else \
-            a * rows[0] + (1.0 - a) * _EMA_STATE
-        rows[0] = acc
-        for kk in range(1, len(rows)):
-            acc = a * rows[kk] + (1.0 - a) * acc
+        # 接缝窗 α 阶梯（seam=True 且有跨块历史时启用）：α 从 seam_alpha
+        # 线性爬回主 α；硬切会把积压滞后一次放出成新凸点（回放台离线实证）
+        _ramp = seam and args.seam_alpha > 0 and _EMA_STATE is not None
+        a_seam = float(args.seam_alpha)
+        n_sb = max(1, int(args.seam_beats))
+        acc = None
+        for kk in range(len(rows)):
+            if _ramp:
+                a_k = a_seam + (a - a_seam) * min(kk, n_sb) / n_sb
+            else:
+                a_k = a
+            if kk == 0:
+                acc = rows[0] if _EMA_STATE is None else \
+                    a_k * rows[0] + (1.0 - a_k) * _EMA_STATE
+            else:
+                acc = a_k * rows[kk] + (1.0 - a_k) * acc
             rows[kk] = acc
         _EMA_STATE = acc.copy()
     return rows
 
 
-def build_block_stream(cur, prev0=None, offset=None):
+def build_block_stream(cur, prev0=None, offset=None, seam=False):
     """换块时一次性：行目标 → [链起点]+行目标 样条插值 → 逐行分桶帧。
 
     返回 (rows_abs, frames_all, bursts)：frames_all (M,14) float32；
@@ -1055,7 +1121,7 @@ def build_block_stream(cur, prev0=None, offset=None):
     放慢播放，节奏语义同 native 的慢速彩排）。prev0 透传 build_rows
     （skip-install 参考连续：链起点=last_tgt，首帧恰=last_tgt=零缝步）。
     """
-    rows = build_rows(cur, prev0, offset)
+    rows = build_rows(cur, prev0, offset, seam=seam)
     _start = (np.asarray(cur, dtype=np.float32) if prev0 is None
               else np.asarray(prev0, dtype=np.float32))
     waypoints = np.vstack([_start[None, :], rows])
@@ -1275,6 +1341,8 @@ k = 0                                # 本块已消费步数
 _obs_k = 0                           # 预取观测拍摄时的本块拍号（跳帧安装用）
 n_swapped = 1                        # 已换入块数（首块同步换入计 1）
 blend_hits = 0                       # 前向搭接触发块数（--blend）
+entry_gap_hist = []                  # 实发拍 |Δcmd|（rad）滚动窗，g₀ 中位用（免发不计）
+entries = []                         # 各块入口行 j（首块不计；汇总用）
 last_tgt = None                      # 上一拍下发目标（|Δcmd|/接缝基准）
 _EMA_STATE = None                    # 循环起点重置：干跑预览那次 build 不作块 1 的跨块历史
 t_loop0 = time.perf_counter()        # 任务秒表
@@ -1362,6 +1430,52 @@ while not aborted:
         # 换块重建轨迹流：锚=当前实际位（链式限幅从实际位重新出发，块内开环
         # 执行、块间重锚校正——轨迹路线的固有节奏，同 infer_policy）
         _cur_sw = read_joints(robot, ARM_NAMES)
+        # ── 入口动态匹配（--entry-match，10-17 回放台移植）：按臂实时位姿选
+        # 新块首派行，取代时钟跳帧。①顺运动方向（主导关节不倒行）②命令流
+        # 单调（新目标须在上拍目标前进侧——追账段反向阶跃=伺服急停反转=
+        # 摆动，回放台 171925 实证）③首拍导程≈g₀（速度连续）④深跳超上限
+        # =内容落后→行 0（EMA 阻尼小步，防棘轮）。
+        if args.entry_match and last_tgt is not None and n_swapped > 1:
+            _plan = BASE_ARM[None, :] + np.concatenate(
+                [chunk[:, :7], chunk[:, 8:15]], axis=1)
+            if not entry_gap_hist:
+                entries.append(0)
+                print("  [入口匹配] 缺 g₀ 历史（上块全免发）→行 0")
+            else:
+                _g0_raw = float(np.median(
+                    entry_gap_hist[-args.entry_gap_win:]))
+                _g0 = float(np.clip(_g0_raw, args.entry_gap_min,
+                                    args.entry_gap_max))
+                _dir = last_tgt - _cur_sw
+                _mag = np.abs(_dir)
+                _dom = _mag >= args.entry_dir_frac * _mag.max()
+                _ds = np.sign(_dir)
+                _rel = _plan - _cur_sw[None]
+                _back = (_dom[None, :]
+                         & ((_rel * _ds[None, :]) < -args.entry_dir_tol))
+                _back_cmd = (_dom[None, :]
+                             & (((_plan - last_tgt[None]) * _ds[None, :])
+                                < -args.entry_dir_tol))
+                _viol = (_back | _back_cmd).any(axis=1)
+                _cand = np.where(~_viol)[0]
+                _gaps = np.max(np.abs(_rel), axis=1)
+                # 窗口完整余量 14 行（水位 0 块长≈13 拍）∩ 跳深上限
+                _jcap = min(max(0, len(chunk) - 14),
+                            max(0, int(args.entry_j_cap)))
+                if len(_cand) and (_cand <= _jcap).any():
+                    _cand = _cand[_cand <= _jcap]
+                    _entry = int(_cand[np.argmin(np.abs(_gaps[_cand] - _g0))])
+                    chunk = chunk[_entry:].copy()
+                    entries.append(_entry)
+                    print(f"  [入口匹配] j={_entry}（g₀={_g0 * 1000:.1f}"
+                          + (f"←{_g0_raw * 1000:.1f}夹紧"
+                             if _g0 != _g0_raw else "")
+                          + f" gap={_gaps[_entry] * 1000:.1f} mrad，可行行 "
+                          f"{len(_cand)}/{len(_plan)}；余 {len(chunk)} 行）")
+                else:
+                    entries.append(0)
+                    print(f"  [入口匹配] 前跳超上限{_jcap}→行 0"
+                          "（内容落后，EMA 阻尼小步）")
         # ── EMA 重播（10-12 真机否决修正，161933 实测拍0 p90 294.6/max 559.3）：
         # _EMA_STATE 原存整条 50 行链滤波完的链尾，而水位 10 弃尾每块只发 ~40
         # 行——状态记在旧计划未发送的尾巴上（超前已发送点 ~10 行 ≈ 数百 mrad），
@@ -1375,8 +1489,10 @@ while not aborted:
         # 50→330→50 = 脉动的残留源（跳帧安装只对了时间槽，没动链锚）。
         # 跳帧安装后新块行 0 本就 ≈ 墙钟正确位（≈last_tgt±模型修正），链改从
         # last_tgt 接续：首帧恰=last_tgt（零缝步），参考全程前向不重锚——同
-        # 同事方案「执行原始计划行、无重锚」的语义。非 skip-install 口径不变。
-        _prev0 = last_tgt if (args.skip_install and last_tgt is not None) else None
+        # 同事方案「执行原始计划行、无重锚」的语义。entry-match 同需参考
+        # 连续（首行=last_tgt+clip 修正，与入口判据同基准）。非二者口径不变。
+        _prev0 = last_tgt if ((args.skip_install or args.entry_match)
+                              and last_tgt is not None) else None
         _roff = None
         if _prev0 is not None and args.ref_offset:
             # 偏移平移（10-13）：新计划行 0 锚在观测滞后臂上，与参考链的失配量
@@ -1386,7 +1502,9 @@ while not aborted:
             # 吃不满包络余量 ±0.15；残余失配仍由链式限幅回走收敛兜底。
             _plan0 = BASE_ARM + np.concatenate([chunk[0][:7], chunk[0][8:15]])
             _roff = np.clip(last_tgt - _plan0, -args.delta_max, args.delta_max)
-        rows_abs, frames_all, bursts = build_block_stream(_cur_sw, prev0=_prev0, offset=_roff)
+        rows_abs, frames_all, bursts = build_block_stream(
+            _cur_sw, prev0=_prev0, offset=_roff,
+            seam=(args.entry_match and n_swapped > 1))
         # ── 前向搭接（--blend，10-12 回放台定案移植）：新块前 M 行目标替换为
         # 旧链末目标→rows[M−1] 直连——换块时新块行 0 落在臂后方 ~lag（预取到
         # 落地 ~10 拍臂又走了），原链会俯冲进回溯段=块首往复；搭接让参考链
@@ -1451,6 +1569,11 @@ while not aborted:
                 seam_rest.append(d_mrad)
             gp = send_grip(robot, chunk[tgi])
             gap0 = float(np.max(np.abs(tgt - cur)))
+            if args.entry_match and gap0 >= GAP_EPS:
+                # g₀ 滚动窗：只记实发拍（免发拍污染中位），同回放台口径
+                entry_gap_hist.append(d_mrad / 1000.0)
+                if len(entry_gap_hist) > 32:
+                    del entry_gap_hist[:-32]
             drift = float(np.max(np.abs(tgt - HOME)))
             if drift > args.max_excursion:
                 print(f"⛔ 漂移护栏：关节最大偏离 {drift * 1000:.0f} mrad > "
@@ -1560,6 +1683,12 @@ if seam_first_all:
           + (f"（合步口径：首发含 {args.cmd_every} 行组差，勿与直发跑直比）"
              if args.cmd_every > 1 else "")
           + (f" | 搭接触发 {blend_hits} 块" if args.blend else ""))
+if args.entry_match and entries:
+    _e = np.asarray(entries, float)              # 仅块 2+ 追加（首块无入口）
+    print(f"入口匹配: 块 {len(_e)} | j min/p50/max "
+          f"{_e.min():.0f}/{np.median(_e):.0f}/{_e.max():.0f}"
+          f"（行0 {int((_e == 0).sum())} 块；j 是内容/位姿失配的深读数，"
+          "闭环应显著浅于回放台）")
 if starve_windows or starve_ticks:
     print(f"星饿: {starve_windows} 段 / {starve_ticks} 拍 / 共 {starve_total:.1f} s"
           f"（最长 {starve_worst:.1f}s，上限 {args.starve_limit}s 未触发即健康）")
