@@ -128,7 +128,9 @@ ap.add_argument("--entry-match", action="store_true",
                      "4 行距恰落稳态带内=其手感好的机制解释，本模式是其动态精确化）。"
                      "③命令流单调闸（171925 摆动破案）：可行行还须在上拍目标"
                      "前进侧（主导关节）——追账段 gap 往 g₀ 匹配=把目标向后挪"
-                     "=逆着运动方向发反向阶跃=伺服急停反转；速度连续≠位置连续")
+                     "=逆着运动方向发反向阶跃=伺服急停反转；速度连续≠位置连续。"
+                     "④前跳深度上限 --entry-j-cap：超限=内容落后→退行 0"
+                     "（EMA 阻尼小步），防开环回放深跳棘轮")
 ap.add_argument("--entry-dir-tol", type=float, default=0.002,
                 help="方向容差 rad（默认 0.002=2 mrad）：关节 |末目标−实际| 低于此"
                      "值视为静止不约束方向；行反向超过此容差才判违约")
@@ -146,6 +148,12 @@ ap.add_argument("--entry-dir-frac", type=float, default=0.5,
                 help="主导向关节阈值（默认 0.5）：只约束 |方向| ≥ frac×max|方向| "
                      "的关节；全关节门被模型抖动打死（任一关节转向即全块违约，"
                      "首跑 13/26 块退行 0），转向中的小关节豁免")
+ap.add_argument("--entry-j-cap", type=int, default=12,
+                help="入口前跳深度上限（行，--entry-match 用）：超限=内容落后于"
+                     "指令态→退回行 0（跨块 EMA+接缝阶梯把后退小步阻尼到 "
+                     "α×gap≈几 mrad）。深跳会消费块尾行→下块内容更落后→棘轮"
+                     "式越跳越深（172802 实证 j 爬到 39、残差 25.5→41）；闭环"
+                     "每块新鲜重规划不存在内容落后，此闸只在开环回放兜底")
 ap.add_argument("--seam-alpha", type=float, default=0.0,
                 help="接缝窗 EMA α 起点（默认 0=关，用主 α）：块边界后 α 从此值"
                      "线性爬回主 α（历时 --seam-beats 拍，阶梯勿平切——硬切回主值"
@@ -477,7 +485,7 @@ _mode_send = ("每行一令直发" if MERGE == 1
               + ("·仅首组，组后流式" if args.cmd_first_only
                  else f"（每 {MERGE} 行一令，间隔 {MERGE} 拍）")) \
     + (f" | 跳帧安装@{args.install_offset}" if args.install_offset > 0 else "") \
-    + (" | 入口动态匹配" if args.entry_match else "") \
+    + (f" | 入口动态匹配(跳深≤{args.entry_j_cap})" if args.entry_match else "") \
     + (f" | 接缝α{args.seam_alpha}→{args.ema_alpha}/{args.seam_beats}拍"
        if args.seam_alpha > 0 and args.ema_alpha > 0 else "") \
     + (" | 跳回溯段" if args.skip_retrace else "") \
@@ -595,8 +603,9 @@ for bi, tgt_blk in enumerate(BLOCKS):
             _jmax = len(rows) - SWAPS[bi]   # 保消费窗完整：入口过深=窗口越界截断
             # （10-17 首跑后段轨迹变慢可行行缩到 2-12 行，j 被推到 44-48，
             # 消费 2 拍/块=66ms 换块，节奏密度翻倍——候选限制在窗内）
-            if len(_cand) and (_cand <= _jmax).any():
-                _cand = _cand[_cand <= _jmax]
+            _jcap = min(_jmax, max(0, int(args.entry_j_cap)))
+            if len(_cand) and (_cand <= _jcap).any():
+                _cand = _cand[_cand <= _jcap]
                 _entry = int(_cand[np.argmin(np.abs(_gaps[_cand] - _g0))])
                 rows = rows[_entry:_entry + SWAPS[bi]]    # 消费窗整体右移到入口
                 _skip_note = (f" | 入口匹配 j={_entry}"
@@ -606,13 +615,14 @@ for bi, tgt_blk in enumerate(BLOCKS):
                               f" mrad，可行行 {len(_cand)}/{len(_rel)}）")
                 entries.append(_entry)
             else:
-                _cand2 = np.arange(max(0, _jmax + 1))
-                _entry = int(_cand2[np.argmin(
-                    _viol_mat[:_jmax + 1].sum(axis=1))])  # 反向量最小的行（勿退行0）
-                rows = rows[_entry:_entry + SWAPS[bi]]
-                _skip_note = (f" | 入口匹配部分违约 j={_entry}"
-                              f"（反向量最小 {_viol_mat.sum(axis=1)[_entry]} 关节·行）")
-                entries.append(_entry)
+                # 深跳超上限=内容落后（172802 棘轮：深跳消费块尾行→下块内容
+                # 更落后→越跳越深，j 爬到 39、残差 25.5→41）。退回行 0：
+                # 跨块 EMA 携带+接缝阶梯把后退小步阻尼到 α×gap（几 mrad），
+                # 命令不深跳、消费回时钟对齐、棘轮解除；替代旧「部分违约
+                # 最小行」回退（那仍是深跳，只是换了个罪名）。
+                rows = rows[:SWAPS[bi]]
+                _skip_note = " | 入口超跳深上限→行0（内容落后，EMA 阻尼小步）"
+                entries.append(0)
         else:
             rows = rows[:SWAPS[bi]]
             _skip_note = " | 入口匹配缺 g₀（上块全免发）→行 0"
