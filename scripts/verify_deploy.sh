@@ -5,6 +5,11 @@ set -u
 PY=~/miniforge3/envs/flash_pyrt311/bin/python
 PASS=0; FAIL=0
 
+# 权重=自备项（不随 bundle 分发，见 DEPLOY.md §1/§4-10）；就位则 ②④⑤ 真冒烟
+CKPT=~/holy/models/pi05_g1_onlypick_deploy
+WS=$(stat -c %s -L "$CKPT/model.safetensors" 2>/dev/null || echo 0)   # -L 穿透软链
+WOK=$([ "$WS" -ge 5000000000 ] && echo yes || echo no)
+
 ck() {  # ck <名称> <命令...>
     local name="$1"; shift
     if "$@" >/dev/null 2>&1; then echo "  ✅ $name"; PASS=$((PASS+1));
@@ -25,9 +30,15 @@ echo "=== ② 部署位置 ==="
 ck "miniforge3 env" test -x "$PY"
 ck "FlashRT editable 目录" test -d ~/holy/FlashRT/flash_rt
 ck "编译产物 fa2 .so" ls ~/holy/FlashRT/flash_rt/flash_rt_fa2*.so
-ck "norm_stats（openpi q01/q99）" ls ~/holy/models/pi05_lerobot_base/assets/physical-intelligence/libero/norm_stats.json
 ck "tokenizer" ls ~/.cache/flash_rt/paligemma_tokenizer.model
-ck "权重字节数（14467165872）" test "$(stat -c %s ~/holy/models/pi05_lerobot_base/model.safetensors 2>/dev/null)" = 14467165872
+if [ "$WOK" = yes ]; then
+    ck "在役权重就位（$((WS / 2**30))GiB，软链可解析）" test -s "$CKPT/model.safetensors"
+    ck "在役 norm_stats（ckpt 自带 q01/q99）" ls "$CKPT/norm_stats.json"
+else
+    echo "  ℹ️ 权重未就位（自备项，不随 bundle、不判失败）——就位方式："
+    echo "     把 ckpt 目录备到 $CKPT/（model.safetensors ≥5GiB 可为软链 + norm_stats.json + config.json）"
+    echo "     装配/来源见 DEPLOY.md §4-10 与 USAGE.md §3.5；就位后重跑本脚本，④⑤ 自动真冒烟"
+fi
 
 echo "=== ③ 环境链 ==="
 unset PYTHONPATH LD_LIBRARY_PATH LD_PRELOAD
@@ -62,30 +73,50 @@ except ImportError:
     c("本地补丁: norm_mode/normalize_state", _need_hotfix)
 from flash_rt.core.utils.norm_stats import load_norm_stats, pi05_candidates
 import pathlib
-s = load_norm_stats(pi05_candidates(pathlib.Path("/home/galbot/holy/models/pi05_lerobot_base")),
-                    checkpoint_dir=pathlib.Path("/home/galbot/holy/models/pi05_lerobot_base"))
+s = None
+for _d in (pathlib.Path("/home/galbot/holy/models/pi05_g1_onlypick_deploy"),   # 在役优先
+           pathlib.Path("/home/galbot/holy/models/pi05_lerobot_base")):        # base 兜底
+    try:
+        s = load_norm_stats(pi05_candidates(_d), checkpoint_dir=_d)
+        break
+    except Exception:
+        pass
+if s is None:
+    raise RuntimeError("无 norm_stats 可载（权重自备项未就位，见 ② 提示）")
 c("norm_stats 加载", lambda: f"actions q01 {len(s['actions']['q01'])} 维")
 sys.exit(0 if ok else 1)
 EOF
 [ $? -eq 0 ] && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
 
-echo "=== ④ 加载+推理（2视角全INT8，期望 (10,7)、~0.2s 级） ==="
-PI05_NO_GRAPH=1 FVK_PI05_RTX_FORCE_INT8=1 "$PY" ~/holy/scripts/inference/load_pi05.py 2>&1 | tail -3
-[ ${PIPESTATUS[0]} -eq 0 ] && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
+echo "=== ④ 加载冒烟（在役 ckpt：safetensors+norm_stats+前端链路） ==="
+if [ "$WOK" = yes ]; then
+    PI05_NO_GRAPH=1 FVK_PI05_RTX_FORCE_INT8=1 "$PY" ~/holy/scripts/inference/load_pi05.py 2>&1 | tail -3
+    [ ${PIPESTATUS[0]} -eq 0 ] && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
+else
+    echo "  ⏭️ 跳过（权重未就位，见 ② 提示）"
+fi
 
-echo "=== ⑤ graph 抓图探测（信息项：r35.5 驱动预期崩，崩了不算失败） ==="
+echo "=== ⑤ graph 抓图探测（信息项：旧驱动 r35.5 预期崩，崩了不算失败） ==="
 # graph 抓图发生在首次 predict（不是 load），必须真推理才探得到
+if [ "$WOK" = yes ]; then
 PI05_NO_GRAPH=0 timeout 240 "$PY" - <<'EOF' >/dev/null 2>&1
-import numpy as np, flash_rt
-m = flash_rt.load_model("/home/galbot/holy/models/pi05_lerobot_base", config="pi05")
-imgs = {"image": np.zeros((224,224,3), np.uint8),
-        "wrist_image": np.zeros((224,224,3), np.uint8)}
-a = m.predict(imgs, prompt="test", state=np.zeros(8, np.float32))
+import json, pathlib, numpy as np, flash_rt
+from flash_rt.core.utils.norm_stats import load_norm_stats, pi05_candidates
+ck = pathlib.Path("/home/galbot/holy/models/pi05_g1_onlypick_deploy")
+mf = json.loads((ck / "flashrt_deploy.json").read_text()) if (ck / "flashrt_deploy.json").exists() else {}
+st = load_norm_stats(pi05_candidates(ck), checkpoint_dir=ck)
+m = flash_rt.load_model(str(ck), config="pi05", action_dim=int(mf.get("action_dim", 16)))
+imgs = {k: np.zeros((224, 224, 3), np.uint8)
+        for k in ("image", "wrist_image", "wrist_image_right")}   # 三视图，与在役闭环同键
+a = m.predict(imgs, prompt="test", state=np.zeros(len(st["state"]["q01"]), np.float32))
 print("graph predict OK", a.shape)
 EOF
 RC=$?
-[ $RC -ne 0 ] && echo "  ⚠️ graph 仍崩（exit $RC）——沿用 PI05_NO_GRAPH=1，与新机驱动无关的结论可更新" \
-          || echo "  🎉 新机 graph 能用！bench 可开 PI05_NO_GRAPH=0 拿更快延迟"
+[ $RC -ne 0 ] && echo "  ⚠️ graph 崩（exit $RC）——沿用 PI05_NO_GRAPH=1（r35.5 驱动属预期）" \
+          || echo "  🎉 graph 能用！bench 可开 PI05_NO_GRAPH=0 拿更快延迟"
+else
+    echo "  ⏭️ 跳过（权重未就位，见 ② 提示）"
+fi
 
 echo ""
 echo "===== 验收汇总: PASS=$PASS FAIL=$FAIL ====="

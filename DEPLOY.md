@@ -60,10 +60,11 @@ tar --exclude='miniforge3/pkgs' --exclude='holy/FlashRT/build*' \
 
 内容 = v2 减 `holy/models`：conda 全环境（flash_pyrt311/flashrt/pi05）、
 FlashRT 源码、torch aarch64 wheel、PaliGemMa tokenizer。**权重/模型目录
-不随包**——新机要跑推理另拷 `holy/models`（或继续用 v2 全量包）；脚本/
-文档照旧走 git 轨。部署步骤同 §2（解压 → git pull → 热修 → 验收），
-仅第 ① 步的 tar 文件名换成 v3；没拷 models 前 verify_deploy.sh 的
-权重与推理项会报错（它检查 base 权重字节数并实际加载模型），属预期。
+不随包**——新机要跑推理另拷在役 ckpt 到 `~/holy/models/pi05_g1_onlypick_deploy/`
+（model.safetensors ≥5GiB 可为软链 + norm_stats.json + config.json，装配见
+§4-10/USAGE §3.5）；脚本/文档照旧走 git 轨。部署步骤同 §2（解压 → git pull →
+热修 → 验收），仅第 ① 步的 tar 文件名换成 v3；没拷权重前 verify_deploy.sh 的
+权重项只给就位指引（不判失败），④⑤ 冒烟自动跳过，③ 环境链照常全绿。
 
 ## 2. 目标机部署
 

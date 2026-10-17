@@ -2,11 +2,13 @@
 """pi0.5 权重加载验证：只加载不出动作，确认 checkpoint + norm_stats + 前端链路通。
 
 用法:
-  ~/miniforge3/envs/flash_pyrt311/bin/python ~/holy/scripts/load_pi05.py
+  ~/miniforge3/envs/flash_pyrt311/bin/python ~/holy/scripts/inference/load_pi05.py [ckpt目录]
+  缺省加载在役 ckpt（pi05_g1_onlypick_deploy）；也可显式传 base 等其他目录。
 （新 shell 先: unset PYTHONPATH LD_LIBRARY_PATH LD_PRELOAD）
 """
 import logging
 import pathlib
+import sys
 import time
 
 logging.basicConfig(
@@ -16,7 +18,8 @@ logging.basicConfig(
 import torch  # noqa: E402
 import flash_rt  # noqa: E402
 
-CKPT = pathlib.Path("/home/galbot/holy/models/pi05_lerobot_base")
+CKPT = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else \
+    pathlib.Path("/home/galbot/holy/models/pi05_g1_onlypick_deploy")
 
 print("flash_rt:", flash_rt.__version__, "| torch:", torch.__version__,
       "| capability:", torch.cuda.get_device_capability())
