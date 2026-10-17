@@ -151,6 +151,11 @@ ap.add_argument("--entry-dir-floor", type=float, default=0.005,
                 help="显著运动地板 rad（默认 5 mrad）：|参考-臂差|低于地板的关节"
                      "不设方向门，全臂低于地板=门全免（平静段噪声关节当主导会把"
                      "可行行清零→假回退→块内呼吸，180940 实证）；0=关地板")
+ap.add_argument("--entry-no-dir-gate", action="store_true",
+                help="入口匹配全关方向门，纯 gap 匹配（argmin|gap−g₀| 恒有解）。"
+                     "方向门两代各有「全窗不可行」死帧：符号门锁过冲帧（180940）、"
+                     "绝对门锁拖曳帧（181946 参考钉臂前 40-98 mrad 脉冲）；闭环里"
+                     "防反向阶跃交回 α 阶梯阻尼（≤0.12×步长）+cap 兜底")
 ap.add_argument("--entry-j-cap", type=int, default=12,
                 help="入口前跳深度上限（行）：超限=内容落后→退行 0（EMA 阻尼"
                      "小步）；深跳消费块尾行→下块内容更落后→棘轮（回放台 "
@@ -445,7 +450,8 @@ print(f"[loop-traj] tick {TICK * 1000:.1f} ms（{args.fps} Hz）| 轨迹流 "
       + ("（换块即预取，块长≈推理时延）" if args.n_action_steps == 0 else "")
       + f" | 星饿上限 {args.starve_limit}s"
       + (" | 跳帧安装" if args.skip_install else "")
-      + (f" | 入口动态匹配(锚=参考,跳深≤{args.entry_j_cap})"
+      + (f" | 入口动态匹配(锚=参考,跳深≤{args.entry_j_cap}"
+         + (",无方向门" if args.entry_no_dir_gate else "") + ")"
          if args.entry_match else "")
       + (f" | 接缝α{args.seam_alpha}→{args.ema_alpha}/{args.seam_beats}拍"
          if args.seam_alpha > 0 and args.ema_alpha > 0 else "")
@@ -1467,18 +1473,24 @@ while not aborted:
                         & (_mag >= args.entry_dir_frac
                            * max(float(_mag.max()), 1e-9)))
                 _rel = _plan - _cur_sw[None]
-                # 门无符号绝对化（180940 二破案）：原 _ds=sign(last_tgt−cur)
-                # 帧在臂冲过参考时反转，把「前进续流」误判为违约、可行行清零
-                # （任何跳深都救不了→假回退）。单调语义本就绝对：
-                # ①不指挥主导关节退到臂后方 ②不把参考往回带（命令流单调，
-                # 追账段反向阶跃=伺服急停反转=摆动，回放台 171925 实证）。
-                _back = (_dom[None, :]
-                         & (_rel < -args.entry_dir_tol))
-                _back_cmd = (_dom[None, :]
-                             & ((_plan - last_tgt[None])
-                                < -args.entry_dir_tol))
-                _viol = (_back | _back_cmd).any(axis=1)
-                _cand = np.where(~_viol)[0]
+                # 方向门三代教训（174448/180940/181946）：符号门锁过冲帧
+                # （_ds 反转把前进续流误判违约）、绝对门锁拖曳帧（计划爬不过
+                # last_tgt 时参考被钉在臂前 40-98 mrad，每块行0+阶梯展开=脉冲，
+                # 拖曳恒存）——两代各有一类「全窗不可行」死帧。--entry-no-dir-gate
+                # 全关后选择恒有解：argmin|gap−g₀| 自然落跨回点/最近逼近点，
+                # backward 步长被 α 阶梯阻尼到 ≤0.12×（软着陆是 EMA 本体职能，
+                # 门只是回放台开环内容下的校验器，闭环里越位）。
+                if args.entry_no_dir_gate:
+                    _cand = np.arange(len(_plan))
+                else:
+                    _ds = np.sign(_dir)
+                    _back = (_dom[None, :]
+                             & ((_rel * _ds[None, :]) < -args.entry_dir_tol))
+                    _back_cmd = (_dom[None, :]
+                                 & (((_plan - last_tgt[None]) * _ds[None, :])
+                                    < -args.entry_dir_tol))
+                    _viol = (_back | _back_cmd).any(axis=1)
+                    _cand = np.where(~_viol)[0]
                 # gap 锚=last_tgt（174448 改锚，见上注）：闭环臂恒落后参考，
                 # 锚臂位=每块深跳追参考；锚参考=在计划跨回指令流处接入。
                 _gaps = np.max(np.abs(_plan - last_tgt[None]), axis=1)
