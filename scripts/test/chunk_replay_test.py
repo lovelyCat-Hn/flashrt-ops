@@ -129,9 +129,22 @@ ap.add_argument("--entry-match", action="store_true",
 ap.add_argument("--entry-dir-tol", type=float, default=0.002,
                 help="方向容差 rad（默认 0.002=2 mrad）：关节 |末目标−实际| 低于此"
                      "值视为静止不约束方向；行反向超过此容差才判违约")
-ap.add_argument("--entry-gap-win", type=int, default=4,
-                help="稳态导程 g₀ 中位数窗口（默认 4 拍）：取上一块末尾最近 N 个"
-                     "实发拍的导程中位数（免发拍不计入；单拍值受模型抖动污染）")
+ap.add_argument("--entry-gap-min", type=float, default=0.008,
+                help="g₀ 夹紧下限 rad（默认 0.008=8 mrad，--entry-match 用）")
+ap.add_argument("--entry-gap-max", type=float, default=0.035,
+                help="g₀ 夹紧上限 rad（默认 0.035=35 mrad）。⚠必须有：参考速度"
+                     "常快于臂追踪速度→块内导程单调恶化→中位数被滞后污染→"
+                     "入口越跳越深→g₀ 更大的正反馈（10-17 首跑实证 j=11→46、"
+                     "gap 29→138 mrad 失控）；夹紧后入口回到 j≈1-4 小步档")
+ap.add_argument("--entry-dir-frac", type=float, default=0.5,
+                help="主导向关节阈值（默认 0.5）：只约束 |方向| ≥ frac×max|方向| "
+                     "的关节；全关节门被模型抖动打死（任一关节转向即全块违约，"
+                     "首跑 13/26 块退行 0），转向中的小关节豁免")
+ap.add_argument("--hold-ms", type=float, default=330.0,
+                help="块间静止窗 ms（默认 330=历史口径）。⚠接缝 A/B 建议 0：固定"
+                     "消费行数模式下 hold 让臂每块从静止零起步=人为顿挫节奏，"
+                     "且回放周期翻倍（27 块 17.4s vs 录制 9.6s）；0=连续追踪"
+                     "（在役节奏：11 拍/块无休止，推理时延由消费窗覆盖）")
 ap.add_argument("--max-excursion", type=float, default=3.0,
                 help="偏离起始位护栏 rad（任一关节超限即停）")
 ap.add_argument("--envelope", type=str, default=None,
@@ -445,7 +458,7 @@ _mode_send = ("每行一令直发" if MERGE == 1
 print(f"[mode] {'⚠ 真机下发' if args.do_exec else '干跑（零下发）'}"
       f" | tick {TICK * 1000:.1f} ms（{args.fps} Hz）| {_mode_send}"
       f" | 链式限幅 ±{args.delta_max} | tfs {args.tfs_ms:g} ms"
-      f" | 漂移护栏 ±{args.max_excursion} rad | 块间 hold 330 ms")
+      f" | 漂移护栏 ±{args.max_excursion} rad | 块间 hold {args.hold_ms:g} ms")
 
 if not args.do_exec:
     print("\n== [干跑] 逐块计划（零锚=0 位，真实首行导程以真机重锚为准）==")
@@ -529,25 +542,33 @@ for bi, tgt_blk in enumerate(BLOCKS):
         # 可行行=所有运动关节均不反向（反向行=关节回摆=摆幅来源）；
         # 入口=可行行中 max 关节 gap 最接近 g₀（上一块末尾稳态导程）的行。
         if _gap_hist:
-            _g0 = float(np.median(_gap_hist[-args.entry_gap_win:]))
+            _g0_raw = float(np.median(_gap_hist[-args.entry_gap_win:]))
+            _g0 = float(np.clip(_g0_raw, args.entry_gap_min, args.entry_gap_max))
             _dir = last_tgt - cur
-            _mov = np.abs(_dir) > args.entry_dir_tol
+            _mag = np.abs(_dir)
+            _dom = _mag >= args.entry_dir_frac * _mag.max()   # 主导向关节掩码
             _ds = np.sign(_dir)
             _rel = rows - cur[None]                       # (50,14)
-            _viol = (_mov[None, :]
-                     & ((_rel * _ds[None, :]) < -args.entry_dir_tol)).any(axis=1)
+            _back = (_dom[None, :]
+                     & ((_rel * _ds[None, :]) < -args.entry_dir_tol))
+            _viol = _back.any(axis=1)                     # 主导向关节有反向=违约
             _cand = np.where(~_viol)[0]
             _gaps = np.max(np.abs(_rel), axis=1)
             if len(_cand):
                 _entry = int(_cand[np.argmin(np.abs(_gaps[_cand] - _g0))])
                 rows = rows[_entry:_entry + SWAPS[bi]]    # 消费窗整体右移到入口
                 _skip_note = (f" | 入口匹配 j={_entry}"
-                              f"（g₀={_g0 * 1000:.1f} gap={_gaps[_entry] * 1000:.1f}"
+                              f"（g₀={_g0 * 1000:.1f}"
+                              + (f"←{_g0_raw * 1000:.1f}夹紧" if _g0 != _g0_raw else "")
+                              + f" gap={_gaps[_entry] * 1000:.1f}"
                               f" mrad，可行行 {len(_cand)}/{len(_rel)}）")
                 entries.append(_entry)
             else:
-                rows = rows[:SWAPS[bi]]
-                _skip_note = " | 入口匹配落空（全块方向违约）→行 0"
+                _entry = int(np.argmin(_back.sum(axis=1)))  # 反向量最小的行（勿退行0）
+                rows = rows[_entry:_entry + SWAPS[bi]]
+                _skip_note = (f" | 入口匹配部分违约 j={_entry}"
+                              f"（反向量最小 {_back.sum(axis=1)[_entry]} 关节·行）")
+                entries.append(_entry)
         else:
             rows = rows[:SWAPS[bi]]
             _skip_note = " | 入口匹配缺 g₀（上块全免发）→行 0"
@@ -735,8 +756,9 @@ for bi, tgt_blk in enumerate(BLOCKS):
               f" | 导程 {gap0 * 1000:5.1f} → {_fr_s}"
               f" | 动 {act:4.1f} 残差 {err:4.1f} mrad")
     if bi < n_blocks - 1 and args.rows_per_block is not None:
-        time.sleep(0.33)   # 固定/全块模式才补推理窗；auto 的等待已建模在延迟行里，
-        # 真实闭环换块瞬间衔接（落地即换，无窗）
+        time.sleep(args.hold_ms / 1000.0)   # 默认 330=历史口径；接缝 A/B 建议 0
+        # （hold 让臂每块从静止零起步=人为顿挫+回放周期翻倍，10-17 实测）；auto
+        # 模式的等待已建模在延迟行里，真实闭环换块瞬间衔接（落地即换，无窗）
 
 fin = read_joints()
 _entry_s = (f" | 入口行 min/p50/max {min(entries)}/{int(np.percentile(entries, 50))}"
