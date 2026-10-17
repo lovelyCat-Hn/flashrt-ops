@@ -441,7 +441,7 @@ print(f"[loop-traj] tick {TICK * 1000:.1f} ms（{args.fps} Hz）| 轨迹流 "
       + ("（换块即预取，块长≈推理时延）" if args.n_action_steps == 0 else "")
       + f" | 星饿上限 {args.starve_limit}s"
       + (" | 跳帧安装" if args.skip_install else "")
-      + (f" | 入口动态匹配(跳深≤{args.entry_j_cap})"
+      + (f" | 入口动态匹配(锚=参考,跳深≤{args.entry_j_cap})"
          if args.entry_match else "")
       + (f" | 接缝α{args.seam_alpha}→{args.ema_alpha}/{args.seam_beats}拍"
          if args.seam_alpha > 0 and args.ema_alpha > 0 else "")
@@ -1430,11 +1430,15 @@ while not aborted:
         # 换块重建轨迹流：锚=当前实际位（链式限幅从实际位重新出发，块内开环
         # 执行、块间重锚校正——轨迹路线的固有节奏，同 infer_policy）
         _cur_sw = read_joints(robot, ARM_NAMES)
-        # ── 入口动态匹配（--entry-match，10-17 回放台移植）：按臂实时位姿选
-        # 新块首派行，取代时钟跳帧。①顺运动方向（主导关节不倒行）②命令流
-        # 单调（新目标须在上拍目标前进侧——追账段反向阶跃=伺服急停反转=
-        # 摆动，回放台 171925 实证）③首拍导程≈g₀（速度连续）④深跳超上限
-        # =内容落后→行 0（EMA 阻尼小步，防棘轮）。
+        # ── 入口动态匹配（--entry-match，10-17 回放台移植；10-17 晚真机
+        # 174448 破案改锚）：闭环模型每块从观测臂位重锚定 → 新 chunk 前段天然
+        # 落在 last_tgt 之后（臂恒追着指令流跑），gap 若锚臂位则可行行只剩
+        # 1-13/50、每块深跳 gap 30-117 mrad 或超上限→行 0 回拖——一冲一收
+        # =摆幅（α 阶梯把深跳摊成拍1-6 的 12-13 mrad 反弹，块中 |Δcmd| 放大
+        # 3×）。锚改 last_tgt（续流语义）：在计划自然跨回参考的位置接入，首拍
+        # 步长≈g₀。①顺运动方向（主导关节不倒行）②命令流单调（追账段反向
+        # 阶跃=伺服急停反转=摆动，回放台 171925 实证）③距 last_tgt≈g₀
+        # ④深跳超上限=内容落后→行 0（EMA 阻尼小步，防棘轮）。
         if args.entry_match and last_tgt is not None and n_swapped > 1:
             _plan = BASE_ARM[None, :] + np.concatenate(
                 [chunk[:, :7], chunk[:, 8:15]], axis=1)
@@ -1458,7 +1462,9 @@ while not aborted:
                                 < -args.entry_dir_tol))
                 _viol = (_back | _back_cmd).any(axis=1)
                 _cand = np.where(~_viol)[0]
-                _gaps = np.max(np.abs(_rel), axis=1)
+                # gap 锚=last_tgt（174448 改锚，见上注）：闭环臂恒落后参考，
+                # 锚臂位=每块深跳追参考；锚参考=在计划跨回指令流处接入。
+                _gaps = np.max(np.abs(_plan - last_tgt[None]), axis=1)
                 # 窗口完整余量 14 行（水位 0 块长≈13 拍）∩ 跳深上限
                 _jcap = min(max(0, len(chunk) - 14),
                             max(0, int(args.entry_j_cap)))
