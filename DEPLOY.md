@@ -66,11 +66,35 @@ FlashRT 源码、torch aarch64 wheel、PaliGemMa tokenizer。**权重/模型目�
 热修 → 验收），仅第 ① 步的 tar 文件名换成 v3；没拷权重前 verify_deploy.sh 的
 权重项只给就位指引（不判失败），④⑤ 冒烟自动跳过，③ 环境链照常全绿。
 
+### v4 = 免热修环境包（2026-10-17，不含权重，7.1G）
+
+v3 配方不动（同样的 excludes），差别只在**源机状态**：此刻 echo 机的
+FlashRT 树已含全部本地补丁（apply_hotfix probe 10/10：action_dim/norm_mode/
+graph WithFlags/chunk env/INT8 per-site/W8A16 门控）+ **W8A16 编译产物**
+（flash_rt_kernels .so 2026-10-09 版，`strings | grep -c w8a16` = 232）。
+新机解压即满血，**§2 的热修步骤变 no-op**（apply_hotfix.sh 幂等，probe 报
+「已在」属正常；留着当体检也行）。
+
+```bash
+cd ~
+tar --exclude='miniforge3/pkgs' --exclude='holy/FlashRT/build*' \
+    -cf ~/flashrt_bundle_v4_env.tar \
+    miniforge3 holy/FlashRT holy/cuda_warmup.py holy/pytorch/dist \
+    .cache/flash_rt
+# 成品 7.1G；不要加 -z。sha256 见下。
+```
+
+| 项 | 值 |
+|---|---|
+| sha256 | `f05251a30a9fb9037d2e64a10ec5ea43dd56f3586e2e017b3906be90f36c2178` |
+| 抽查命令 | `tar -tf … \| grep w8a16`（源码+.so 在）·解压后 `strings FlashRT/flash_rt/flash_rt_kernels*.so \| grep -c w8a16`（=232） |
+| FlashRT 本地提交基线 | 含 8f08ca85（W8A16 kernel）；新机启用 `FVK_PI05_RTX_W8A16_DECODER=1` 无需重编 |
+
 ## 2. 目标机部署
 
 ```bash
 # ① 解压（必须在 ~ 下！解到别的目录 mv 也行，但最终位置必须是 /home/galbot/{miniforge3,holy,.cache}）
-cd ~ && tar -xf flashrt_bundle_v2.tar
+cd ~ && tar -xf flashrt_bundle_v4_env.tar
 
 # ② 拉代码轨（脚本+文档以 git 为准，覆盖 bundle 里的冻结快照）
 #    新机首次连 GitHub 需先配认证（二选一）：
@@ -81,7 +105,8 @@ cp -r /tmp/ops/scripts/. ~/holy/scripts/
 cp -r /tmp/ops/hotfix_flashrt ~/holy/
 cp /tmp/ops/*.md ~/holy/
 
-# ③ 应用 FlashRT 热修（bundle 源码缺两个本地补丁，背景见 2.1；幂等）
+# ③ FlashRT 热修体检（v4 包已含全部本地补丁，此处应报「已在」= no-op；
+#    仅 v2/v3 老包需要真修。幂等，重复跑无副作用）
 bash ~/holy/hotfix_flashrt/apply_hotfix.sh
 
 # ④ 一键验收
@@ -99,7 +124,7 @@ bash ~/holy/scripts/verify_deploy.sh
 不需要 conda init、不需要 pip、不需要联网——env 自包含（含 numpy 1.26.4 + opencv 4.10 钉版），所有编译产物随包。
 如果目标机已有 miniconda/anaconda：**不要跑 miniforge 的 conda init**（双 init 打架），用绝对路径即可。
 
-### 2.1 FlashRT 本地补丁热修（解压后必做，10 秒）
+### 2.1 FlashRT 本地补丁热修（v4 包免做；v2/v3 老包解压后必做，10 秒）
 
 bundle 里的 FlashRT 源码停在 09-21 打包版（`6406a1c2`），**缺两个后续纯 Python 补丁**
 （`6425fe8d` 动作维可配置、`bff59419` 归一化语义 norm_mode/normalize_state）——G1 三件套
