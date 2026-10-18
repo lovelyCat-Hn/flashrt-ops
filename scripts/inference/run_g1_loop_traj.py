@@ -47,7 +47,7 @@ RTC：--rtc-horizon N > 0 时启用推理侧前缀引导（同 native，FlashRT 
 
 ⚠ 加 --exec 会连续真实驱动双臂！安全设计（与 native 同款）：
   1. 只动双臂 14 关节；腿/头维度永不下发；夹爪仅 --grip 显式开启时下发
-     （0~100% → manifest 标定宽度，变化超 --grip-chg 才发，非阻塞不等反馈）
+     （0~100%% → manifest 标定宽度，变化超 --grip-chg 才发，非阻塞不等反馈）
   2. 换块时行目标链式限幅 ±--delta-max rad/行 + 逐帧包络钳位；漂移护栏：
      行目标偏离起始位超 --max-excursion → 立即停止循环
   3. q 键即时退出（后台监听线程，SDK 阻塞中也可退）；物理急停第一优先级
@@ -125,8 +125,9 @@ ap.add_argument("--cmd-first-only", action="store_true",
                      "--cmd-every>1，组后爪/臂恢复逐拍")
 ap.add_argument("--entry-match", action="store_true",
                 help="入口动态匹配换块（10-17 回放台 entry-match 移植，用户提案；"
-                     "与 --skip-install/--ref-offset/--blend/--cmd-every>1/"
-                     "--cmd-first-only 互斥——本模式取代时钟跳帧，按位姿选行）："
+                     "与 --skip-install/--ref-offset/--blend 互斥——本模式取代时钟"
+                     "跳帧，按位姿选行；10-18 起可与合步 --cmd-every 组合：入口管"
+                     "从哪行接入，合步管怎么消费，正交）："
                      "新块到来读臂实际关节位，①顺运动方向（主导关节不倒行）；"
                      "②命令流单调（新目标须在上拍目标前进侧——追账段 gap 往小"
                      "匹配=反向阶跃=伺服急停反转，171925 实证）；③首拍导程对齐"
@@ -166,6 +167,12 @@ ap.add_argument("--entry-fill-tol", type=float, default=0.002,
 ap.add_argument("--entry-fill-max", type=int, default=15,
                 help="凹陷回补搜索窗（行，默认 15）：窗内回到坑前水平=桥接填平；"
                      "超窗=持续后撤（真倒退）放行不改")
+ap.add_argument("--entry-fwd-bias", type=float, default=0.0,
+                help="前向偏好软代价 ε（默认 0=关，建议 0.5，10-18 用户提案）："
+                     "argmin 目标改 |gap−g₀| + ε×后方越界量（各关节 max(0,"
+                     "last_tgt−plan) 最大值）——绝对值匹配分不清参考两侧同距行，"
+                     "后方侧=首拍倒退（EMA 阻尼≤0.12× 但非零）；软偏好非硬门"
+                     "（无死帧），挑「方向相同又绝对误差最近」的行")
 ap.add_argument("--entry-j-cap", type=int, default=12,
                 help="入口前跳深度上限（行）：超限=内容落后→退行 0（EMA 阻尼"
                      "小步）；深跳消费块尾行→下块内容更落后→棘轮（回放台 "
@@ -189,13 +196,13 @@ ap.add_argument("--ema-alpha", type=float, default=0.0,
                      "重启版对接缝无效）——接缝/深尾垃圾的执行侧兜底杠杆；首跑"
                      "先 0 判读样条本身")
 ap.add_argument("--grip-ema-alpha", type=float, default=0.0,
-                help="爪指令 EMA 低通系数（0=关，默认）：grip% 流逐拍平滑后再进"
+                help="爪指令 EMA 低通系数（0=关，默认）：grip%% 流逐拍平滑后再进"
                      "发送判定。臂维 EMA（--ema-alpha）管不了爪：build_rows 只滤"
                      " [:7]+[8:15]，爪维 dim7/15 直通 send_grip。⚠单独用治不了"
                      "冻结（111901 终审：病根=每条新指令重启行程，细流仍是流）；"
                      "与 --grip-ss 配套做去抖穿越判定，候选 0.1")
 ap.add_argument("--grip-ss", type=str, default="",
-                help="爪状态机「开阈,合阈」如 50,35（空=关，默认）：平滑后爪%"
+                help="爪状态机「开阈,合阈」如 50,35（空=关，默认）：平滑后爪%%"
                      "≥开阈→置开态发一次、≤合阈→置合态发一次、带内不发；无翻转"
                      "时平滑值漂离上次实发 ≥15 点且距上次下发 ≥2.0s 才补发一条"
                      "（中间宽度意图）。机制依据（111901 终审）："
@@ -314,9 +321,6 @@ if args.entry_match:
                          "（入口匹配按位姿选行，取代时钟跳帧）")
     if args.blend:
         raise SystemExit("--entry-match 与 --blend 互斥（同回放台口径）")
-    if args.cmd_every > 1 or args.cmd_first_only:
-        raise SystemExit("--entry-match 与合步（--cmd-every>1/--cmd-first-only）"
-                         "互斥（同回放台口径；动态入口取代写死合步）")
     if args.ema_alpha <= 0:
         raise SystemExit("--entry-match 须配 --ema-alpha>0：方向/导程判据作用在"
                          "滤波后的行序列上，裸行序列的模型抖动会打死方向门"
@@ -464,8 +468,9 @@ print(f"[loop-traj] tick {TICK * 1000:.1f} ms（{args.fps} Hz）| 轨迹流 "
       + (" | 跳帧安装" if args.skip_install else "")
       + (f" | 入口动态匹配(锚=参考,跳深≤{args.entry_j_cap}"
          + (",无方向门" if args.entry_no_dir_gate else "")
-         + (",凹陷填补" if args.entry_fill_dip else "") + ")"
-         if args.entry_match else "")
+         + (",凹陷填补" if args.entry_fill_dip else "")
+         + (f",前向偏好ε{args.entry_fwd_bias:g}" if args.entry_fwd_bias > 0 else "")
+         + ")" if args.entry_match else "")
       + (f" | 接缝α{args.seam_alpha}→{args.ema_alpha}/{args.seam_beats}拍"
          if args.seam_alpha > 0 and args.ema_alpha > 0 else "")
       + (" | 偏移平移" if args.ref_offset else "")
@@ -1512,14 +1517,26 @@ while not aborted:
                             max(0, int(args.entry_j_cap)))
                 if len(_cand) and (_cand <= _jcap).any():
                     _cand = _cand[_cand <= _jcap]
-                    _entry = int(_cand[np.argmin(np.abs(_gaps[_cand] - _g0))])
+                    # 前向偏好软代价（10-18 用户提案）：|gap−g₀| 绝对值匹配在参考
+                    # 两侧同距行间分不出方向，选中后方侧=首拍倒退（EMA 阻尼≤0.12×
+                    # 但非零）。目标加 ε×后方越界量（各关节 last_tgt−plan 正部
+                    # 最大值，rad）——软偏好非硬门，无死帧，纯选择层不加内容。
+                    _obj = np.abs(_gaps[_cand] - _g0)
+                    if args.entry_fwd_bias > 0:
+                        _behind = np.maximum(
+                            last_tgt[None, :] - _plan, 0.0).max(axis=1)
+                        _obj = _obj + args.entry_fwd_bias * _behind[_cand]
+                    _entry = int(_cand[np.argmin(_obj)])
                     chunk = chunk[_entry:].copy()
                     entries.append(_entry)
                     print(f"  [入口匹配] j={_entry}（g₀={_g0 * 1000:.1f}"
                           + (f"←{_g0_raw * 1000:.1f}夹紧"
                              if _g0 != _g0_raw else "")
-                          + f" gap={_gaps[_entry] * 1000:.1f} mrad，可行行 "
-                          f"{len(_cand)}/{len(_plan)}；余 {len(chunk)} 行）")
+                          + f" gap={_gaps[_entry] * 1000:.1f} mrad"
+                          + (f"，后越={_behind[_entry] * 1000:.1f}"
+                             if args.entry_fwd_bias > 0 else "")
+                          + f"，可行行 {len(_cand)}/{len(_plan)}；"
+                          f"余 {len(chunk)} 行）")
                 else:
                     entries.append(0)
                     _nf = np.where(~_viol)[0]
