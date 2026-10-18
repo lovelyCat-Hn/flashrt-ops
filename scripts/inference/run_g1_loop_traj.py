@@ -1696,6 +1696,7 @@ while not aborted:
                       if _grp_idx < len(args.cmd_every_ramp) else args.cmd_every)
             _send_this = k >= _grp_k0 + _grp_n - 1
             _is_merged = args.cmd_every > 1 and _send_this
+            _grp_lo = _grp_k0 if _send_this else k   # 组首行（组跨帧下界）
             if _send_this:
                 _grp_k0, _grp_idx = k + 1, _grp_idx + 1
         else:
@@ -1704,6 +1705,7 @@ while not aborted:
             # 发送拍 = 合步拍，或（first-only 口径）组后恢复的逐拍流式拍
             _send_this = _is_merged or (args.cmd_first_only and k >= args.cmd_every)
             _grp_n = args.cmd_every
+            _grp_lo = k                               # 均匀合步组首=k 本身
         if args.cmd_every > 1 and not _send_this:
             k += 1
             merged_skips += 1
@@ -1735,7 +1737,14 @@ while not aborted:
                 aborted = True
                 break
             if gap0 >= GAP_EPS:
-                b = bursts[tgi]
+                # 组跨帧（10-18 用户提案）：F>1 且合步拍 → 下发整组 N 行的全部
+                # 插值帧（240Hz cubic 斜坡滑过 4 行导程，替代 133ms 阶梯）。
+                # 楼梯稳态：纹波 = Δ·e^(−kT)/(1−e^(−kT))（Δ=29/T=133ms → ±15
+                # mrad）；子帧化 Δ/8、T/8 → ±1.9 mrad，均值导程不变=速度不花
+                # （ramp 花导程买平滑，插值不花）。F=1 恒旧路径零变（单路点）。
+                b = (list(range(_grp_lo * args.frames_per_row,
+                                (tgi + 1) * args.frames_per_row))
+                     if (_is_merged and args.frames_per_row > 1) else bursts[tgi])
                 if args.do_exec:
                     # 帧突发：绝对截止配速（预算 tick−reserve 匀速铺满整行），
                     # SDK 单帧调用超预算只体现为丢拍重锚，绝不追发
