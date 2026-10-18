@@ -169,10 +169,11 @@ ap.add_argument("--entry-fill-max", type=int, default=15,
                      "超窗=持续后撤（真倒退）放行不改")
 ap.add_argument("--entry-fwd-bias", type=float, default=0.0,
                 help="前向偏好软代价 ε（默认 0=关，建议 0.5，10-18 用户提案）："
-                     "argmin 目标改 |gap−g₀| + ε×后方越界量（各关节 max(0,"
-                     "last_tgt−plan) 最大值）——绝对值匹配分不清参考两侧同距行，"
-                     "后方侧=首拍倒退（EMA 阻尼≤0.12× 但非零）；软偏好非硬门"
-                     "（无死帧），挑「方向相同又绝对误差最近」的行")
+                     "argmin 目标改 |gap−g₀| + ε×后方越界量（主导关节 max(0,"
+                     "last_tgt−plan) 最大值；151241 修正：全关节计罚会把臂落后"
+                     "的导程常数抬进所有浅行=挑深不挑向）——绝对值匹配分不清参考"
+                     "两侧同距行，后方侧=首拍倒退（EMA 阻尼≤0.12× 但非零）；"
+                     "软偏好非硬门（无死帧），挑「方向相同又绝对误差最近」的行")
 ap.add_argument("--entry-j-cap", type=int, default=12,
                 help="入口前跳深度上限（行）：超限=内容落后→退行 0（EMA 阻尼"
                      "小步）；深跳消费块尾行→下块内容更落后→棘轮（回放台 "
@@ -1519,12 +1520,17 @@ while not aborted:
                     _cand = _cand[_cand <= _jcap]
                     # 前向偏好软代价（10-18 用户提案）：|gap−g₀| 绝对值匹配在参考
                     # 两侧同距行间分不出方向，选中后方侧=首拍倒退（EMA 阻尼≤0.12×
-                    # 但非零）。目标加 ε×后方越界量（各关节 last_tgt−plan 正部
-                    # 最大值，rad）——软偏好非硬门，无死帧，纯选择层不加内容。
+                    # 但非零）。目标加 ε×后方越界量——软偏好非硬门，无死帧，纯
+                    # 选择层不加内容。后方越界只在主导关节上计（151241 二破案）：
+                    # 臂恒落后参考一段导程，用 last_tgt 全关节计罚会把落后关节的
+                    # ≈导程常数抬进所有浅行——ε 名义挑前向、实为挑深跳（j 被推
+                    # 深、参考更热），且同罚不改排序只加热。限主导关节=纯「模型
+                    # 自身是否在倒退」的度量；全臂平静段 _dom 全假=罚项自动退场。
                     _obj = np.abs(_gaps[_cand] - _g0)
                     if args.entry_fwd_bias > 0:
                         _behind = np.maximum(
-                            last_tgt[None, :] - _plan, 0.0).max(axis=1)
+                            (last_tgt[None, :] - _plan) * _dom[None, :],
+                            0.0).max(axis=1)
                         _obj = _obj + args.entry_fwd_bias * _behind[_cand]
                     _entry = int(_cand[np.argmin(_obj)])
                     chunk = chunk[_entry:].copy()
