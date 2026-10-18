@@ -123,6 +123,15 @@ ap.add_argument("--cmd-first-only", action="store_true",
                      "步的组间大步 85-105 mrad 太肥（20261016 实录：块界治好但"
                      "误差搬进块内），流式 Pursuit 会把首组滞后自然吃回；须配 "
                      "--cmd-every>1，组后爪/臂恢复逐拍")
+ap.add_argument("--cmd-every-ramp", type=str, default="",
+                help="缝侧细笔画：换块后前几组的组宽序列，逗号分隔（如 '1,1,2'=组"
+                     "0/1/2 各并 1/1/2 行、组 3 起回落 --cmd-every；默认空=关恒 N）。"
+                     "动机（10-18 N 扫描）：缝上方向修正所有 N 同幅（重规划修正本身），"
+                     "显形与否∝渲染笔画粗细（拍≥1 p50：N=2 11.5 vs N=4 29.4）——"
+                     "缝侧 1/1/2 行细笔把修正角画成圆滑拐弯，组 3 起仍吃 N=4 导程"
+                     "（干脆度/爪沿不动）；顺带修 entry-match 锚定被首组 tgi=k+N−1 "
+                     "吃掉 N−1 行的精度损失（组宽 1 时下发=锚行 j 本身）。"
+                     "与 --cmd-first-only 互斥")
 ap.add_argument("--entry-match", action="store_true",
                 help="入口动态匹配换块（10-17 回放台 entry-match 移植，用户提案；"
                      "与 --skip-install/--ref-offset/--blend 互斥——本模式取代时钟"
@@ -337,6 +346,18 @@ if args.cmd_every < 1:
     raise SystemExit("--cmd-every 须 ≥ 1（1=纯 30Hz 直发零变）")
 if args.cmd_first_only and args.cmd_every <= 1:
     raise SystemExit("--cmd-first-only 须配 --cmd-every > 1（否则无合步组可言）")
+args.cmd_every_ramp = ([int(x) for x in args.cmd_every_ramp.split(",")
+                        if x.strip()] if args.cmd_every_ramp else [])
+if args.cmd_every_ramp:
+    if args.cmd_every <= 1:
+        raise SystemExit("--cmd-every-ramp 须配 --cmd-every > 1（无合步组则无组宽可言）")
+    if any(g < 1 for g in args.cmd_every_ramp):
+        raise SystemExit("--cmd-every-ramp 组宽须 ≥1")
+    if len(args.cmd_every_ramp) > 16:
+        raise SystemExit("--cmd-every-ramp 序列过长（≤16 组）")
+    if args.cmd_first_only:
+        raise SystemExit("--cmd-every-ramp 与 --cmd-first-only 互斥（缝侧细笔取代"
+                         "「首组合步+组后流式」口径）")
 if args.cmd_every > 1 and args.blend:
     raise SystemExit("--cmd-every > 1 与 --blend 互斥：blend 把块首重铺细步"
                      "（消块首尖峰），合步把 N 拍并 1 条大步（消指令沿密度）"
@@ -460,6 +481,8 @@ print(f"[loop-traj] tick {TICK * 1000:.1f} ms（{args.fps} Hz）| 轨迹流 "
       + (f" | 爪EMA α={args.grip_ema_alpha:g}" if args.grip_ema_alpha > 0 else "")
       + (f" | 合步 1/{args.cmd_every}"
          + ("·仅首组，组后流式" if args.cmd_first_only else "")
+         + (f"，缝侧细笔 {'/'.join(map(str, args.cmd_every_ramp))}→{args.cmd_every}"
+            if args.cmd_every_ramp else "")
          if args.cmd_every > 1 else "")
       + (f" | 爪状态机 {GRIP_SS[0]:g}/{GRIP_SS[1]:g}" if GRIP_SS is not None else "")
       + (f" | 帧落盘 {_frames_dir.name}" if _frames_dir is not None else "")
@@ -1398,6 +1421,8 @@ starve_worst = 0.0                   # 最长星饿段 s
 _starve_t0 = None                    # 当前星饿段起点（None=不在星饿）
 skip_sends = 0                       # 导程 <GAP_EPS 免发拍数
 merged_skips = 0                     # 合步静默拍数（cmd-every>1 只消费不发送）
+_grp_k0 = 0                          # ramp 当前组起点拍号（块内，--cmd-every-ramp）
+_grp_idx = 0                         # 已耗 ramp 组数（耗尽后恒 cmd_every）
 dropped_ticks = 0                    # 落后超 1 拍的重锚次数（丢拍）
 next_t = time.perf_counter()
 swap_envelope_check()
@@ -1429,6 +1454,7 @@ while not aborted:
         _dump_chunk(chunk, BASE_ARM, n_swapped, _dur)   # n_swapped 初值=1（首块计入）→ 块2 起 idx 连号不覆盖
         prev_block_ticks = k          # 上块消费拍数（重置前捕获，表头用）
         k = 0
+        _grp_k0 = _grp_idx = 0        # ramp 组游标随块复位
         seam_flush()
         if _starve_t0 is not None:
             _d = t_tick - _starve_t0
@@ -1660,19 +1686,32 @@ while not aborted:
     else:
         # ── 合步节流（--cmd-every N>1，默认 1=零变）：非发送拍只消费不发送，
         # k 照常推进（参考时间线/水位/星饿/预取语义全部不动）；发送拍整组并
-        # 1 条，目标=组末行绝对位 rows[k+N−1]（帧/爪同取组末行，口径一致），
-        # 首组含块界——换块接缝修正随整组导程一并下发，不以 1 行小步暴露。
-        _is_merged = args.cmd_every > 1 and (
-            k == 0 if args.cmd_first_only else k % args.cmd_every == 0)
-        # 发送拍 = 合步拍，或（first-only 口径）组后恢复的逐拍流式拍
-        _send_this = _is_merged or (args.cmd_first_only and k >= args.cmd_every)
+        # 1 条，目标=组末行绝对位（帧/爪同取组末行，口径一致）。
+        # --cmd-every-ramp：缝侧组宽序列（1/1/2→N），组游标 _grp_k0/_grp_idx
+        # 随块复位；组宽=1 的发送拍 tgi=k=锚行 j 本身（entry-match 匹配精度
+        # 不再被 +N−1 吃掉）。g₀ 窗只记满宽组（单位=4 行组差，细笔拍不入窗）。
+        _ramp_on = bool(args.cmd_every_ramp) and args.cmd_every > 1
+        if _ramp_on:
+            _grp_n = (args.cmd_every_ramp[_grp_idx]
+                      if _grp_idx < len(args.cmd_every_ramp) else args.cmd_every)
+            _send_this = k >= _grp_k0 + _grp_n - 1
+            _is_merged = args.cmd_every > 1 and _send_this
+            if _send_this:
+                _grp_k0, _grp_idx = k + 1, _grp_idx + 1
+        else:
+            _is_merged = args.cmd_every > 1 and (
+                k == 0 if args.cmd_first_only else k % args.cmd_every == 0)
+            # 发送拍 = 合步拍，或（first-only 口径）组后恢复的逐拍流式拍
+            _send_this = _is_merged or (args.cmd_first_only and k >= args.cmd_every)
+            _grp_n = args.cmd_every
         if args.cmd_every > 1 and not _send_this:
             k += 1
             merged_skips += 1
         else:
             # ── 发送拍：合步拍发组末行、流式拍发本行（全部走 set_joint_commands
             # burst 接口；接口铁律见文件头——本脚本不碰 set_joint_positions）──
-            tgi = min(k + args.cmd_every - 1, len(rows_abs) - 1) if _is_merged else k
+            tgi = (k if _ramp_on else
+                   (min(k + args.cmd_every - 1, len(rows_abs) - 1) if _is_merged else k))
             cur = read_joints(robot, ARM_NAMES)
             tgt = rows_abs[tgi]
             cmd_delta = (tgt - last_tgt) if last_tgt is not None else np.zeros_like(tgt)
@@ -1683,7 +1722,8 @@ while not aborted:
                 seam_rest.append(d_mrad)
             gp = send_grip(robot, chunk[tgi])
             gap0 = float(np.max(np.abs(tgt - cur)))
-            if args.entry_match and gap0 >= GAP_EPS:
+            if (args.entry_match and gap0 >= GAP_EPS
+                    and _grp_n == args.cmd_every):
                 # g₀ 滚动窗：只记实发拍（免发拍污染中位），同回放台口径
                 entry_gap_hist.append(d_mrad / 1000.0)
                 if len(entry_gap_hist) > 32:
@@ -1740,7 +1780,7 @@ while not aborted:
             print(f"  拍{k - 1}: |Δcmd| {d_mrad:5.1f} mrad"
                   f" | 导程 {gap0 * 1000:5.1f} → {fr_s}"
                   f" | 残差 {err:4.1f} mrad"
-                  + (f" | 合步[{tgi}]" if _is_merged else "")
+                  + (f" | 合步[{tgi}]×{_grp_n}" if _is_merged else "")
                   + f" | {gp if gp else st}")
 
     # ── 出口：最后一块消费到水位（或包络截短后耗尽）──
