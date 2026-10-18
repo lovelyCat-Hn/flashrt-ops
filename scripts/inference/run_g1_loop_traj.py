@@ -156,6 +156,16 @@ ap.add_argument("--entry-no-dir-gate", action="store_true",
                      "方向门两代各有「全窗不可行」死帧：符号门锁过冲帧（180940）、"
                      "绝对门锁拖曳帧（181946 参考钉臂前 40-98 mrad 脉冲）；闭环里"
                      "防反向阶跃交回 α 阶梯阻尼（≤0.12×步长）+cap 兜底")
+ap.add_argument("--entry-fill-dip", action="store_true",
+                help="凹陷填补（10-18 用户提案）：|gap−g₀| 绝对值匹配可选中参考后"
+                     "方的行=首拍倒退，块内短促倒退段也照样入流=残摆源；按关节把"
+                     "回补窗内的短倒退凹陷线性桥接填平（取 0 持位/镜像取正侧都是"
+                     "桥的特例），须配 --entry-match")
+ap.add_argument("--entry-fill-tol", type=float, default=0.002,
+                help="凹陷判定的倒退步阈 rad（默认 2 mrad，与方向门 tol 同源）")
+ap.add_argument("--entry-fill-max", type=int, default=15,
+                help="凹陷回补搜索窗（行，默认 15）：窗内回到坑前水平=桥接填平；"
+                     "超窗=持续后撤（真倒退）放行不改")
 ap.add_argument("--entry-j-cap", type=int, default=12,
                 help="入口前跳深度上限（行）：超限=内容落后→退行 0（EMA 阻尼"
                      "小步）；深跳消费块尾行→下块内容更落后→棘轮（回放台 "
@@ -296,6 +306,8 @@ args = ap.parse_args()
 
 if args.ref_offset and not args.skip_install:
     raise SystemExit("--ref-offset 须与 --skip-install 同用（偏移定义在新计划行 0 上）")
+if args.entry_fill_dip and not args.entry_match:
+    raise SystemExit("--entry-fill-dip 需要 --entry-match（填补在入口匹配流内执行）")
 if args.entry_match:
     if args.skip_install or args.ref_offset:
         raise SystemExit("--entry-match 与 --skip-install/--ref-offset 互斥"
@@ -451,7 +463,8 @@ print(f"[loop-traj] tick {TICK * 1000:.1f} ms（{args.fps} Hz）| 轨迹流 "
       + f" | 星饿上限 {args.starve_limit}s"
       + (" | 跳帧安装" if args.skip_install else "")
       + (f" | 入口动态匹配(锚=参考,跳深≤{args.entry_j_cap}"
-         + (",无方向门" if args.entry_no_dir_gate else "") + ")"
+         + (",无方向门" if args.entry_no_dir_gate else "")
+         + (",凹陷填补" if args.entry_fill_dip else "") + ")"
          if args.entry_match else "")
       + (f" | 接缝α{args.seam_alpha}→{args.ema_alpha}/{args.seam_beats}拍"
          if args.seam_alpha > 0 and args.ema_alpha > 0 else "")
@@ -1514,6 +1527,46 @@ while not aborted:
                             if len(_nf) else "全窗无可行行")
                     print(f"  [入口匹配] 前跳超上限{_jcap}→行 0"
                           f"（{_why}，EMA 阻尼小步）")
+            # ── 凹陷填补（--entry-fill-dip，10-18 用户提案）：门全关后
+            # argmin|gap−g₀| 是绝对值匹配，参考两侧同距的行都可选——选中后方侧
+            # =首拍倒退（残摆源）；块内模型抖动的短促倒退段也照样入流。修补=
+            # 按关节把「回补窗内的短倒退凹陷」从坑前水平线性桥到回补行（用户
+            # 例：5→−7→−4→…→12 填成 5→桥→12，"补到能顺利衔接上的那个拍"；
+            # 取 0 持位/镜像取正侧都是桥的特例）。超窗不回补=持续后撤（真倒退）
+            # 放行——真后撤是平滑趋势非方向翻转，伺服追得上，不吃模型合法修正。
+            # 在 EMA 阶梯之前执行，EMA 再低通一次。
+            if args.entry_fill_dip:
+                _abs = BASE_ARM[None, :] + np.concatenate(
+                    [chunk[:, :7], chunk[:, 8:15]], axis=1)
+                _ftol = float(args.entry_fill_tol)
+                _fmax = max(2, int(args.entry_fill_max))
+                _seq = np.vstack([last_tgt[None, :], _abs])   # 锚=指令流尾
+                _ndip = _nrow = 0
+                for _j in range(_seq.shape[1]):
+                    _x = _seq[:, _j]
+                    _i = 1
+                    while _i < len(_x):
+                        if _x[_i] < _x[_i - 1] - _ftol:       # 凹陷起点
+                            _lvl = _x[_i - 1]
+                            _rec = -1
+                            for _k in range(_i, min(len(_x), _i + _fmax)):
+                                if _x[_k] >= _lvl - _ftol:
+                                    _rec = _k
+                                    break
+                            if _rec > 0:                       # 窗内回补→桥
+                                _x[_i:_rec] = np.linspace(
+                                    _lvl, _x[_rec], _rec - _i + 2)[1:-1]
+                                _ndip += 1
+                                _nrow += _rec - _i
+                                _i = _rec
+                            else:
+                                _i += 1                        # 真倒退放行
+                        else:
+                            _i += 1
+                chunk[:, :7] = _seq[1:, :7] - BASE_ARM[None, :7]
+                chunk[:, 8:15] = _seq[1:, 7:14] - BASE_ARM[None, 7:]
+                if _ndip:
+                    print(f"  [凹陷填补] 桥接 {_ndip} 处 / {_nrow} 行")
         # ── EMA 重播（10-12 真机否决修正，161933 实测拍0 p90 294.6/max 559.3）：
         # _EMA_STATE 原存整条 50 行链滤波完的链尾，而水位 10 弃尾每块只发 ~40
         # 行——状态记在旧计划未发送的尾巴上（超前已发送点 ~10 行 ≈ 数百 mrad），
