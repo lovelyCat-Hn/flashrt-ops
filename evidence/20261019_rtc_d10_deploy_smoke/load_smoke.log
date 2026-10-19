@@ -1,0 +1,23 @@
+GPU does not advertise FP8 support: disabling FP8 paths for the Pi0.5 RTX pipeline.
+  autotune: tested 6 algos, best=4 (86.928 us)
+  autotune: tested 7 algos, best=1 (196.394 us)
+  autotune: tested 7 algos, best=2 (77.28 us)
+  autotune: tested 7 algos, best=0 (326.115 us)
+  autotune: tested 8 algos, best=3 (278.413 us)
+  autotune: tested 7 algos, best=1 (127.12 us)
+  autotune: tested 8 algos, best=2 (353.45 us)
+  autotune: tested 8 algos, best=3 (310.637 us)
+  autotune: tested 6 algos, best=3 (2818.64 us)
+  autotune: tested 6 algos, best=3 (2773.82 us)
+  autotune: tested 8 algos, best=5 (2644.02 us)
+  autotune: tested 1 algos, best=0 (5.6576 us)
+  autotune: tested 8 algos, best=0 (66.112 us)
+  autotune: tested 2 algos, best=1 (32.4192 us)
+  autotune: tested 1 algos, best=0 (69.5136 us)
+  autotune: tested 1 algos, best=0 (66.7456 us)
+  autotune: tested 1 algos, best=0 (67.5232 us)
+  autotune: tested 1 algos, best=0 (13.1328 us)
+load 10.3s
+predict 无前缀（首块免引导路径）: shape=(50, 16) 4ms | 臂维幅值 p50=0.0301 爪维范围=[-1.4,0.5]
+predict 带 rtc_prefix(10,16): shape=(50, 16) 0ms | 与无前缀差异 max|Δ|=2.4109
+SMOKE PASS

@@ -262,6 +262,13 @@ ap.add_argument("--rtc-horizon", type=int, default=0,
                      "0=关（默认）。前缀=旧块未消费尾段重锚进新块坐标系")
 ap.add_argument("--rtc-max-w", type=float, default=10.0,
                 help="RTC 最大引导权重（lerobot max_guidance_weight 默认 10）")
+ap.add_argument("--head-crop", action="store_true",
+                help="头相机观测追加训练同款裁剪放大（letterbox224 → 裁 "
+                     "[126:214,52:172] → Lanczos4 拉回 164×224 → 上下补 30px "
+                     "黑条）。训练头图带此处理的 ckpt（sft_1012 系："
+                     "sft1012_training_rtc / dropout20）推理必带，漏做="
+                     "train/serve 图像分布失配（10-15 place 相 R 爪不放同款病）；"
+                     "默认关=在役 letterbox224 行为零变")
 ap.add_argument("--tfs-ms", type=float, default=0.0,
                 help="每帧 time_from_start_s 毫秒数：0=尽快到达（官方语义 fastest "
                      "arrival，官方 100Hz 流式示例同值，默认）；>0=期望到达时限"
@@ -500,6 +507,7 @@ print(f"[loop-traj] tick {TICK * 1000:.1f} ms（{args.fps} Hz）| 轨迹流 "
       + (" | 偏移平移" if args.ref_offset else "")
       + (f" | RTC 引导 horizon {args.rtc_horizon}（max_w {args.rtc_max_w}）"
          if args.rtc_horizon > 0 else " | RTC 关")
+      + (" | 头图训练裁剪放大" if args.head_crop else "")
       + (f" | 帧到达时限 {args.tfs_ms:g} ms" if args.tfs_ms > 0 else ""))
 
 
@@ -890,6 +898,38 @@ def letterbox224(img):
     return _cv
 
 
+# ── 头图训练裁剪放大（--head-crop，2026-10-19 trained-RTC 权重试跑）────────
+# 复现同事数据管线对头相机的处理：/home/galbot/image_preprocessor.py
+# ImagePreprocessor._apply_head_training_crop 原样内联（其顶层 import
+# emulate_data_collection 在 /home/galbot/infer_policy/，跨目录 import 脆弱，
+# 故不 import 只内联，常量逐一对齐源文件；与 ab_test/1015 B 线内联逐位一致）。
+# 训练视频头图 = letterbox224 帧上裁 [126:214, 52:172] → Lanczos4 拉回
+# 164×224（≈1.87× 放大）→ 上下各补 30px 黑条回 224。仅作用头相机键 "image"
+# （双腕图训练无此处理）；裁剪/缩放/补边均为逐通道空间算子，BGR/RGB 通道序无关。
+HEAD_TRAINING_CROP_YX = (126, 214, 52, 172)   # y0, y1, x0, x1（224×224 输入上）
+HEAD_TRAINING_CONTENT_HW = (164, 224)         # 裁剪内容拉回的目标 (H, W)
+HEAD_TRAINING_PAD_TBLR = (30, 30, 0, 0)       # 上/下/左/右黑边 px
+
+
+def head_training_crop(img):
+    """letterbox224 后的头图 → 训练同款裁剪放大回 224×224。"""
+    if img.ndim != 3 or img.shape[:2] != (224, 224):
+        raise ValueError(f"head_training_crop 期望 224x224 HWC 输入，"
+                         f"got shape={img.shape}")
+    y0, y1, x0, x1 = HEAD_TRAINING_CROP_YX
+    if not (0 <= y0 < y1 <= img.shape[0] and 0 <= x0 < x1 <= img.shape[1]):
+        raise ValueError(f"head_training_crop 窗口 [{y0}:{y1}, {x0}:{x1}] 越界")
+    ch, cw = HEAD_TRAINING_CONTENT_HW
+    content = cv2.resize(img[y0:y1, x0:x1], (cw, ch),
+                         interpolation=cv2.INTER_LANCZOS4)
+    pt, pb, pl, pr = HEAD_TRAINING_PAD_TBLR
+    out = cv2.copyMakeBorder(content, pt, pb, pl, pr,
+                             cv2.BORDER_CONSTANT, value=(0, 0, 0))
+    if out.shape[:2] != (224, 224):
+        raise ValueError(f"head_training_crop 输出形状异常: {out.shape[:2]}")
+    return out
+
+
 def grab_views(robot) -> dict:
     out = {}
     for key, cam in list(CAM_MAP.items())[:VIEWS]:
@@ -909,8 +949,10 @@ def grab_views(robot) -> dict:
             raise SystemExit(f"⛔ 相机流疑似冻结：{cam} 连续 3 轮逐字节相同"
                              f"（实时流有传感器噪声不可能全等）——观测已失真，"
                              f"停止循环。排查 RT 相机服务")
-        out[key] = np.ascontiguousarray(
-            cv2.cvtColor(letterbox224(img), cv2.COLOR_BGR2RGB))
+        _lb = letterbox224(img)
+        if args.head_crop and key == "image":
+            _lb = head_training_crop(_lb)   # 头图训练裁剪放大（仅头相机）
+        out[key] = np.ascontiguousarray(cv2.cvtColor(_lb, cv2.COLOR_BGR2RGB))
     return out
 
 
