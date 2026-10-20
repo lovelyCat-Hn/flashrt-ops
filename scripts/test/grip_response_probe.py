@@ -85,8 +85,11 @@ def poll_span(robot, group, t0, seconds, side, phase, target=None):
     return first_move
 
 
-def settle(robot, group, need=0.8, timeout=8.0):
-    """等爪静止（|v|<0.005 连续 need 秒）。"""
+def settle(robot, group, need=1.2, timeout=8.0):
+    """等爪静止（|v|<0.005 连续 need 秒）。need 必须 > 死区上限 ~0.96s：
+    待发行程在死区里速度恒零，need 太短会把「还没动」误判成「已停稳」，
+    下一条指令会把前一条吞掉（173520 P2 实录：0.8s < 0.9s 死区 → 开爪
+    指令被吞、120mm 行程从未执行）。"""
     t0 = time.perf_counter()
     last_move = time.perf_counter()
     while time.perf_counter() - t0 < timeout:
