@@ -9,6 +9,11 @@
   P2 重启规则（行程中同向重发）——合爪已动 0.3s 时再发一条全合指令
      （正是闭环干的事）：若出现中途 ≥0.25s 零速段再起步 = 「每条新指令
      重启行程重吃死区」实锤；若一路滑到底 = 重启律证伪。
+     〔174428 已判：同向在途重发=满速零凹陷平滑，重启律（在途版）证伪〕
+  P4 在途反向——合爪在途 0.3s 时反向发全开：事件门「反向不豁免」与
+     keep-alive 反向前提的判决格（10-16 闭环定律预判=重启）。
+  P5 速度接管——0.01 m/s 低速行程在途时同目标改发正常速：中途变速生效
+     （接管）还是保持旧速（继承）= 预合爪爬行（--grip-preclose）的前提格。
   P3 密发复现（chg 门模拟）——0.1s 间隔连发 3s 微摆目标（模拟裸 chg 门），
      随后静默 2.5s：密发期宽度冻结 + 静默期一次补走 = 111901 定律现场复现。
 
@@ -102,6 +107,49 @@ def settle(robot, group, need=1.2, timeout=8.0):
         time.sleep(0.05)
 
 
+def wait_first_motion(robot, group, t0, timeout=3.0):
+    """等在途首动（|v|>0.005）。返回首动相对 t0 的时刻，超时 None。"""
+    while time.perf_counter() - t0 < timeout:
+        gs = robot.get_gripper_state(group)
+        if gs and abs(gs.velocity) > 0.005:
+            return time.perf_counter() - t0
+        time.sleep(1.0 / args.poll_hz)
+    return None
+
+
+def trace_seg(robot, group, side, phase, stc, trace_s):
+    """trace_s 秒 30Hz 采样并写 rows；返回 [(t_rel, |v|)]。"""
+    seg = []
+    t2 = time.perf_counter()
+    t_end = t2 + trace_s
+    while time.perf_counter() < t_end:
+        tel = time.perf_counter() - t2
+        gs = robot.get_gripper_state(group)
+        if gs is not None:
+            age = (time.time_ns() - gs.timestamp_ns) / 1e9 if getattr(gs, "timestamp_ns", 0) else float("nan")
+            seg.append((tel, abs(gs.velocity)))
+            rows.append([side, phase, round(tel, 3), round(gs.width * 1000, 2),
+                         round(gs.velocity, 4), int(gs.is_moving), round(age, 3),
+                         str(stc).replace("ControlStatus.", "")])
+        time.sleep(1.0 / args.poll_hz)
+    return seg
+
+
+def zero_runs(seg):
+    """|v| 零速段 [(起, 止, 是否中途)]；中途=段后仍有运动。"""
+    runs, i = [], 0
+    while i < len(seg):
+        if seg[i][1] < 0.005:
+            j = i
+            while j < len(seg) and seg[j][1] < 0.005:
+                j += 1
+            runs.append((seg[i][0], seg[j - 1][0], j < len(seg)))
+            i = j
+        else:
+            i += 1
+    return runs
+
+
 input("确认爪行程内无障碍、急停可及，回车开始（Ctrl-C 中止）> ")
 
 sides = ["left", "right"] if args.side == "both" else [args.side]
@@ -130,53 +178,74 @@ for side in sides:
     settle(robot, group)                      # 回到全开静止
     t0 = time.perf_counter()
     robot.set_gripper_command(group, WMIN, args.speed, args.effort, False)
-    mv = None                                 # 等首动
-    while time.perf_counter() - t0 < 3.0:
-        gs = robot.get_gripper_state(group)
-        if gs and abs(gs.velocity) > 0.005:
-            mv = time.perf_counter() - t0
-            break
-        time.sleep(1.0 / args.poll_hz)
+    mv = wait_first_motion(robot, group, t0)
     if mv is None:
         print("  ⚠ 3s 内未启动，P2 跳过")
     else:
         time.sleep(0.3)                       # 已在途 0.3s
-        t2 = time.perf_counter()
         stc = robot.set_gripper_command(group, WMIN, args.speed, args.effort, False)
-        seg = []                              # (t, |v|)
-        t_end = t2 + 3.5
-        while time.perf_counter() < t_end:
-            tel = time.perf_counter() - t2
-            gs = robot.get_gripper_state(group)
-            if gs is not None:
-                age = (time.time_ns() - gs.timestamp_ns) / 1e9 if getattr(gs, "timestamp_ns", 0) else float("nan")
-                seg.append((tel, abs(gs.velocity)))
-                rows.append([side, "P2_retarget", round(tel, 3), round(gs.width * 1000, 2),
-                             round(gs.velocity, 4), int(gs.is_moving), round(age, 3),
-                             str(stc).replace("ControlStatus.", "")])
-            time.sleep(1.0 / args.poll_hz)
-        # 零速段分析：中途（之后还恢复运动）≥0.25s 的零速段=重启停车
-        runs = []
-        i = 0
-        while i < len(seg):
-            if seg[i][1] < 0.005:
-                j = i
-                while j < len(seg) and seg[j][1] < 0.005:
-                    j += 1
-                runs.append((seg[i][0], seg[j - 1][0], j < len(seg)))  # (起,止,是否中途)
-                i = j
-            else:
-                i += 1
-        mid = [r for r in runs if r[2] and (r[1] - r[0]) >= 0.25]
+        seg = trace_seg(robot, group, side, "P2_retarget", stc, 3.5)
+        mid = [r for r in zero_runs(seg) if r[2] and (r[1] - r[0]) >= 0.25]
         if mid:
             p = max(mid, key=lambda r: r[1] - r[0])
             print(f"  首动 {mv:.2f}s → 同向重发后 {p[0]:.2f}s 停车、{p[1]:.2f}s 再动"
                   f"（停顿 {p[1] - p[0]:.2f}s）→ 重启律实锤")
         else:
-            term = [r for r in runs if not r[2]]
+            term = [r for r in zero_runs(seg) if not r[2]]
             print("  同向重发后无中途零速段（一路滑到底）→ 重启律证伪"
                   + (f"（仅末段到位停车 @{term[0][0]:.2f}s）" if term else ""))
     settle(robot, group)
+
+    # P4 在途反向：合爪在途 0.3s 时反向发全开——事件门「反向不豁免」与
+    # keep-alive 反向前提的判决格（10-16 闭环定律预判=重启）
+    print("P4 在途反向（合爪中途发全开）:")
+    robot.set_gripper_command(group, WMAX, args.speed, args.effort, False)
+    settle(robot, group)
+    t0 = time.perf_counter()
+    robot.set_gripper_command(group, WMIN, args.speed, args.effort, False)
+    mv = wait_first_motion(robot, group, t0)
+    if mv is None:
+        print("  ⚠ 3s 内未启动，P4 跳过")
+    else:
+        time.sleep(0.3)
+        stc = robot.set_gripper_command(group, WMAX, args.speed, args.effort, False)
+        seg = trace_seg(robot, group, side, "P4_reverse", stc, 4.5)
+        mid = [r for r in zero_runs(seg) if r[2] and (r[1] - r[0]) >= 0.25]
+        if mid:
+            p = max(mid, key=lambda r: r[1] - r[0])
+            print(f"  反向重发后 {p[0]:.2f}s 停车、{p[1]:.2f}s 再动"
+                  f"（停顿 {p[1] - p[0]:.2f}s）→ 在途反向=重启实锤（反向豁免判死）")
+        else:
+            term = [r for r in zero_runs(seg) if not r[2]]
+            print("  在途反向无中途零速段 → 反向也平滑（keep-alive 反向前提成立）"
+                  + (f"（仅末段停车 @{term[0][0]:.2f}s）" if term else ""))
+    settle(robot, group)
+
+    # P5 速度接管：0.01 m/s 低速行程在途时同目标改发正常速——中途变速生效
+    # （接管）还是保持旧速（继承）= --grip-preclose 预合爪爬行的前提格
+    print("P5 速度接管（0.01 在途 → 正常速同目标重发）:")
+    robot.set_gripper_command(group, WMAX, args.speed, args.effort, False)
+    settle(robot, group)
+    t0 = time.perf_counter()
+    robot.set_gripper_command(group, WMIN, 0.01, args.effort, False)
+    mv = wait_first_motion(robot, group, t0, timeout=4.0)
+    if mv is None:
+        print("  ⚠ 4s 内未启动，P5 跳过")
+    else:
+        time.sleep(0.5)                       # 低速在途 0.5s（约走 5mm）
+        stc = robot.set_gripper_command(group, WMIN, args.speed, args.effort, False)
+        seg = trace_seg(robot, group, side, "P5_speedtakeover", stc, 4.0)
+        win = [v for t, v in seg if 0.2 <= t <= 1.2]   # 重发后稳定窗
+        vmean = sum(win) / len(win) if win else float("nan")
+        if vmean >= 0.08:
+            verdict = "速度接管（新令生效）→ 爬行可行：爬速起步+正常速收敛"
+        elif vmean <= 0.03:
+            verdict = "速度继承（行程保持旧速）→ 爬行段全程慢速，收敛等意图平稳"
+        else:
+            verdict = "混合/渐变（看 CSV 细判）"
+        print(f"  重发后 0.2-1.2s 平均|v|={vmean:.3f} m/s（爬速 0.01 / 正常 "
+              f"{args.speed}）→ {verdict}")
+    settle(robot, group, need=1.2, timeout=15.0)
 
     # P3 密发复现：0.1s 连发微摆目标 3s（模拟裸 chg 门），静默 2.5s
     print("P3 密发复现（0.1s 连发 3s → 静默 2.5s）:")
@@ -208,5 +277,7 @@ with out_p.open("w", newline="") as f:
                 "is_moving", "state_ts_age_s", "status"])
     w.writerows(rows)
 print(f"\n曲线已落盘: {out_p}")
-print("判读: P1 左右爪 onset 对比（10-13 左爪=0.91s）；P2 停顿>0.3s=重启律实锤；"
+print("判读: P1 左右爪 onset 对比（10-13 左爪=0.91s）；P2 停顿>0.3s=重启律实锤"
+      "（174428 已判=证伪·在途同向平滑）；P4 停顿>0.3s=在途反向重启实锤（事件门"
+      "反向豁免判死）；P5 平均|v|≥0.08=速度接管（--grip-preclose 可行）；"
       "P3 密发期冻结+静默期补走=165556 阶梯机制现场复现。")
