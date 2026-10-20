@@ -193,6 +193,14 @@ ap.add_argument("--seam-alpha", type=float, default=0.0,
                      "一次放出成新凸点）。削块首 EMA 衰减尾峰值，稳态零税")
 ap.add_argument("--seam-beats", type=int, default=4,
                 help="接缝窗拍数=α 爬坡长（默认 4）；--seam-alpha 0 时无效")
+ap.add_argument("--seam-overlap-alpha", type=float, default=0.0,
+                help="重叠混接权重（新计划权重，0=关，默认）：同事 lerobot 栈"
+                     "weighted_average 移植——换块时保留旧块未执行行，按墙钟"
+                     "对齐（skip-install 偏移）与新旧计划逐行 0.3·旧+0.7·新混合，"
+                     "重叠区结束后纯新计划；每行执行值=两代计划凸组合，接缝不再"
+                     "是事件。取代 --entry-match/--seam-alpha/--blend/--ref-offset"
+                     "（互斥校验）；须配 --skip-install（时间槽对齐）。爪维 dim7/15"
+                     "同窗同权混合。2026-10-20 A/B 候审")
 ap.add_argument("--burst-reserve-ms", type=float, default=6.0,
                 help="row-tick 内留给读关节/打印/换块的毫秒数：帧突发配速预算="
                      "tick−该值（默认 6）")
@@ -342,6 +350,23 @@ if args.entry_match:
         raise SystemExit("--entry-match 须配 --ema-alpha>0：方向/导程判据作用在"
                          "滤波后的行序列上，裸行序列的模型抖动会打死方向门"
                          "（回放台 v1 教训）")
+if args.seam_overlap_alpha > 0:
+    _ovp_bad = [n for n, _on in (
+        ("--entry-match", args.entry_match),
+        ("--seam-alpha", args.seam_alpha > 0),
+        ("--blend", args.blend),
+        ("--ref-offset", args.ref_offset)) if _on]
+    if _ovp_bad:
+        raise SystemExit(f"--seam-overlap-alpha 与 {_ovp_bad} 互斥：重叠混接以"
+                         "「旧流惯性项」取代全部缝口机制（同事栈语义），叠加会"
+                         "双重滤波")
+    if not args.skip_install:
+        raise SystemExit("--seam-overlap-alpha 须配 --skip-install：混接对齐键="
+                         "「取图→落地流逝拍数」，即跳帧安装的偏移；无对齐则新旧"
+                         "计划错位混接（时间维 OOD）")
+    if args.ema_alpha > 0:
+        print("⚠ --seam-overlap-alpha 与 --ema-alpha 同开：EMA 再滤一遍混接行，"
+              "收敛新计划更慢（同事栈臂维无 EMA）；A/B 判读时注意此差异")
 if args.fps > 40:
     raise SystemExit(f"--fps {args.fps} > 40 拒绝：tick {1000 / args.fps:.1f}ms 低于"
                      "取图+SDK 硬开销 ~25ms，必然连续丢拍")
@@ -504,6 +529,8 @@ print(f"[loop-traj] tick {TICK * 1000:.1f} ms（{args.fps} Hz）| 轨迹流 "
          + ")" if args.entry_match else "")
       + (f" | 接缝α{args.seam_alpha}→{args.ema_alpha}/{args.seam_beats}拍"
          if args.seam_alpha > 0 and args.ema_alpha > 0 else "")
+      + (f" | 重叠混接 旧{1 - args.seam_overlap_alpha:g}/新{args.seam_overlap_alpha:g}"
+         if args.seam_overlap_alpha > 0 else "")
       + (" | 偏移平移" if args.ref_offset else "")
       + (f" | RTC 引导 horizon {args.rtc_horizon}（max_w {args.rtc_max_w}）"
          if args.rtc_horizon > 0 else " | RTC 关")
@@ -1466,6 +1493,10 @@ merged_skips = 0                     # 合步静默拍数（cmd-every>1 只消�
 _grp_k0 = 0                          # ramp 当前组起点拍号（块内，--cmd-every-ramp）
 _grp_idx = 0                         # 已耗 ramp 组数（耗尽后恒 cmd_every）
 dropped_ticks = 0                    # 落后超 1 拍的重锚次数（丢拍）
+overlap_hits = 0                     # 重叠混接生效块数（--seam-overlap-alpha）
+_old_rows_abs = None                 # 旧块行流快照（换块捕获，混接惯性项）
+_old_chunk = None                    # 旧块原始 chunk 快照（爪维混接用）
+_old_k = 0                           # 换块时旧流下一行号
 next_t = time.perf_counter()
 swap_envelope_check()
 _cur0 = read_joints(robot, ARM_NAMES)
@@ -1487,6 +1518,12 @@ while not aborted:
 
     # ── 换块：推理落地 → 整块换入弃尾（lerobot 水位语义）──
     if job is not None and job.done():
+        # 重叠混接前置捕获（--seam-overlap-alpha）：旧块行流/chunk 在覆盖前
+        # 存快照——混接的惯性项=「旧计划未执行段」，弃尾模式直接丢、混接模式
+        # 留作 0.3 权重参考流（同事 _aggregate_action_queues 的 old 侧）。
+        _old_rows_abs = rows_abs.copy() if rows_abs is not None else None
+        _old_chunk = chunk.copy() if chunk is not None else None
+        _old_k = k
         chunk = job.result()
         _dur = job.dur_ms
         infer_ms.add(_dur)
@@ -1498,6 +1535,11 @@ while not aborted:
         k = 0
         _grp_k0 = _grp_idx = 0        # ramp 组游标随块复位
         seam_flush()
+        # 重叠混接门与偏移（须在跳帧安装消费 _obs_k 前捕获）：偏移=取图→落地
+        # 流逝拍数=跳帧安装的 skip 数，同一把墙钟对齐键（同事栈 timestep 语义）
+        _ovp = (args.seam_overlap_alpha > 0 and n_swapped > 1
+                and last_tgt is not None and _old_rows_abs is not None)
+        _ovp_off = max(0, prev_block_ticks - _obs_k) if _ovp else 0
         if _starve_t0 is not None:
             _d = t_tick - _starve_t0
             starve_windows += 1
@@ -1687,6 +1729,41 @@ while not aborted:
         rows_abs, frames_all, bursts = build_block_stream(
             _cur_sw, prev0=_prev0, offset=_roff,
             seam=(args.entry_match and n_swapped > 1))
+        # ── 重叠混接（--seam-overlap-alpha，2026-10-20 同事 lerobot 栈
+        # weighted_average 移植）：跳帧安装已把新块行 i 对齐墙钟槽「旧流
+        # 自拍 _old_k+i」，此处把混接窗内每行替换为 (1−α)·旧流+α·新链——
+        # 旧计划从「被弃尾」变为「惯性项」，换块跳变被凸组合衰减并摊在
+        # 整个重叠区（同事 _aggregate_action_queues：0.3·old+0.7·new，
+        # 重叠区=新块与旧队列的 timestep 交集；水位 0 节奏下稳态=每行
+        # 都是两代计划混合，接缝不再是事件而是永续惯性）。爪维 dim7/15
+        # 数据集语义即绝对 0-100，同窗同权凸组合仍在值域。链式限幅/样条
+        # /包络在混接前已作用于新链（凸组合的两个分量都近 last_tgt，
+        # 结果不引入超限步长）；帧流随行目标重建（同 --blend 手法）。
+        if _ovp:
+            _a = float(args.seam_overlap_alpha)
+            _m = min(len(_old_rows_abs) - _old_k, len(rows_abs))
+            if _m > 0:
+                rows_abs[:_m] = ((1.0 - _a) * _old_rows_abs[_old_k:_old_k + _m]
+                                 + _a * rows_abs[:_m])
+                chunk[:_m, 7] = ((1.0 - _a) * _old_chunk[_old_k:_old_k + _m, 7]
+                                 + _a * chunk[:_m, 7])
+                chunk[:_m, 15] = ((1.0 - _a) * _old_chunk[_old_k:_old_k + _m, 15]
+                                  + _a * chunk[:_m, 15])
+                _wp0 = (np.asarray(_prev0, dtype=np.float32)
+                        if _prev0 is not None else np.asarray(_cur_sw,
+                                                              dtype=np.float32))
+                _wp = np.vstack([_wp0[None, :], rows_abs])
+                frames_all = INTERP.interpolate(_wp)
+                if ENV_LO is not None:
+                    np.clip(frames_all, ENV_LO14[None, :], ENV_HI14[None, :],
+                            out=frames_all)
+                overlap_hits += 1
+                print(f"  [重叠混接] 旧{1.0 - _a:g}/新{_a:g}｜偏移 {_ovp_off} 行"
+                      f"｜混接窗 {_m} 行（旧流自拍 {_old_k}，块内实际消费至"
+                      f"水位为止）")
+            else:
+                print(f"  [重叠混接] 旧流已耗尽（自拍 {_old_k} ≥ 流长 "
+                      f"{len(_old_rows_abs)}）→ 纯新计划接管")
         # ── 前向搭接（--blend，10-12 回放台定案移植）：新块前 M 行目标替换为
         # 旧链末目标→rows[M−1] 直连——换块时新块行 0 落在臂后方 ~lag（预取到
         # 落地 ~10 拍臂又走了），原链会俯冲进回溯段=块首往复；搭接让参考链
@@ -1885,6 +1962,9 @@ if args.entry_match and entries:
           f"{_e.min():.0f}/{np.median(_e):.0f}/{_e.max():.0f}"
           f"（行0 {int((_e == 0).sum())} 块；j 是内容/位姿失配的深读数，"
           "闭环应显著浅于回放台）")
+if overlap_hits:
+    print(f"重叠混接: {overlap_hits} 块（α新={args.seam_overlap_alpha:g}，"
+          "偏移=取图→落地流逝拍；首拍 |Δcmd| 即混接后缝口径，与 A 组直比）")
 if starve_windows or starve_ticks:
     print(f"星饿: {starve_windows} 段 / {starve_ticks} 拍 / 共 {starve_total:.1f} s"
           f"（最长 {starve_worst:.1f}s，上限 {args.starve_limit}s 未触发即健康）")
