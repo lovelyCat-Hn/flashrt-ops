@@ -10,10 +10,12 @@
      （正是闭环干的事）：若出现中途 ≥0.25s 零速段再起步 = 「每条新指令
      重启行程重吃死区」实锤；若一路滑到底 = 重启律证伪。
      〔174428 已判：同向在途重发=满速零凹陷平滑，重启律（在途版）证伪〕
-  P4 在途反向——合爪在途 0.3s 时反向发全开：事件门「反向不豁免」与
-     keep-alive 反向前提的判决格（10-16 闭环定律预判=重启）。
-  P5 速度接管——0.01 m/s 低速行程在途时同目标改发正常速：中途变速生效
-     （接管）还是保持旧速（继承）= 预合爪爬行（--grip-preclose）的前提格。
+  P4 在途反向——合爪在途 0.3s 时反向发全开：事件门反向豁免的判决格
+     （183232 已判=平滑掉头 ~0.2s 不碰零；10-16 反转律改写：杀手=死区密发
+     非方向；保留供复现/其它爪验证）。
+  P5 速度接管——爬速（--creep-speed，默认 0.03；0.01 实证未启动）行程在途
+     时同目标改发正常速：中途变速生效（接管）还是保持旧速（继承）=
+     预合爪爬行（--grip-preclose）的前提格。
   P3 密发复现（chg 门模拟）——0.1s 间隔连发 3s 微摆目标（模拟裸 chg 门），
      随后静默 2.5s：密发期宽度冻结 + 静默期一次补走 = 111901 定律现场复现。
 
@@ -37,8 +39,12 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--ckpt", default="/home/galbot/holy/models/pi05_g1_onlypick_deploy")
 ap.add_argument("--side", choices=["left", "right", "both"], default="both")
 ap.add_argument("--speed", type=float, default=0.15, help="m/s，生产值 0.15")
+ap.add_argument("--creep-speed", type=float, default=0.03,
+                help="P5 爬速 m/s（默认 0.03=SDK 默认速；0.01 实证 4s 未启动 183232）")
 ap.add_argument("--effort", type=float, default=30)
 ap.add_argument("--poll-hz", type=float, default=30.0)
+ap.add_argument("--only", default="",
+                help="只跑指定相位，逗号分隔，如 --only p5（默认全部 p1,p2,p4,p5,p3）")
 args = ap.parse_args()
 
 mf_p = pathlib.Path(args.ckpt) / "flashrt_deploy.json"
@@ -152,14 +158,17 @@ def zero_runs(seg):
 
 input("确认爪行程内无障碍、急停可及，回车开始（Ctrl-C 中止）> ")
 
-sides = ["left", "right"] if args.side == "both" else [args.side]
-for side in sides:
-    group = getattr(G1JointGroup, f"{side}_gripper")
-    print(f"\n──── {side} 爪 ────")
-    gs = robot.get_gripper_state(group)
-    print(f"起始宽度 {(gs.width * 1000 if gs else float('nan')):.1f} mm")
+_ONLY = ({s.strip().lower() for s in args.only.split(",") if s.strip()}
+         if args.only.strip() else None)
 
-    # P1 onset：静止态单发全行程（开→各回），速度列判启动
+
+def _run(ph):
+    """--only 相位过滤（默认全跑）。"""
+    return _ONLY is None or ph in _ONLY
+
+
+def phase_p1(robot, group, side):
+    """P1 onset：静止态单发全行程（开→各回），速度列判启动。"""
     print("P1 onset（单发全行程）:")
     settle(robot, group)
     t0 = time.perf_counter()
@@ -171,14 +180,21 @@ for side in sides:
     print(f"  合: 启动 {fm if fm is not None else -1:.2f}s" if fm is not None else "  合: 4s 窗内未动 ⚠")
     settle(robot, group)
 
-    # P2 重启规则：合爪已动 0.3s 时【同向重发】全合指令（闭环实际干的事），
-    # 看速度是否出现中途零速段（重启停车→死区→再起步）还是一路滑到底
-    print("P2 重启规则（合爪中途同向重发）:")
+
+def _close_stroke(robot, group):
+    """从当前态回到全开静止，再起步一次全合行程；返回首动时刻（None=未启动）。"""
     robot.set_gripper_command(group, WMAX, args.speed, args.effort, False)
     settle(robot, group)                      # 回到全开静止
     t0 = time.perf_counter()
     robot.set_gripper_command(group, WMIN, args.speed, args.effort, False)
-    mv = wait_first_motion(robot, group, t0)
+    return wait_first_motion(robot, group, t0)
+
+
+def phase_p2(robot, group, side):
+    """P2 重启规则：合爪在途 0.3s 时【同向重发】（174428 已判=平滑零凹陷；
+    保留供复现/其它爪验证）。"""
+    print("P2 重启规则（合爪中途同向重发）:")
+    mv = _close_stroke(robot, group)
     if mv is None:
         print("  ⚠ 3s 内未启动，P2 跳过")
     else:
@@ -196,14 +212,12 @@ for side in sides:
                   + (f"（仅末段到位停车 @{term[0][0]:.2f}s）" if term else ""))
     settle(robot, group)
 
-    # P4 在途反向：合爪在途 0.3s 时反向发全开——事件门「反向不豁免」与
-    # keep-alive 反向前提的判决格（10-16 闭环定律预判=重启）
+
+def phase_p4(robot, group, side):
+    """P4 在途反向：合爪在途 0.3s 时反向发全开（183232 已判=平滑掉头 ~0.2s
+    不碰零、事件门反向豁免成立；保留供复现/其它爪验证）。"""
     print("P4 在途反向（合爪中途发全开）:")
-    robot.set_gripper_command(group, WMAX, args.speed, args.effort, False)
-    settle(robot, group)
-    t0 = time.perf_counter()
-    robot.set_gripper_command(group, WMIN, args.speed, args.effort, False)
-    mv = wait_first_motion(robot, group, t0)
+    mv = _close_stroke(robot, group)
     if mv is None:
         print("  ⚠ 3s 内未启动，P4 跳过")
     else:
@@ -214,40 +228,46 @@ for side in sides:
         if mid:
             p = max(mid, key=lambda r: r[1] - r[0])
             print(f"  反向重发后 {p[0]:.2f}s 停车、{p[1]:.2f}s 再动"
-                  f"（停顿 {p[1] - p[0]:.2f}s）→ 在途反向=重启实锤（反向豁免判死）")
+                  f"（停顿 {p[1] - p[0]:.2f}s）→ 在途反向=重启实锤")
         else:
             term = [r for r in zero_runs(seg) if not r[2]]
-            print("  在途反向无中途零速段 → 反向也平滑（keep-alive 反向前提成立）"
+            print("  在途反向无中途零速段 → 反向也平滑"
                   + (f"（仅末段停车 @{term[0][0]:.2f}s）" if term else ""))
     settle(robot, group)
 
-    # P5 速度接管：0.01 m/s 低速行程在途时同目标改发正常速——中途变速生效
-    # （接管）还是保持旧速（继承）= --grip-preclose 预合爪爬行的前提格
-    print("P5 速度接管（0.01 在途 → 正常速同目标重发）:")
+
+def phase_p5(robot, group, side):
+    """P5 速度接管：爬速行程在途时同目标改发正常速——中途变速生效（接管）
+    还是保持旧速（继承）= --grip-preclose 的前提格。
+    ⚠ 爬速 0.01 实证未启动（183232：4s 无首动，疑低于固件最小可执行速度），
+    默认 0.03（SDK 默认速，bench 已证可执行）。"""
+    print(f"P5 速度接管（{args.creep_speed} 在途 → 正常速同目标重发）:")
     robot.set_gripper_command(group, WMAX, args.speed, args.effort, False)
     settle(robot, group)
     t0 = time.perf_counter()
-    robot.set_gripper_command(group, WMIN, 0.01, args.effort, False)
+    robot.set_gripper_command(group, WMIN, args.creep_speed, args.effort, False)
     mv = wait_first_motion(robot, group, t0, timeout=4.0)
     if mv is None:
-        print("  ⚠ 4s 内未启动，P5 跳过")
+        print(f"  ⚠ 4s 内未启动（爬速 {args.creep_speed} 疑低于固件最小速），P5 跳过")
     else:
-        time.sleep(0.5)                       # 低速在途 0.5s（约走 5mm）
+        time.sleep(0.5)                       # 爬速在途 0.5s
         stc = robot.set_gripper_command(group, WMIN, args.speed, args.effort, False)
         seg = trace_seg(robot, group, side, "P5_speedtakeover", stc, 4.0)
         win = [v for t, v in seg if 0.2 <= t <= 1.2]   # 重发后稳定窗
         vmean = sum(win) / len(win) if win else float("nan")
         if vmean >= 0.08:
             verdict = "速度接管（新令生效）→ 爬行可行：爬速起步+正常速收敛"
-        elif vmean <= 0.03:
+        elif vmean <= max(0.03, args.creep_speed):
             verdict = "速度继承（行程保持旧速）→ 爬行段全程慢速，收敛等意图平稳"
         else:
             verdict = "混合/渐变（看 CSV 细判）"
-        print(f"  重发后 0.2-1.2s 平均|v|={vmean:.3f} m/s（爬速 0.01 / 正常 "
-              f"{args.speed}）→ {verdict}")
+        print(f"  重发后 0.2-1.2s 平均|v|={vmean:.3f} m/s（爬速 {args.creep_speed} / "
+              f"正常 {args.speed}）→ {verdict}")
     settle(robot, group, need=1.2, timeout=15.0)
 
-    # P3 密发复现：0.1s 连发微摆目标 3s（模拟裸 chg 门），静默 2.5s
+
+def phase_p3(robot, group, side):
+    """P3 密发复现：0.1s 连发微摆目标 3s（模拟裸 chg 门），静默 2.5s。"""
     print("P3 密发复现（0.1s 连发 3s → 静默 2.5s）:")
     t0 = time.perf_counter()
     n_sent = 0
@@ -269,6 +289,18 @@ for side in sides:
     w_end = gs.width * 1000.0 if gs else float("nan")
     print(f"  密发 {n_sent} 条（±5mm 摆动目标）→ 密发末宽度 {w_dense_end:.1f}mm | "
           f"静默 2.5s → {w_end:.1f}mm（补走 {abs(w_end - w_dense_end):.1f}mm）")
+
+
+sides = ["left", "right"] if args.side == "both" else [args.side]
+for side in sides:
+    group = getattr(G1JointGroup, f"{side}_gripper")
+    print(f"\n──── {side} 爪 ────")
+    gs = robot.get_gripper_state(group)
+    print(f"起始宽度 {(gs.width * 1000 if gs else float('nan')):.1f} mm")
+    for fn, ph in ((phase_p1, "p1"), (phase_p2, "p2"), (phase_p4, "p4"),
+                   (phase_p5, "p5"), (phase_p3, "p3")):
+        if _run(ph):
+            fn(robot, group, side)
 
 out_p = out_d / f"{tag}_{args.side}.csv"
 with out_p.open("w", newline="") as f:

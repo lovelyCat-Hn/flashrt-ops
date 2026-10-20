@@ -7,8 +7,8 @@
 
 判据（定律终版 174428）：
   T1 事件门  首拍必发；意图没动（<max(chg,3%)）永不发（零travel重发只会重置
-             静默钟）；间隔未满+静止=hold；间隔未满+在途同向=发；在途反向=hold；
-             间隔≥N=发。
+             静默钟）；间隔未满+静止=hold；间隔未满+在途=发（P2/P4：同向反向
+             均平滑零罚，183232）；间隔≥N=发。
   T2 爬行    意图下行未平稳=爬速；窗内平稳=正常速；首拍（史短）=正常速。
   T3 回归    min_interval=0 时行为与旧 chg 门逐拍一致。
 """
@@ -134,7 +134,8 @@ row[7] = 95.0
 robot.state[rg(robot)] = GS(0.05, -0.10)        # 在途合爪但意图=开（反向）
 clock[0] = 1.6
 send_grip(robot, row)
-check("在途反向=hold（未测格不豁免）", not robot.calls)
+check("在途反向=豁免发（P4 183232：反向也平滑掉头）",
+      len(robot.calls) == 1, f"{robot.calls}")
 
 # ── T2 预合爪爬行 ──
 print("T2 预合爪爬行 --grip-preclose 0.03")

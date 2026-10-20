@@ -317,10 +317,10 @@ ap.add_argument("--grip-send-every", type=int, default=0,
 ap.add_argument("--grip-min-interval", type=float, default=0.0,
                 help="爪事件门 s（2026-10-20 定律终版）：距上次实发 ≥N 秒才发下一条"
                      "（静默窗≥死区 0.44-0.96s → 行程必能起步，永冻结构性不可能）；"
-                     "间隔未满时仅「在途(|v|>0.02)且同向且意图差≥3%%」豁免即时发"
-                     "（在途同向平滑零罚，174428 P2 实锤；在途反向不豁免=避未测格）。"
-                     "0=关（走旧 chg 门）。推荐 1.2。与 --grip-send-every/--grip-ss "
-                     "互斥。")
+                     "间隔未满时仅「在途(|v|>0.02)且意图差≥3%%」豁免即时发"
+                     "（P2/P4 实锤：在途同向/反向均平滑零罚，183232 反向掉头仅"
+                     "~0.2s 不碰零）。0=关（走旧 chg 门）。推荐 1.2。与 "
+                     "--grip-send-every/--grip-ss 互斥。")
 ap.add_argument("--grip-preclose", type=float, default=0.0,
                 help="预合爪爬速 m/s：爪意图下行（合爪）且未平稳时，下发改用此低速——"
                      "把 0.9s 起步死区吸收进低价值意图早期、行程在途后模型同向更新"
@@ -803,8 +803,8 @@ if args.grip:
             raise SystemExit("--grip-min-interval 与 --grip-send-every/--grip-ss "
                              "互斥（三选一的门：事件门/周期拍/状态机）")
         print(f"爪事件门: 距上次实发 ≥{args.grip_min_interval}s 才发；间隔未满仅"
-              f"在途(|v|>0.02)同向且意图差≥3% 豁免（chg 门旁路）——静默保证起步、"
-              f"在途微调免费（174428 P2）")
+              f"在途(|v|>0.02)且意图差≥3% 豁免（chg 门旁路）——静默保证起步、"
+              f"在途更新免费（P2/P4：同向反向均平滑）")
     if args.grip_preclose > 0:
         print(f"预合爪爬行: 意图下行未平稳时下发改用 {args.grip_preclose} m/s"
               f"（死区吸收进意图早期，在途同向免费跟随；平稳后回 "
@@ -1106,8 +1106,9 @@ def send_grip(robot, chunk_row):
     永起步不了（合步2 N=4→0.27s=永冻），此路要真静默须 N≥18。
     --grip-min-interval N=事件门（2026-10-20 定律终版，三选一门之一）：距上次
     实发 ≥N 秒才发（静默窗覆盖死区→行程必能起步）；间隔未满仅「在途(|v|>0.02)
-    且同向且意图差≥3%」豁免——在途同向平滑零罚（P2 实锤：满速零凹陷滑到底），
-    在途反向不豁免（未测格，EMA+间隔双重阻尼）。
+    且意图差≥3%」豁免——在途同向/反向均平滑零罚（P2 174428 满速零凹陷滑到底；
+    P4 183232 反向掉头 ~0.2s 不碰零；10-16「反转重启律」随之改写：杀手=死区
+    密发，方向只是伴随特征）。
     --grip-preclose V=预合爪爬行：意图下行未平稳时下发改用爬速 V，把 0.9s 死区
     吸收进低价值意图早期，行程在途后同向更新免费跟随；意图平稳回正常速收敛。
     ⚠ 中途变速生效性（接管 vs 继承）=探针 P5 未判，A/B 前先跑。
@@ -1174,9 +1175,9 @@ def send_grip(robot, chunk_row):
             else:
                 _gs = robot.get_gripper_state(getattr(G1JointGroup, name))
                 if _gs is not None and abs(_gs.velocity) > 0.02:
-                    w_t = GRIP["wmin"] + p / 100.0 * (GRIP["wmax"] - GRIP["wmin"])
-                    if (w_t - _gs.width) * _gs.velocity > 0:
-                        why = "在途同向"        # 反向不豁免（未测格）
+                    why = "在途"                # P2/P4 双实锤：在途同向/反向均
+                                                # 平滑零罚（183232 掉头仅 ~0.2s
+                                                # 减速-再加速，不碰零）
             if not why:
                 parts.append(f"{name[0].upper()} {p:.1f}%·hold")
                 continue
