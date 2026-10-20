@@ -13,8 +13,12 @@
   P4 在途反向——合爪在途 0.3s 时反向发全开：事件门反向豁免的判决格
      （183232 已判=平滑掉头 ~0.2s 不碰零；10-16 反转律改写：杀手=死区密发
      非方向；保留供复现/其它爪验证）。
-  P5 速度接管——爬速（--creep-speed，默认 0.03；0.01 实证未启动）行程在途
-     时同目标改发正常速：中途变速生效（接管）还是保持旧速（继承）=
+  P5 最小速度极限梯——降序速度梯（--creep-ladder）从静止全开起步全合，每档
+     --creep-wait 秒窗（默认 6s），判据 |v|>0.005 或宽度位移≥0.5mm（慢速档
+     速度列可能贴噪声，位移兜底）：得 onset(v) 谱 + 固件最小可执行速度。
+     0.01/0.03 已知 4s 窗未启动（183232/184439），故拉窗；未启动≠不可执行
+     ——两点拟合 onset=L+D/v 外推失败档，分辨「窗太短」vs「真低于最小速」。
+     末尾在最小可执行档跑接管格（在途同目标改发正常速：接管 or 继承）=
      预合爪爬行（--grip-preclose）的前提格。
   P3 密发复现（chg 门模拟）——0.1s 间隔连发 3s 微摆目标（模拟裸 chg 门），
      随后静默 2.5s：密发期宽度冻结 + 静默期一次补走 = 111901 定律现场复现。
@@ -39,8 +43,10 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--ckpt", default="/home/galbot/holy/models/pi05_g1_onlypick_deploy")
 ap.add_argument("--side", choices=["left", "right", "both"], default="both")
 ap.add_argument("--speed", type=float, default=0.15, help="m/s，生产值 0.15")
-ap.add_argument("--creep-speed", type=float, default=0.03,
-                help="P5 爬速 m/s（默认 0.03=SDK 默认速；0.01 实证 4s 未启动 183232）")
+ap.add_argument("--creep-ladder", default="0.12,0.10,0.08,0.06,0.05,0.04,0.03,0.02,0.01",
+                help="P5 速度梯 m/s，降序逗号分隔（找固件最小可执行速度）")
+ap.add_argument("--creep-wait", type=float, default=6.0,
+                help="P5 每档首动观察窗 s（0.03 在 4s 窗未启动过，默认 6s）")
 ap.add_argument("--effort", type=float, default=30)
 ap.add_argument("--poll-hz", type=float, default=30.0)
 ap.add_argument("--only", default="",
@@ -72,10 +78,11 @@ tag = time.strftime("%Y%m%d-%H%M%S")
 rows = []          # [side, phase, t_rel_s, width_mm, velocity_mps, is_moving, ts_age_s, status]
 
 
-def poll_span(robot, group, t0, seconds, side, phase, target=None):
+def poll_span(robot, group, t0, seconds, side, phase, target=None, speed=None):
     """轮询 seconds 秒；target 非 None 时先发一条指令。返回首个 |v|>0.005 的 t。"""
     if target is not None:
-        stc = robot.set_gripper_command(group, target, args.speed, args.effort, False)
+        stc = robot.set_gripper_command(group, target, speed or args.speed,
+                                        args.effort, False)
     else:
         stc = "-"
     first_move = None
@@ -237,31 +244,82 @@ def phase_p4(robot, group, side):
 
 
 def phase_p5(robot, group, side):
-    """P5 速度接管：爬速行程在途时同目标改发正常速——中途变速生效（接管）
-    还是保持旧速（继承）= --grip-preclose 的前提格。
-    ⚠ 爬速 0.01 实证未启动（183232：4s 无首动，疑低于固件最小可执行速度），
-    默认 0.03（SDK 默认速，bench 已证可执行）。"""
-    print(f"P5 速度接管（{args.creep_speed} 在途 → 正常速同目标重发）:")
+    """P5 固件最小速度极限梯：降序速度梯逐档从静止全开起步全合，判据
+    |v|>0.005 或宽度位移≥0.5mm；两点拟合 onset=L+D/v 外推失败档；最小可执行
+    档上跑接管格（预合爪爬行 --grip-preclose 的前提格）。"""
+    ladder = [float(x) for x in args.creep_ladder.split(",") if x.strip()]
+    print(f"P5 最小速度极限梯 {ladder}（每档窗 {args.creep_wait:.0f}s）:")
+    res = []                                      # (v, onset, vmax, dw)
+    for v in ladder:
+        gs = robot.get_gripper_state(group)
+        w0 = gs.width * 1000.0 if gs else 0.0
+        if w0 < WMAX * 1000.0 - 2.0:              # 上档动过 → 回全开再静置
+            robot.set_gripper_command(group, WMAX, args.speed, args.effort, False)
+            settle(robot, group)
+        t0 = time.perf_counter()
+        ph = f"P5_lad_{v:.2f}"
+        poll_span(robot, group, t0, args.creep_wait, side, ph,
+                  target=WMIN, speed=v)
+        step = [r for r in rows if r[1] == ph]
+        onset = None
+        if step:
+            w_start = step[0][3]
+            for r in step:
+                if abs(r[4]) > 0.005 or abs(r[3] - w_start) >= 0.5:
+                    onset = r[2]
+                    break
+        vmax = max((abs(r[4]) for r in step), default=0.0)
+        dw = abs(step[-1][3] - step[0][3]) if step else 0.0
+        res.append((v, onset, vmax, dw))
+        if onset is not None:
+            print(f"  v={v:.2f}: 启动 {onset:.2f}s | max|v|={vmax:.3f} | "
+                  f"Δw={dw:.1f}mm")
+        else:
+            print(f"  v={v:.2f}: {args.creep_wait:.0f}s 未启动 | "
+                  f"max|v|={vmax:.3f} | Δw={dw:.1f}mm")
+    ok = [r for r in res if r[1] is not None]     # 梯序=速度降序
+    if len(ok) >= 2:
+        v_hi, t_hi = ok[0][0], ok[0][1]           # 最快档
+        v_lo, t_lo = ok[-1][0], ok[-1][1]         # 最慢可执行档
+        den = 1.0 / v_lo - 1.0 / v_hi
+        D = (t_lo - t_hi) / den if den > 1e-9 else float("nan")   # 行程等效距离
+        L = t_hi - D / v_hi if D == D else float("nan")           # 固定起步延迟
+        print(f"  onset=L+D/v 拟合（两点 {v_hi:.2f}/{v_lo:.2f}）: "
+              f"L={L:.2f}s D={D * 1000:.0f}mm")
+        for v, onset, _, _ in res:
+            if onset is None and D == D and D > 0:
+                tp = L + D / v
+                print(f"  外推 v={v:.2f} onset≈{tp:.1f}s → "
+                      f"{'窗太短非不可执行' if tp > args.creep_wait else '应已启动却未动=疑似真低于最小速'}")
+    vmin = min((r[0] for r in ok), default=None)
+    if vmin is None:
+        print("  ⚠ 全梯未启动 → 梯顶以下全灭：--grip-preclose 判死候选"
+              "（除非外推显示窗太短——加档重跑）")
+        settle(robot, group)
+        return
+    onset_v = next(r[1] for r in res if r[0] == vmin)
+    print(f"  → 最小可执行速度 ≈ {vmin:.2f} m/s（onset {onset_v:.2f}s）")
+    # 接管格：最小可执行档起步在途 → 正常速同目标重发
     robot.set_gripper_command(group, WMAX, args.speed, args.effort, False)
     settle(robot, group)
     t0 = time.perf_counter()
-    robot.set_gripper_command(group, WMIN, args.creep_speed, args.effort, False)
-    mv = wait_first_motion(robot, group, t0, timeout=4.0)
+    robot.set_gripper_command(group, WMIN, vmin, args.effort, False)
+    mv = wait_first_motion(robot, group, t0, timeout=max(10.0, onset_v * 1.5))
     if mv is None:
-        print(f"  ⚠ 4s 内未启动（爬速 {args.creep_speed} 疑低于固件最小速），P5 跳过")
+        print("  ⚠ 接管格起步未启动（与梯判矛盾=复现差异），跳过")
     else:
-        time.sleep(0.5)                       # 爬速在途 0.5s
+        time.sleep(0.5)                           # 最小档在途 0.5s
         stc = robot.set_gripper_command(group, WMIN, args.speed, args.effort, False)
         seg = trace_seg(robot, group, side, "P5_speedtakeover", stc, 4.0)
         win = [v for t, v in seg if 0.2 <= t <= 1.2]   # 重发后稳定窗
         vmean = sum(win) / len(win) if win else float("nan")
         if vmean >= 0.08:
-            verdict = "速度接管（新令生效）→ 爬行可行：爬速起步+正常速收敛"
-        elif vmean <= max(0.03, args.creep_speed):
+            verdict = "速度接管（新令生效）→ 爬行可行：最小档起步+正常速收敛"
+        elif vmean <= max(0.03, vmin):
             verdict = "速度继承（行程保持旧速）→ 爬行段全程慢速，收敛等意图平稳"
         else:
             verdict = "混合/渐变（看 CSV 细判）"
-        print(f"  重发后 0.2-1.2s 平均|v|={vmean:.3f} m/s（爬速 {args.creep_speed} / "
+        print(f"  重发后 0.2-1.2s 平均|v|={vmean:.3f} m/s（爬速 {vmin:.2f} / "
               f"正常 {args.speed}）→ {verdict}")
     settle(robot, group, need=1.2, timeout=15.0)
 
@@ -311,5 +369,6 @@ with out_p.open("w", newline="") as f:
 print(f"\n曲线已落盘: {out_p}")
 print("判读: P1 左右爪 onset 对比（10-13 左爪=0.91s）；P2 停顿>0.3s=重启律实锤"
       "（174428 已判=证伪·在途同向平滑）；P4 停顿>0.3s=在途反向重启实锤（事件门"
-      "反向豁免判死）；P5 平均|v|≥0.08=速度接管（--grip-preclose 可行）；"
+      "反向豁免判死）；P5 梯=固件最小可执行速度+接管格（≥0.08=接管→--grip-preclose "
+      "可行；全梯未启动=preclose 判死候选）；"
       "P3 密发期冻结+静默期补走=165556 阶梯机制现场复现。")
