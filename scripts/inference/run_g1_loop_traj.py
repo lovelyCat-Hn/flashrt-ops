@@ -306,6 +306,12 @@ ap.add_argument("--grip-speed", type=float, default=None, help="夹爪速度 m/s
 ap.add_argument("--grip-effort", type=float, default=None, help="夹爪力矩 N（config [gripper].effort）")
 ap.add_argument("--grip-chg", type=float, default=None,
                 help="夹爪下发变化阈值 %%（config [gripper].chg）")
+ap.add_argument("--grip-send-every", type=int, default=0,
+                help="爪定时静默制：每 N 个机会拍强制发 1 条当前 EMA 值，chg 死区门"
+                     "整体旁路（0=关，走旧 chg 门）。2026-10-20 静默定律：爪只在指令"
+                     "静默期执行、每条新指令打断在途行程从头重来——chg=0（无死区）"
+                     "30Hz 密发实证完全冻结（143831），chg=2 密发滞留爬行（135828）。"
+                     "N=4→≈7.5Hz/静默 75%%。R/L 同拍判定，同拍配对不变。")
 ap.add_argument("--config", default=g1_config.DEFAULT_PATH,
                 help="配置文件路径（优先级 CLI > config > 内置默认）")
 ap.add_argument("--log-file", default=None,
@@ -773,6 +779,10 @@ if args.grip:
             "chg": args.grip_chg, "sent": {}, "sent_peak": {}}
     print(f"夹爪下发开启: 0%→{wmin} m | 100%→{wmax} m | 速度 {args.grip_speed} m/s | "
           f"力矩 {args.grip_effort} N | 变化阈值 {args.grip_chg}%")
+    if args.grip_send_every > 0:
+        print(f"爪定时静默制: 每 {args.grip_send_every} 机会拍 1 条"
+              f"（≈{30.0 / args.grip_send_every:.1f}Hz、静默 "
+              f"{100.0 - 100.0 / args.grip_send_every:.0f}%），chg 死区门旁路")
     if args.grip_state_cmd:
         print("⚠ state 夹爪维(7/15)喂【指令值】（--grip-state-cmd）：对齐数据集 state "
               "爪维语义（「回读滞后 6.3-8s」旧说已被 10-13 标定翻案，回读新鲜 "
@@ -1063,6 +1073,10 @@ def send_grip(robot, chunk_row):
     q 停流静→最后一条 1.5s 走满（「q 后突然张开」全案闭合）。故
     --grip-ss 状态机=少发（每相 1-2 条、每条 ≥2s 静默窗）；无 ss 时退回旧
     chg 门（2% 变化即发，111901 证明该模式爪会冻结——保留只为对照）。
+    --grip-send-every N=定时静默制（2026-10-20 定稿）：chg 死区门整体旁路，
+    每 N 个机会拍无条件发当前 EMA 值一条、其余拍纯静默 → 爪在静默窗内跑完
+    行程；N=4→≈7.5Hz/静默 75%。纯去掉死区（≡chg=0）=143831 实证完全冻结，
+    勿用。
     """
     if GRIP is None:
         return None
@@ -1070,6 +1084,15 @@ def send_grip(robot, chunk_row):
         return "dry（不下发）"
     parts = []
     now = time.monotonic()
+    # --grip-send-every：节流判定每调用一次（=一个机会拍），R/L 共用同一判定
+    # 保持同拍配对；合步模式只组末拍调用，节奏自然跟随。chg 门在节流模式下
+    # 整体旁路（死区逻辑去掉，见函数 docstring 的剂量-响应证据）。
+    global _GRIP_BEAT
+    _pace = int(args.grip_send_every) > 0
+    _send_beat = False
+    if _pace:
+        _send_beat = (_GRIP_BEAT % int(args.grip_send_every)) == 0
+        _GRIP_BEAT += 1
     for name, dim in GRIP["names"]:
         p = float(np.clip(chunk_row[dim], 0.0, 100.0))
         if args.grip_ema_alpha > 0:
@@ -1098,7 +1121,10 @@ def send_grip(robot, chunk_row):
             if not why:                          # 无翻转未到补发条件=一律不发
                 parts.append(f"{name[0].upper()} {p:.1f}%·hold")
                 continue
-        elif last is not None and abs(p - last) < GRIP["chg"]:
+        elif not _pace and last is not None and abs(p - last) < GRIP["chg"]:
+            parts.append(f"{name[0].upper()} {p:.1f}%·hold")
+            continue
+        if _pace and not _send_beat:         # 节流窗内的拍一律不发（ss 放行也压住）
             parts.append(f"{name[0].upper()} {p:.1f}%·hold")
             continue
         w = GRIP["wmin"] + p / 100.0 * (GRIP["wmax"] - GRIP["wmin"])
@@ -1177,6 +1203,7 @@ _GRIP_EMA = {}      # 爪指令 EMA 状态（--grip-ema-alpha>0 时启用；跨�
                     # 回 chg 门=状态机整跑未生效）
 _GRIP_SS_STATE = {}  # 状态机每爪当前态 'hi'/'lo'
 _GRIP_SS_SENT = {}   # 状态机每爪 (上次实发时刻, 上次实发值)
+_GRIP_BEAT = 0       # --grip-send-every 机会拍计数（send_grip 每调用 +1）
 
 
 def build_rows(cur, prev0=None, offset=None, seam=False):
@@ -1895,8 +1922,11 @@ while not aborted:
             ach = read_joints(robot, ARM_NAMES)
             err = float(np.max(np.abs(ach - tgt))) * 1000
             track_err.append(err)
-            fr_s = (f"{n_fr}帧@{args.fps * args.frames_per_row:.0f}Hz" if n_fr
-                    else "· 免发 ·")
+            # 合步拍打实际下发沿频率（沿=fps/组宽，ramp 变宽逐拍如实）；
+            # 流式拍维持 @参考流密度 旧口径（fps×frames_per_row）
+            fr_s = ((f"{n_fr}帧·沿{args.fps / _grp_n:.0f}Hz" if _is_merged
+                     else f"{n_fr}帧@{args.fps * args.frames_per_row:.0f}Hz")
+                    if n_fr else "· 免发 ·")
             print(f"  拍{k - 1}: |Δcmd| {d_mrad:5.1f} mrad"
                   f" | 导程 {gap0 * 1000:5.1f} → {fr_s}"
                   f" | 残差 {err:4.1f} mrad"
