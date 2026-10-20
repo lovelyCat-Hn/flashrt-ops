@@ -736,6 +736,7 @@ VIEWS = int(mf.get("views", 3))
 CAM_MAP = mf.get("camera_map", {"image": "HEAD_RIGHT_CAMERA",
                                 "wrist_image": "LEFT_ARM_CAMERA",
                                 "wrist_image_right": "RIGHT_ARM_CAMERA"})
+print(f"[ckpt] {CKPT}")  # 日志自证权重（160917 盲区：日志无法判 A/B 跑的哪个 ckpt）
 
 # ── 关节包络护栏（压桌防护，2026-10-06）：任务数据集臂关节合法构型盒。SDK 侧
 # 臂端 fault/堵钻不回传（指令恒 SUCCESS，10-06 实录），刚性伺服撞桌只会硬压到
