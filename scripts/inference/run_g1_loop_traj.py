@@ -1,6 +1,22 @@
 #!/usr/bin/env python
 """G1 双臂闭环——轨迹流执行器（set_joint_commands 高频流路线）。
 
+【标准版配方（2026-10-21 用户定档=lerobot 对齐版）】
+  run_g1_loop_traj.py --exec --rounds 200 \\
+    --n-action-steps 0 --skip-install --seam-overlap-alpha 0.7 \\
+    --cmd-every 1 \\
+    --ema-alpha 0.3 --grip-ema-alpha 0.3 --grip-state-cmd \\
+    --delta-max 0.05 --burst-reserve-ms 0 --nav-suspend \\
+    --rtc-horizon 10 --head-crop \\
+    --ckpt models/pi05_g1_training_rtc_d10_deploy
+  语义=同事 lerobot 栈忠实复刻：爪=关节流（--grip-path joint 默认，
+  dim7/15 并回 set_joint_commands，P6 破案后 10-21 定档）、tfs=0、
+  30Hz 直发（cmd-every 1）、skip-install=同事 skip_frames、
+  overlap 0.7=同事 weighted_average（0.3 旧+0.7 新）、EMA=同事
+  action_filter、水位 0=换块即预取；+trained-RTC（--rtc-horizon 10
+  须配 sft1012_training_rtc_d10 权重，--head-crop pick 相必带——
+  place 相/非此 ckpt 勿带）。逐项依据见 USAGE §3.8。
+
 与 run_g1_loop_native.py（母本）同一条推理链路、同一套护栏与水位换块调度，
 只换发令侧：native 每拍发一条位置指令（30Hz 阶跃，10-09 真机七跑定案
 抖感∝指令沿能量=阶跃幅值×沿频率）；本脚本走同事 infer_policy 的真机在役
