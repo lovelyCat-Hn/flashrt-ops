@@ -21,6 +21,9 @@
              正常流式；平台满+深指令=进入（钳实宽−margin@effort_hold）；
              指令记账=模型意图不变；实宽让步→目标冻结不跟随（棘轮修复
              144325）；指令上穿实宽+exit=
+  T6 深指令满窗 --grip-hold-window（150603 死锁教训）：静停开位+刚下合
+             令=深指令史不满窗→不进（防冻结在开位死锁）；深指令持续满窗
+             且平台=进；行程中平台破=永不进。
              退出当拍发模型目标；退出清史→再进须新平台；effort_hold=0=沿用10。
 """
 import ast
@@ -317,6 +320,44 @@ for _ in range(5):
 jc = robot.jcalls[-1][1][0]
 check("effort_hold=0=保持段沿用 10", jc[2] == 10.0, f"{jc}")
 check("钳位仍生效", abs(jc[0] - 0.039) < 1e-9, f"{jc}")
+
+# ── T6 深指令满窗（150603 死锁教训） ──
+print("T6 深指令满窗 --grip-hold-window 5（静停开位+新合令防误进）")
+clock = [50.0]
+ns = make_ns(clock)
+ns.update(GRIP=grip_of(), args=args_of(hold=True, window=5), robot=FakeRobot())
+robot, sgj = ns["robot"], ns["send_grip_joint"]
+
+sent_seq = []
+# 拍1-3：爪停在开位 115.5mm、指令还开着（98%=117.6mm 不深）；拍4起指令转合
+# （80%=96mm 深）。拍4-7 深指令史不满窗 → 不得进（否则冻结在开位死锁）；
+# 拍8（深满窗+平台）才进。
+for k in range(1, 9):
+    p = 98.0 if k <= 3 else 80.0
+    robot.state[G1JointGroup.right_gripper] = GS(0.1155, 0.0)
+    robot.jcalls.clear()
+    sgj(robot, {7: p, 15: 90.0}, 0.0)
+    sent_seq.append(robot.jcalls[0][1][0][0])
+check("拍1-3 开指令不进（发意图 117.6mm）",
+      all(abs(x - 0.1176) < 1e-9 for x in sent_seq[:3]), f"{sent_seq}")
+check("拍4-7 深指令史不满窗=不进（发意图 96mm，非钳位）",
+      all(abs(x - 0.096) < 1e-9 for x in sent_seq[3:7]), f"{sent_seq}")
+check("拍8 深满窗+平台=进（钳 112.5mm）",
+      abs(sent_seq[7] - 0.1125) < 1e-9, f"{sent_seq}")
+
+print("T6b 行程中平台破=永不进（自由合爪不误判憋死）")
+clock = [60.0]
+ns = make_ns(clock)
+ns.update(GRIP=grip_of(), args=args_of(hold=True, window=5), robot=FakeRobot())
+robot, sgj = ns["robot"], ns["send_grip_joint"]
+sents = []
+for k in range(8):
+    robot.state[G1JointGroup.right_gripper] = GS(0.100 - k * 0.005, 0.0)
+    robot.jcalls.clear()
+    sgj(robot, {7: 10.0, 15: 90.0}, 0.0)
+    sents.append(robot.jcalls[0][1][0][0])
+check("行程中永不进（实宽每拍走 5mm，每拍发意图 12mm 非钳位）",
+      all(abs(x - 0.012) < 1e-9 for x in sents), f"{sents}")
 
 print(f"\n{'全绿' if not FAIL else 'FAIL: ' + ', '.join(FAIL)}")
 raise SystemExit(1 if FAIL else 0)

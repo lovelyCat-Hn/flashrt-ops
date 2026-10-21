@@ -259,7 +259,10 @@ letterbox-vs-crop 另一功能，挂同名会造虚假等价）：
   物理回读（p50 10ms），只改物理下发不改指令记账（--grip-state-cmd/
   sent_peak 语义不变）。旋钮：`--grip-hold-gap-mm 5`（进门）/
   `--grip-hold-exit-mm 3`（出门）/`--grip-hold-margin-mm 3`（保有夹紧量）/
-  `--grip-hold-plateau-mm 0.8`+`--grip-hold-window 5`（平台窗）/
+  `--grip-hold-plateau-mm 0.8`+`--grip-hold-window 12`（憋死判定窗：
+  进入须「实宽平台」∧「深指令持续满窗」——窗短于爪 onset+行程会误进：
+  144325 跟随版棘轮碾进 56-72mm、150603 冻结版冻结在开位死锁全程不闭合，
+  同根两症；满窗=0.4s 给足 onset+行程时间，自由爪早动了平台破即不进）/
   `--grip-effort-hold 4`（0=沿用10）。日志 `[实 X.Xmm eff X.X]`：
   eff=GripperState.effort **单位未知勿按牛顿判读**（144325 实证饱和轨
   100、全开 114mm 也 100，头文件 "Newtons" 被推翻；行为像电机负载百分比，

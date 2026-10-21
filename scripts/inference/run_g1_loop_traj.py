@@ -400,8 +400,10 @@ ap.add_argument("--grip-hold-margin-mm", type=float, default=3.0,
 ap.add_argument("--grip-hold-plateau-mm", type=float, default=0.8,
                 help="平台判据 mm：连续 window 拍实宽 max−min ≤ 此值才算物理"
                      "被撑住（正在合爪途中不触发）。默认 0.8")
-ap.add_argument("--grip-hold-window", type=int, default=5,
-                help="平台窗（发送拍数，30Hz 下 5 拍≈167ms）。默认 5")
+ap.add_argument("--grip-hold-window", type=int, default=12,
+                help="憋死判定窗（发送拍数，30Hz 下 12 拍=0.4s）：须实宽平台"
+                     "且深指令持续满窗（>爪 onset 0.14s+行程起步，150603 死锁"
+                     "教训）。默认 12")
 ap.add_argument("--grip-effort-hold", type=float, default=4.0,
                 help="保持段 effort（N·m 级力矩上限）：官方文档明文爪关节 "
                      "effort 字段生效=最大夹持力限制（galbot_robot.hpp "
@@ -971,8 +973,9 @@ if args.grip:
               "set_gripper_command 老路，各门适用——该路 onset=0.12s+行程/速度"
               "+0.03 下限+吞令=训练外注入行为（10-21 P6 破案），默认已不走")
     if args.grip_hold_on_stall:
-        print(f"[grip-hold] 憋死保持开：指令≤实宽−{args.grip_hold_gap_mm}mm 且"
-              f"实宽平台({args.grip_hold_window}拍≤{args.grip_hold_plateau_mm}mm)"
+        print(f"[grip-hold] 憋死保持开：指令≤实宽−{args.grip_hold_gap_mm}mm "
+              f"持续满窗({args.grip_hold_window}拍)且实宽平台"
+              f"(≤{args.grip_hold_plateau_mm}mm)"
               f"→钳 进入时实宽−{args.grip_hold_margin_mm}mm（冻结不跟随）@effort"
               f"{'沿用' if args.grip_effort_hold <= 0 else args.grip_effort_hold}"
               f"；指令≥实宽+{args.grip_hold_exit_mm}mm 退出恢复流式")
@@ -1456,25 +1459,32 @@ def send_grip_joint(robot, chunk_row, tfs_s):
             phys = _gs.width
             h = _GRIPJ_HOLD.setdefault(name, {"on": False, "hist": [],
                                               "enters": 0, "tgt": None})
-            h["hist"].append(phys)
+            # 双史窗口：(实宽, 本拍指令是否够深)。进入须「实宽平台」∧「深指令
+            # 持续满窗」——150603 死锁教训：爪静停开位时模型刚下合令，只看
+            # 当拍深指令会误进（onset 未到爪还没动）→ 冻结在开位=意图永不上
+            # 穿 exit 门、爪全程不闭合。满窗深指令=「给了 onset+行程时间仍到
+            # 不了」才算真憋死；自由爪满窗前早动了，平台破即不进。
+            h["hist"].append((phys,
+                              w <= phys - args.grip_hold_gap_mm / 1000.0))
             _win = max(2, int(args.grip_hold_window))
             while len(h["hist"]) > _win:
                 del h["hist"][:-_win]
             _plateau = (len(h["hist"]) >= _win and
-                        (max(h["hist"]) - min(h["hist"])) * 1000.0
+                        (max(p for p, _ in h["hist"])
+                         - min(p for p, _ in h["hist"])) * 1000.0
                         <= args.grip_hold_plateau_mm)
+            _deep_all = all(d for _, d in h["hist"])
             if h["on"]:
                 if w >= phys + args.grip_hold_exit_mm / 1000.0:
                     h["on"] = False
                     h["hist"].clear()   # 退出清史：再进须新平台（防近阈闪断）
                     h["tgt"] = None
                     _tag = " HOLD退出"
-            elif _plateau and w <= phys - args.grip_hold_gap_mm / 1000.0:
+            elif _plateau and _deep_all:
                 h["on"] = True
                 h["enters"] += 1
-                # 进入时冻结目标（144325 首跑教训：若逐拍跟随 实宽−margin
-                # 会棘轮——接触面一让步目标再进 margin，慢速碾进 56-72mm；
-                # 冻结后刚性物同样钉死、软物/空爪最多压进 margin 一次）
+                # 进入时冻结目标（144325 教训：逐拍跟随 实宽−margin=棘轮
+                # 碾进；冻结后刚性物同样钉死、软物最多压进 margin 一次）
                 h["tgt"] = max(0.0,
                                phys - args.grip_hold_margin_mm / 1000.0)
                 _tag = " HOLD进入"
