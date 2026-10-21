@@ -23,6 +23,30 @@ BUILTIN = {
         "ckpt": "/home/galbot/holy/models/pi05_g1_pick_deploy",
         "prompt": "Left arm pick up A. Right arm pick up A.",
     },
+    "lerobot": {
+        # run_g1_loop_traj.py 专用档（2026-10-21 用户定档=traj 标准版·lerobot
+        # 对齐版）：只给 traj 脚本消费，不与 [loop]/[run] 共享以免互劫。
+        # 语义与同事 infer_policy 栈逐项对齐——爪=关节流（tfs=0 关节路径）、
+        # skip_install=skip_frames、seam_overlap_alpha=weighted_average
+        # （0.7=0.3 旧+0.7 新）、ema_alpha=action_filter（dim23 全维单滤镜）。
+        # ckpt 耦合项：rtc_horizon/head_crop 只对 training_rtc_d10 且 pick 相
+        # 合法（place 训练无裁剪=place 相带 --no-head-crop；非 RTC 训练 ckpt
+        # 开引导=拉弯 chunk，10-16 定罪案——脚本有 ckpt 名守卫提示）。
+        "ckpt": "/home/galbot/holy/models/pi05_g1_training_rtc_d10_deploy",
+        "prompt": "Left arm pick up A. Right arm pick up A.",
+        "rounds": 200,            # 轮
+        "n_action_steps": 0,      # 0=换块即取新计划（水位 0；新鲜度第一杠杆）
+        "skip_install": True,     # 换块跳帧安装（同事 skip_frames）
+        "seam_overlap_alpha": 0.7,  # 换块重叠混接（同事 weighted_average）
+        "cmd_every": 1,           # 纯流式直发（合步 N>1 与 overlap 相性未验）
+        "ema_alpha": 0.3,         # 行目标 EMA（dim23 全维；爪维默认跟随此值）
+        "grip_state_cmd": True,   # state 爪维喂指令值（数据集语义；忘带=R 爪死 0）
+        "delta_max": 0.05,        # rad/步（对原始增量 0.00% 截断=封版）
+        "burst_reserve_ms": 0.0,  # 纯流式无突发预算
+        "nav_suspend": True,      # 搁置导航栈（醒着 +60ms 税，低延迟必带）
+        "rtc_horizon": 10,        # 前缀引导（trained-RTC 权重专属，抹剩余接缝）
+        "head_crop": True,        # 头图裁剪放大（sft_1012 训练同款；place 相勿带）
+    },
     "warmup": {
         "speed": 0.15,        # 臂/头关节速度 rad/s（腿固定 0.2 rad/s）
         "skip_zero": True,    # 2026-10-12 默认跳过零位段（规划器 TIMEOUT 坑，9-23 实录；
@@ -112,6 +136,12 @@ _KNOWN_LOOP_KEYS = {
     "near_exit", "cache_frames", "max_excursion", "settle", "settle_frac",
     "switch_dist", "chunk_mode", "traj_dt", "catch_timeout",
 }
+_KNOWN_LEROBOT_KEYS = {
+    "ckpt", "prompt", "rounds", "n_action_steps", "skip_install",
+    "seam_overlap_alpha", "cmd_every", "ema_alpha", "grip_state_cmd",
+    "delta_max", "burst_reserve_ms", "nav_suspend", "rtc_horizon",
+    "head_crop",
+}
 
 
 def load(path=DEFAULT_PATH):
@@ -136,6 +166,12 @@ def load(path=DEFAULT_PATH):
         unknown = set(loop) - _KNOWN_LOOP_KEYS
         if unknown:
             print(f"[config] ⚠ {p} [loop] 未认键（tomllib 静默忽略，请核对拼写）: "
+                  + ", ".join(sorted(unknown)))
+    lerobot = data.get("lerobot")
+    if isinstance(lerobot, dict):
+        unknown = set(lerobot) - _KNOWN_LEROBOT_KEYS
+        if unknown:
+            print(f"[config] ⚠ {p} [lerobot] 未认键（tomllib 静默忽略，请核对拼写）: "
                   + ", ".join(sorted(unknown)))
     return data, p
 

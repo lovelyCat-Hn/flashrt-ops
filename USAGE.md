@@ -215,17 +215,27 @@ high-frequency control usage"）。**默认 N=1=纯 30Hz 直发（原生 lerobot
 240Hz，指令阶跃≈行差/N 消指令沿激励，同事 infer_policy 在役路线；插值器
 移植件 `g1_traj_interp.py`：linear/cubic/quintic，默认 cubic）。
 
-**标准版配方（2026-10-21 用户定档=lerobot 对齐版）**：
+**标准版配方（2026-10-21 用户定档=lerobot 对齐版）**——配方固化在
+`config/g1.toml [lerobot]` 档（traj 脚本专用，不与 [loop]/[run] 共享；
+三态优先级 CLI > [lerobot] > 内置，启动日志 `[config]` 覆盖行可核对生效
+来源），标准跑一条命令：
 
 ```bash
-~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_traj.py --exec --rounds 200 \
-  --n-action-steps 0 --skip-install --seam-overlap-alpha 0.7 \
-  --cmd-every 1 \
-  --ema-alpha 0.3 --grip-state-cmd \
-  --delta-max 0.05 --burst-reserve-ms 0 --nav-suspend \
-  --rtc-horizon 10 --head-crop \
-  --ckpt ~/holy/models/pi05_g1_training_rtc_d10_deploy
+~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_traj.py --exec
 ```
+
+逐项覆盖=CLI 显式传参；布尔档显式关=--no-X 反关旗标。常用覆写例：
+
+```bash
+# 无 RTC A/B（前缀引导关；skip-install/overlap 与 RTC 无关照常生效）
+~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_traj.py --exec --rtc-horizon 0
+# place 相（place 训练无裁剪；grip-state-cmd 按任务语义决定，place=回读语义须反关）
+~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_traj.py --exec --no-head-crop --no-grip-state-cmd
+# 醒着导航 A/B（编排器 --no-nav-suspend 同款语义）
+~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_traj.py --exec --no-nav-suspend
+```
+
+档内逐项语义（=同事 lerobot 栈忠实复刻）：
 
 逐项语义（=同事 lerobot 栈忠实复刻）：
 - **爪=关节流（`--grip-path joint`，10-21 起默认）**：dim7/15 并回
@@ -238,7 +248,7 @@ high-frequency control usage"）。**默认 N=1=纯 30Hz 直发（原生 lerobot
   `--n-action-steps 0` 水位 0=换块即预取（块长≈推理时延，须配 skip-install）
 - `--seam-overlap-alpha 0.7`=同事 weighted_average 换块混接（0.3 旧+0.7 新）；
   与 entry-match/seam-alpha/blend/ref-offset 互斥
-- `--cmd-every 1`=纯 30Hz 直发（默认值，显式写出仅为可读）
+- `cmd_every = 1`=纯 30Hz 直发
 - `--ema-alpha 0.3`=同事 action_filter 同款——**dim23 全维单滤镜：臂+爪一个
   α**（robot_controller.py:110 实锤；10-21 定档统一，爪 EMA 默认跟随臂，
   `--grip-ema-alpha` 仅 A/B 单独覆盖用，0=爪不滤）；EMA 滤模型爪列翻转

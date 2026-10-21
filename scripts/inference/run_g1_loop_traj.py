@@ -2,12 +2,13 @@
 """G1 双臂闭环——轨迹流执行器（set_joint_commands 高频流路线）。
 
 【标准版配方（2026-10-21 用户定档=lerobot 对齐版）】
-  run_g1_loop_traj.py --exec --rounds 200 \\
-    --n-action-steps 0 --skip-install --seam-overlap-alpha 0.7 \\
-    --cmd-every 1 \\
-    --ema-alpha 0.3 --grip-state-cmd \\
-    --delta-max 0.05 --burst-reserve-ms 0 --nav-suspend \\
-    --rtc-horizon 10 --head-crop \\
+  标准跑一条命令：run_g1_loop_traj.py --exec
+  配方固化在 config/g1.toml [lerobot] 档（三态 CLI > [lerobot] > 内置：
+  逐项覆盖=CLI 显式传参；布尔档显式关=--no-X 反关旗标；日志 [config]
+  覆盖行可核对生效来源）。等价 CLI 展开：
+    --rounds 200 --n-action-steps 0 --skip-install --seam-overlap-alpha 0.7
+    --cmd-every 1 --ema-alpha 0.3 --grip-state-cmd --delta-max 0.05
+    --burst-reserve-ms 0 --nav-suspend --rtc-horizon 10 --head-crop
     --ckpt models/pi05_g1_training_rtc_d10_deploy
   语义=同事 lerobot 栈忠实复刻：爪=关节流（--grip-path joint 默认，
   dim7/15 并回 set_joint_commands，P6 破案后 10-21 定档）、tfs=0、
@@ -127,7 +128,7 @@ ap.add_argument("--frames-per-row", type=int, default=1,
                      "突发下发 set_joint_commands。默认 1=纯 30Hz 直发（每 tick"
                      " 一条命令，原生 lerobot 语义；10-10 用户定案退役 240Hz 微"
                      "流）；N>1 仅留作 A/B 显式选用（8≈240Hz@30fps）")
-ap.add_argument("--cmd-every", type=int, default=1,
+ap.add_argument("--cmd-every", type=int, default=None,
                 help="合步：每 N 拍并 1 条指令（拍 k 下发组末行 rows[k+N−1]，"
                      "中间行只消费不发送），指令沿 30→30/N Hz——阶跃≈N 行差"
                      "（链钳 ±delta-max 逐行封顶不变，合计 ≤N×50 mrad），臂以"
@@ -210,22 +211,22 @@ ap.add_argument("--seam-alpha", type=float, default=0.0,
                      "一次放出成新凸点）。削块首 EMA 衰减尾峰值，稳态零税")
 ap.add_argument("--seam-beats", type=int, default=4,
                 help="接缝窗拍数=α 爬坡长（默认 4）；--seam-alpha 0 时无效")
-ap.add_argument("--seam-overlap-alpha", type=float, default=0.0,
-                help="重叠混接权重（新计划权重，0=关，默认）：同事 lerobot 栈"
+ap.add_argument("--seam-overlap-alpha", type=float, default=None,
+                help="重叠混接权重（新计划权重，0=关；默认见 [lerobot] 档）：同事 lerobot 栈"
                      "weighted_average 移植——换块时保留旧块未执行行，按墙钟"
                      "对齐（skip-install 偏移）与新旧计划逐行 0.3·旧+0.7·新混合，"
                      "重叠区结束后纯新计划；每行执行值=两代计划凸组合，接缝不再"
                      "是事件。取代 --entry-match/--seam-alpha/--blend/--ref-offset"
                      "（互斥校验）；须配 --skip-install（时间槽对齐）。爪维 dim7/15"
                      "同窗同权混合。2026-10-20 A/B 候审")
-ap.add_argument("--burst-reserve-ms", type=float, default=6.0,
+ap.add_argument("--burst-reserve-ms", type=float, default=None,
                 help="row-tick 内留给读关节/打印/换块的毫秒数：帧突发配速预算="
-                     "tick−该值（默认 6）")
+                     "tick−该值（默认见 [lerobot] 档）")
 ap.add_argument("--interp", choices=("linear", "cubic", "quintic"), default="cubic",
                 help="行间样条（g1_traj_interp，移植自同事 infer_policy 真机在役"
                      "实现；默认 cubic natural 样条 C2 连续无冲击）")
-ap.add_argument("--ema-alpha", type=float, default=0.0,
-                help="行目标 EMA 低通系数（0=关，默认；借自同事 action_filter "
+ap.add_argument("--ema-alpha", type=float, default=None,
+                help="行目标 EMA 低通系数（0=关；默认见 [lerobot] 档；借自同事 action_filter "
                      "lowpass）：rows[k]←α·raw[k]+(1−α)·rows[k−1]，状态跨块连续"
                      "（接缝首行同样被滤，infer_policy 同款语义；10-12 判明块内"
                      "重启版对接缝无效）——接缝/深尾垃圾的执行侧兜底杠杆；首跑"
@@ -257,7 +258,7 @@ ap.add_argument("--blend-gate", type=float, default=0.06,
                      "重规划 bend）在 <60 mrad 换块上裸过门=块间顿挫节奏"
                      "（水位 10 下 ~1.4 Hz），降门（如 0.02）让搭接直线接管"
                      "全部有效换块——参考链全程等速无起步慢段")
-ap.add_argument("--skip-install", action="store_true",
+ap.add_argument("--skip-install", action="store_true", default=None,
                 help="换块跳帧安装（同事 infer_policy rtc_controller.add_chunk "
                      "skip_frames 墙钟对齐同款，2026-10-13 移植）：新块落地时丢掉"
                      "前「观测拍摄→落地」流逝拍数行，从当前墙钟槽位接续。行 0 重锚"
@@ -283,12 +284,12 @@ ap.add_argument("--blend", action="store_true",
                      "全程前向，臂不停车不回摆；1:1 替换不加拍不占墙钟，末行=原 "
                      "rows[M−1] 与 EMA 状态链一致。与 --rtc-horizon 叠加属双重"
                      "消缝（推理侧+执行侧），A/B 时分开评估")
-ap.add_argument("--rtc-horizon", type=int, default=0,
+ap.add_argument("--rtc-horizon", type=int, default=None,
                 help="推理侧 RTC 前缀引导窗口（行数）：>0 启用（lerobot 默认 10），"
-                     "0=关（默认）。前缀=旧块未消费尾段重锚进新块坐标系")
+                     "0=关；默认见 [lerobot] 档。前缀=旧块未消费尾段重锚进新块坐标系")
 ap.add_argument("--rtc-max-w", type=float, default=10.0,
                 help="RTC 最大引导权重（lerobot max_guidance_weight 默认 10）")
-ap.add_argument("--head-crop", action="store_true",
+ap.add_argument("--head-crop", action="store_true", default=None,
                 help="头相机观测追加训练同款裁剪放大（letterbox224 → 裁 "
                      "[126:214,52:172] → Lanczos4 拉回 164×224 → 上下补 30px "
                      "黑条）。训练头图带此处理的 ckpt（sft_1012 系："
@@ -363,7 +364,7 @@ ap.add_argument("--config", default=g1_config.DEFAULT_PATH,
 ap.add_argument("--log-file", default=None,
                 help="日志文件路径（默认 <仓库>/logs/loop_native_<时间戳>.log；终端照常显示，"
                      "全文同步写文件，判读免复制）")
-ap.add_argument("--grip-state-cmd", action="store_true",
+ap.add_argument("--grip-state-cmd", action="store_true", default=None,
                 help="state 夹爪维(dim7/15)改喂【指令值】而非 SDK 回读：数据集 state "
                      "爪维语义=跟随段记指令值（持物段=物理被撑开），喂物理回读=分布"
                      "漂移（「回读滞后 6.3-8s」旧说已被 10-13 标定翻案：新鲜 p50 "
@@ -379,76 +380,28 @@ ap.add_argument("--envelope-abort-n", type=int, default=5,
                      "持续越界=感知漂移，继续跑只会反复撞桌")
 ap.add_argument("--no-envelope-guard", action="store_true",
                 help="关闭关节包络护栏（排障对照用）")
-ap.add_argument("--nav-suspend", action="store_true",
+ap.add_argument("--nav-suspend", action="store_true", default=None,
                 help="闭环期间 SIGSTOP 搁置导航栈 7 进程（localization/fusion/"
                      "navigation_plan/vtn/surround/swallows/lidar_capture）："
                      "2026-10-07 实测推理 375.3→320.5ms（−54.8ms）、GR3D 50→7。"
                      "退出自动 CONT（含 kill -9，守护网兜底）。"
                      "⚠ 只用于臂上任务+底盘不动窗口：冻结期 localization 位姿停更，"
                      "底盘先恢复导航。默认关")
+# [lerobot] 布尔档反关旗标（三态约定「布尔想显式关给 --no-X」，见 g1_config 头注；
+# 档里 true 时 CLI 无从显式关——entry-match 路线/醒着导航 A/B/place 相都要用）
+ap.add_argument("--no-skip-install", action="store_true",
+                help="显式关跳帧安装（[lerobot] 档 skip_install=true 的反关；"
+                     "entry-match 路线用）")
+ap.add_argument("--no-grip-state-cmd", action="store_true",
+                help="显式关 state 爪维喂指令值（[lerobot] 档 grip_state_cmd=true "
+                     "的反关；place 相等回读语义任务用）")
+ap.add_argument("--no-nav-suspend", action="store_true",
+                help="显式关导航栈搁置（[lerobot] 档 nav_suspend=true 的反关；"
+                     "醒着导航 A/B 用，编排器侧摘除旧痛点补齐）")
+ap.add_argument("--no-head-crop", action="store_true",
+                help="显式关头图裁剪（[lerobot] 档 head_crop=true 的反关；"
+                     "place 相/非裁剪训练 ckpt 用）")
 args = ap.parse_args()
-
-if args.ref_offset and not args.skip_install:
-    raise SystemExit("--ref-offset 须与 --skip-install 同用（偏移定义在新计划行 0 上）")
-if args.entry_fill_dip and not args.entry_match:
-    raise SystemExit("--entry-fill-dip 需要 --entry-match（填补在入口匹配流内执行）")
-if args.entry_match:
-    if args.skip_install or args.ref_offset:
-        raise SystemExit("--entry-match 与 --skip-install/--ref-offset 互斥"
-                         "（入口匹配按位姿选行，取代时钟跳帧）")
-    if args.blend:
-        raise SystemExit("--entry-match 与 --blend 互斥（同回放台口径）")
-    if args.ema_alpha <= 0:
-        raise SystemExit("--entry-match 须配 --ema-alpha>0：方向/导程判据作用在"
-                         "滤波后的行序列上，裸行序列的模型抖动会打死方向门"
-                         "（回放台 v1 教训）")
-if args.seam_overlap_alpha > 0:
-    _ovp_bad = [n for n, _on in (
-        ("--entry-match", args.entry_match),
-        ("--seam-alpha", args.seam_alpha > 0),
-        ("--blend", args.blend),
-        ("--ref-offset", args.ref_offset)) if _on]
-    if _ovp_bad:
-        raise SystemExit(f"--seam-overlap-alpha 与 {_ovp_bad} 互斥：重叠混接以"
-                         "「旧流惯性项」取代全部缝口机制（同事栈语义），叠加会"
-                         "双重滤波")
-    if not args.skip_install:
-        raise SystemExit("--seam-overlap-alpha 须配 --skip-install：混接对齐键="
-                         "「取图→落地流逝拍数」，即跳帧安装的偏移；无对齐则新旧"
-                         "计划错位混接（时间维 OOD）")
-    if args.ema_alpha > 0:
-        print("⚠ --seam-overlap-alpha 与 --ema-alpha 同开：EMA 再滤一遍混接行，"
-              "收敛新计划更慢（同事栈臂维无 EMA）；A/B 判读时注意此差异")
-if args.fps > 40:
-    raise SystemExit(f"--fps {args.fps} > 40 拒绝：tick {1000 / args.fps:.1f}ms 低于"
-                     "取图+SDK 硬开销 ~25ms，必然连续丢拍")
-if args.frames_per_row < 1:
-    raise SystemExit("--frames-per-row 须 ≥ 1")
-if args.rtc_horizon < 0:
-    raise SystemExit("--rtc-horizon 须 ≥ 0（0=关）")
-if args.cmd_every < 1:
-    raise SystemExit("--cmd-every 须 ≥ 1（1=纯 30Hz 直发零变）")
-if args.cmd_first_only and args.cmd_every <= 1:
-    raise SystemExit("--cmd-first-only 须配 --cmd-every > 1（否则无合步组可言）")
-args.cmd_every_ramp = ([int(x) for x in args.cmd_every_ramp.split(",")
-                        if x.strip()] if args.cmd_every_ramp else [])
-if args.cmd_every_ramp:
-    if args.cmd_every <= 1:
-        raise SystemExit("--cmd-every-ramp 须配 --cmd-every > 1（无合步组则无组宽可言）")
-    if any(g < 1 for g in args.cmd_every_ramp):
-        raise SystemExit("--cmd-every-ramp 组宽须 ≥1")
-    if len(args.cmd_every_ramp) > 16:
-        raise SystemExit("--cmd-every-ramp 序列过长（≤16 组）")
-    if args.cmd_first_only:
-        raise SystemExit("--cmd-every-ramp 与 --cmd-first-only 互斥（缝侧细笔取代"
-                         "「首组合步+组后流式」口径）")
-if args.cmd_every > 1 and args.blend:
-    raise SystemExit("--cmd-every > 1 与 --blend 互斥：blend 把块首重铺细步"
-                     "（消块首尖峰），合步把 N 拍并 1 条大步（消指令沿密度）"
-                     "——块界两套相反策略，勿混用")
-TICK = 1.0 / args.fps
-GAP_EPS = 1e-4        # 行导程低于该值免突发（伺服保持）
-
 # ── 全文日志落盘：q 退出走 os._exit 不刷缓冲（09-23 坑），故逐行强制 flush ──
 _log_path = args.log_file or str(
     pathlib.Path(__file__).resolve().parents[2] / "logs" /
@@ -525,12 +478,30 @@ _log_fh = open(_log_path, "a", buffering=1, encoding="utf-8")
 sys.stdout = _Tee(sys.stdout, _log_fh)
 sys.stderr = _Tee(sys.stderr, _log_fh)
 print(f"[log] 全文日志 → {_log_path}")
+# ── [lerobot] 档（2026-10-21 用户定档=traj 标准版·lerobot 对齐版）：脚本专用
+#    配置表，不与 [loop]/[run] 共享以免互劫。三态 CLI > config/g1.toml
+#    [lerobot] > g1_config.BUILTIN；先于交叉校验落位=校验看生效值 ──
+# 布尔档冲突检测须在 apply 之前：apply 会把档值 true 回填进 args，
+# 之后无法区分「CLI 显式给」与「config 回填」
+for _b in ("skip_install", "grip_state_cmd", "nav_suspend", "head_crop"):
+    if getattr(args, "no_" + _b) and getattr(args, _b):
+        raise SystemExit(f"--{_b.replace('_', '-')} 与 "
+                         f"--no-{_b.replace('_', '-')} 同传，意图冲突")
 g1_config.apply(args, {
-    "ckpt": ("run", "ckpt"),
-    "prompt": ("run", "prompt"),
-    "rounds": ("loop", "rounds"),
-    "n_action_steps": ("loop", "n_action_steps"),
-    "delta_max": ("loop", "delta_max"),
+    "ckpt": ("lerobot", "ckpt"),
+    "prompt": ("lerobot", "prompt"),
+    "rounds": ("lerobot", "rounds"),
+    "n_action_steps": ("lerobot", "n_action_steps"),
+    "skip_install": ("lerobot", "skip_install"),
+    "seam_overlap_alpha": ("lerobot", "seam_overlap_alpha"),
+    "cmd_every": ("lerobot", "cmd_every"),
+    "ema_alpha": ("lerobot", "ema_alpha"),
+    "grip_state_cmd": ("lerobot", "grip_state_cmd"),
+    "delta_max": ("lerobot", "delta_max"),
+    "burst_reserve_ms": ("lerobot", "burst_reserve_ms"),
+    "nav_suspend": ("lerobot", "nav_suspend"),
+    "rtc_horizon": ("lerobot", "rtc_horizon"),
+    "head_crop": ("lerobot", "head_crop"),
     "cache_frames": ("loop", "cache_frames"),
     "max_excursion": ("loop", "max_excursion"),
     "grip": ("gripper", "enabled"),
@@ -538,6 +509,93 @@ g1_config.apply(args, {
     "grip_effort": ("gripper", "effort"),
     "grip_chg": ("gripper", "chg"),
 })
+
+# None 哨兵回落（配方旗标 argparse 默认改 None 交给三态回填，此处补脚本旧默认）
+if args.seam_overlap_alpha is None:
+    args.seam_overlap_alpha = 0.0
+if args.cmd_every is None:
+    args.cmd_every = 1
+if args.ema_alpha is None:
+    args.ema_alpha = 0.0
+if args.rtc_horizon is None:
+    args.rtc_horizon = 0
+if args.burst_reserve_ms is None:
+    args.burst_reserve_ms = 6.0
+# 布尔档反关覆盖：--no-X 压过档值 true（显式关）；X/--no-X 全未给=False
+for _b in ("skip_install", "grip_state_cmd", "nav_suspend", "head_crop"):
+    if getattr(args, "no_" + _b):
+        if getattr(args, _b):
+            print(f"[config] --no-{_b.replace('_', '-')} 压过档值（生效 False）")
+        setattr(args, _b, False)
+    elif getattr(args, _b) is None:
+        setattr(args, _b, False)
+if args.rtc_horizon > 0 and "rtc" not in pathlib.Path(str(args.ckpt)).name.lower():
+    print("⚠ rtc_horizon>0 但 ckpt 名不含 rtc：前缀引导只对条件训练权重合法"
+          "（未训练 ckpt 开引导=拉弯 chunk/伸歪，10-16 定罪案）；确认这是有意的")
+
+
+if args.ref_offset and not args.skip_install:
+    raise SystemExit("--ref-offset 须与 --skip-install 同用（偏移定义在新计划行 0 上）")
+if args.entry_fill_dip and not args.entry_match:
+    raise SystemExit("--entry-fill-dip 需要 --entry-match（填补在入口匹配流内执行）")
+if args.entry_match:
+    if args.skip_install or args.ref_offset:
+        raise SystemExit("--entry-match 与 --skip-install/--ref-offset 互斥"
+                         "（入口匹配按位姿选行，取代时钟跳帧）")
+    if args.blend:
+        raise SystemExit("--entry-match 与 --blend 互斥（同回放台口径）")
+    if args.ema_alpha <= 0:
+        raise SystemExit("--entry-match 须配 --ema-alpha>0：方向/导程判据作用在"
+                         "滤波后的行序列上，裸行序列的模型抖动会打死方向门"
+                         "（回放台 v1 教训）")
+if args.seam_overlap_alpha > 0:
+    _ovp_bad = [n for n, _on in (
+        ("--entry-match", args.entry_match),
+        ("--seam-alpha", args.seam_alpha > 0),
+        ("--blend", args.blend),
+        ("--ref-offset", args.ref_offset)) if _on]
+    if _ovp_bad:
+        raise SystemExit(f"--seam-overlap-alpha 与 {_ovp_bad} 互斥：重叠混接以"
+                         "「旧流惯性项」取代全部缝口机制（同事栈语义），叠加会"
+                         "双重滤波")
+    if not args.skip_install:
+        raise SystemExit("--seam-overlap-alpha 须配 --skip-install：混接对齐键="
+                         "「取图→落地流逝拍数」，即跳帧安装的偏移；无对齐则新旧"
+                         "计划错位混接（时间维 OOD）")
+    if args.ema_alpha > 0:
+        print("⚠ --seam-overlap-alpha 与 --ema-alpha 同开：EMA 再滤一遍混接行，"
+              "收敛新计划更慢（同事栈臂维无 EMA）；A/B 判读时注意此差异")
+if args.fps > 40:
+    raise SystemExit(f"--fps {args.fps} > 40 拒绝：tick {1000 / args.fps:.1f}ms 低于"
+                     "取图+SDK 硬开销 ~25ms，必然连续丢拍")
+if args.frames_per_row < 1:
+    raise SystemExit("--frames-per-row 须 ≥ 1")
+if args.rtc_horizon < 0:
+    raise SystemExit("--rtc-horizon 须 ≥ 0（0=关）")
+if args.cmd_every < 1:
+    raise SystemExit("--cmd-every 须 ≥ 1（1=纯 30Hz 直发零变）")
+if args.cmd_first_only and args.cmd_every <= 1:
+    raise SystemExit("--cmd-first-only 须配 --cmd-every > 1（否则无合步组可言）")
+args.cmd_every_ramp = ([int(x) for x in args.cmd_every_ramp.split(",")
+                        if x.strip()] if args.cmd_every_ramp else [])
+if args.cmd_every_ramp:
+    if args.cmd_every <= 1:
+        raise SystemExit("--cmd-every-ramp 须配 --cmd-every > 1（无合步组则无组宽可言）")
+    if any(g < 1 for g in args.cmd_every_ramp):
+        raise SystemExit("--cmd-every-ramp 组宽须 ≥1")
+    if len(args.cmd_every_ramp) > 16:
+        raise SystemExit("--cmd-every-ramp 序列过长（≤16 组）")
+    if args.cmd_first_only:
+        raise SystemExit("--cmd-every-ramp 与 --cmd-first-only 互斥（缝侧细笔取代"
+                         "「首组合步+组后流式」口径）")
+if args.cmd_every > 1 and args.blend:
+    raise SystemExit("--cmd-every > 1 与 --blend 互斥：blend 把块首重铺细步"
+                     "（消块首尖峰），合步把 N 拍并 1 条大步（消指令沿密度）"
+                     "——块界两套相反策略，勿混用")
+TICK = 1.0 / args.fps
+GAP_EPS = 1e-4        # 行导程低于该值免突发（伺服保持）
+
+
 if args.no_grip:
     args.grip = False
 if args.grip_ema_alpha is None:
