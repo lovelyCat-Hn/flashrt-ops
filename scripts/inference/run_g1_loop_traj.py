@@ -5,17 +5,20 @@
   标准跑一条命令：run_g1_loop_traj.py --exec
   配方固化在 config/g1.toml [lerobot] 档（三态 CLI > [lerobot] > 内置：
   逐项覆盖=CLI 显式传参；布尔档显式关=--no-X 反关旗标；日志 [config]
-  覆盖行可核对生效来源）。等价 CLI 展开：
-    --rounds 200 --n-action-steps 0 --skip-install --seam-overlap-alpha 0.7
-    --cmd-every 1 --ema-alpha 0.3 --grip-state-cmd --delta-max 0.05
-    --burst-reserve-ms 0 --nav-suspend --rtc-horizon 10 --head-crop
+  覆盖行可核对生效来源）。旗标/档键名已对齐同事栈词汇
+  （execute_actions_per_chunk/skip_frames/fusion_alpha/filter_alpha/
+  max_joint_delta_per_step/execution_horizon；旧旗标名保留为 CLI 别名）。
+  等价 CLI 展开：
+    --rounds 200 --execute-actions-per-chunk 0 --skip-frames --fusion-alpha 0.7
+    --cmd-every 1 --filter-alpha 0.3 --grip-state-cmd --max-joint-delta-per-step 0.05
+    --burst-reserve-ms 0 --nav-suspend --execution-horizon 10 --head-crop
     --ckpt models/pi05_g1_training_rtc_d10_deploy
   语义=同事 lerobot 栈忠实复刻：爪=关节流（--grip-path joint 默认，
   dim7/15 并回 set_joint_commands，P6 破案后 10-21 定档）、tfs=0、
   30Hz 直发（cmd-every 1）、skip-install=同事 skip_frames、
   overlap 0.7=同事 weighted_average（0.3 旧+0.7 新）、EMA=同事
-  action_filter（dim23 全维：臂+爪同 α，--grip-ema-alpha 默认跟随、
-  仅 A/B 单独覆盖）、水位 0=换块即预取；+trained-RTC（--rtc-horizon 10
+  action_filter（dim23 全维：臂+爪同 α，--grip-filter-alpha 默认跟随、
+  仅 A/B 单独覆盖）、水位 0=换块即预取；+trained-RTC（--execution-horizon 10
   须配 sft1012_training_rtc_d10 权重，--head-crop pick 相必带——
   place 相/非此 ckpt 勿带）。逐项依据见 USAGE §3.8。
 
@@ -23,7 +26,7 @@
 只换发令侧：native 每拍发一条位置指令（30Hz 阶跃，10-09 真机七跑定案
 抖感∝指令沿能量=阶跃幅值×沿频率）；本脚本走同事 infer_policy 的真机在役
 路线——
-  换块时一次性：行目标（链式 ±--delta-max rad/行 限幅）→ [当前实际位]+
+  换块时一次性：行目标（链式 ±--max-joint-delta-per-step rad/行 限幅）→ [当前实际位]+
   行目标 样条插值成每行 --frames-per-row 帧（默认 1=纯 30Hz 直发；10-10
   用户定案退役 240Hz 微流，N>1 仅 A/B 显式选用）→ 每 row-tick
   按 (tick−--burst-reserve-ms) 预算匀速突发下发 set_joint_commands
@@ -41,7 +44,7 @@ SDK 契约出处：g1/__init__.pyi set_joint_commands "suitable for
   星饿（块耗尽且推理未归）=不下发（刚性伺服保持最后目标原地等待），超
   --starve-limit 判挂死停机。帧突发配速预算=tick−--burst-reserve-ms，
   SDK 单帧调用若超预算只会体现为丢拍重锚（遥测可见），绝不追发。
-RTC：--rtc-horizon N > 0 时启用推理侧前缀引导（同 native，FlashRT 引擎
+RTC：--execution-horizon N > 0 时启用推理侧前缀引导（同 native，FlashRT 引擎
   guided RTC）：旧块未消费尾段重锚进新块坐标系作为前缀，每个去噪步把
   新块开头拉向旧计划，消换块接缝跳变。0=关（默认）。
 搭接：--blend 执行侧前向搭接（10-12 回放台定案移植）——换块后新块前 M 行
@@ -66,7 +69,7 @@ RTC：--rtc-horizon N > 0 时启用推理侧前缀引导（同 native，FlashRT 
 ⚠ 加 --exec 会连续真实驱动双臂！安全设计（与 native 同款）：
   1. 只动双臂 14 关节；腿/头维度永不下发；夹爪仅 --grip 显式开启时下发
      （0~100%% → manifest 标定宽度，变化超 --grip-chg 才发，非阻塞不等反馈）
-  2. 换块时行目标链式限幅 ±--delta-max rad/行 + 逐帧包络钳位；漂移护栏：
+  2. 换块时行目标链式限幅 ±--max-joint-delta-per-step rad/行 + 逐帧包络钳位；漂移护栏：
      行目标偏离起始位超 --max-excursion → 立即停止循环
   3. q 键即时退出（后台监听线程，SDK 阻塞中也可退）；物理急停第一优先级
   4. 执行前回车确认
@@ -80,7 +83,7 @@ RTC：--rtc-horizon N > 0 时启用推理侧前缀引导（同 native，FlashRT 
   ~/miniforge3/envs/flash_pyrt311/bin/python \
       ~/holy/scripts/inference/run_g1_loop_traj.py \
       [--ckpt ~/holy/models/pi05_g1_onlypick_deploy] [--exec] \
-      [--rounds 60] [--rtc-horizon 10]
+      [--rounds 60] [--execution-horizon 10]
   # 240Hz 微流（--frames-per-row 8）已于 10-10 退役，默认 1=纯 30Hz 直发
 """
 import argparse
@@ -108,16 +111,18 @@ ap.add_argument("--exec", dest="do_exec", action="store_true",
                 help="真实连续驱动双臂（默认干跑只打印首块 5 拍目标；不进配置，仅 CLI）")
 ap.add_argument("--rounds", type=int, default=None,
                 help="换块次数（每块消费到水位即换，弃尾；config [loop].rounds）")
-ap.add_argument("--n-action-steps", type=int, default=None,
+ap.add_argument("--execute-actions-per-chunk", "--n-action-steps",
+                dest="n_action_steps", type=int, default=None,
                 help="预取水位阈值：本块消费到第 K 步即触发新推理（lerobot "
                      "chunk_size_threshold 语义；≤ --chunk-size；"
                      "config [loop].n_action_steps；v3 里它是消费配额，这里只定换块时机）。"
                      "0=换块即预取（本块第 0 步下发后立即起跑下一块推理，块长≈推理"
-                     "时延；须配 --skip-install）")
+                     "时延；须配 --skip-frames（原 --skip-install））")
 ap.add_argument("--chunk-size", type=int, default=50,
                 help="chunk 长度（lerobot chunk_size），默认 50=训练原生长度"
                      "（env FLASH_RT_PI05_ACTION_CHUNK_SIZE 自动设）")
-ap.add_argument("--delta-max", type=float, default=None,
+ap.add_argument("--max-joint-delta-per-step", "--delta-max",
+                dest="delta_max", type=float, default=None,
                 help="每行目标限幅 rad（链式：每行至多向 chunk 行绝对位挪这么多；"
                      "config [loop].delta_max）")
 ap.add_argument("--fps", type=int, default=30,
@@ -152,7 +157,7 @@ ap.add_argument("--cmd-every-ramp", type=str, default="",
                      "与 --cmd-first-only 互斥")
 ap.add_argument("--entry-match", action="store_true",
                 help="入口动态匹配换块（10-17 回放台 entry-match 移植，用户提案；"
-                     "与 --skip-install/--ref-offset/--blend 互斥——本模式取代时钟"
+                     "与 --skip-frames/--ref-offset/--blend 互斥——本模式取代时钟"
                      "跳帧，按位姿选行；10-18 起可与合步 --cmd-every 组合：入口管"
                      "从哪行接入，合步管怎么消费，正交）："
                      "新块到来读臂实际关节位，①顺运动方向（主导关节不倒行）；"
@@ -211,13 +216,14 @@ ap.add_argument("--seam-alpha", type=float, default=0.0,
                      "一次放出成新凸点）。削块首 EMA 衰减尾峰值，稳态零税")
 ap.add_argument("--seam-beats", type=int, default=4,
                 help="接缝窗拍数=α 爬坡长（默认 4）；--seam-alpha 0 时无效")
-ap.add_argument("--seam-overlap-alpha", type=float, default=None,
+ap.add_argument("--fusion-alpha", "--seam-overlap-alpha",
+                dest="seam_overlap_alpha", type=float, default=None,
                 help="重叠混接权重（新计划权重，0=关；默认见 [lerobot] 档）：同事 lerobot 栈"
                      "weighted_average 移植——换块时保留旧块未执行行，按墙钟"
                      "对齐（skip-install 偏移）与新旧计划逐行 0.3·旧+0.7·新混合，"
                      "重叠区结束后纯新计划；每行执行值=两代计划凸组合，接缝不再"
                      "是事件。取代 --entry-match/--seam-alpha/--blend/--ref-offset"
-                     "（互斥校验）；须配 --skip-install（时间槽对齐）。爪维 dim7/15"
+                     "（互斥校验）；须配 --skip-frames（时间槽对齐）。爪维 dim7/15"
                      "同窗同权混合。2026-10-20 A/B 候审")
 ap.add_argument("--burst-reserve-ms", type=float, default=None,
                 help="row-tick 内留给读关节/打印/换块的毫秒数：帧突发配速预算="
@@ -225,14 +231,16 @@ ap.add_argument("--burst-reserve-ms", type=float, default=None,
 ap.add_argument("--interp", choices=("linear", "cubic", "quintic"), default="cubic",
                 help="行间样条（g1_traj_interp，移植自同事 infer_policy 真机在役"
                      "实现；默认 cubic natural 样条 C2 连续无冲击）")
-ap.add_argument("--ema-alpha", type=float, default=None,
+ap.add_argument("--filter-alpha", "--ema-alpha",
+                dest="ema_alpha", type=float, default=None,
                 help="行目标 EMA 低通系数（0=关；默认见 [lerobot] 档；借自同事 action_filter "
                      "lowpass）：rows[k]←α·raw[k]+(1−α)·rows[k−1]，状态跨块连续"
                      "（接缝首行同样被滤，infer_policy 同款语义；10-12 判明块内"
                      "重启版对接缝无效）——接缝/深尾垃圾的执行侧兜底杠杆；首跑"
                      "先 0 判读样条本身")
-ap.add_argument("--grip-ema-alpha", type=float, default=None,
-                help="爪指令 EMA 低通系数。默认 None=跟随 --ema-alpha（10-21 "
+ap.add_argument("--grip-filter-alpha", "--grip-ema-alpha",
+                dest="grip_ema_alpha", type=float, default=None,
+                help="爪指令 EMA 低通系数。默认 None=跟随 --filter-alpha（10-21 "
                      "定档：同事 action_filter=dim23 全维单滤镜 robot_controller"
                      ".py:110，臂+爪一个 α 一致性；joint 路爪也走 "
                      "set_joint_commands，分旋钮是分路时代遗产）。显式传值=爪单独"
@@ -258,7 +266,8 @@ ap.add_argument("--blend-gate", type=float, default=0.06,
                      "重规划 bend）在 <60 mrad 换块上裸过门=块间顿挫节奏"
                      "（水位 10 下 ~1.4 Hz），降门（如 0.02）让搭接直线接管"
                      "全部有效换块——参考链全程等速无起步慢段")
-ap.add_argument("--skip-install", action="store_true", default=None,
+ap.add_argument("--skip-frames", "--skip-install",
+                dest="skip_install", action="store_true", default=None,
                 help="换块跳帧安装（同事 infer_policy rtc_controller.add_chunk "
                      "skip_frames 墙钟对齐同款，2026-10-13 移植）：新块落地时丢掉"
                      "前「观测拍摄→落地」流逝拍数行，从当前墙钟槽位接续。行 0 重锚"
@@ -270,7 +279,7 @@ ap.add_argument("--skip-install", action="store_true", default=None,
                      "「无重锚」语义）。默认关=行 0 重锚现役口径。"
                      "与回放台 --skip-retrace 无关（那是离线概念）")
 ap.add_argument("--ref-offset", action="store_true",
-                help="偏移平移（配合 --skip-install，10-13 120045 实机后续杠杆）："
+                help="偏移平移（配合 --skip-frames，10-13 120045 实机后续杠杆）："
                      "新计划锚=观测滞后臂，行 0 天然落后参考一个失配量（=块首回走"
                      "刹车的来源）。把整条新计划平移 offset=last_tgt−plan[0]（逐维"
                      "钳 ±delta-max）再接参考链——块首零缝步零回走，臂速无块界刹车，"
@@ -282,9 +291,10 @@ ap.add_argument("--blend", action="store_true",
                      "目标→rows[M−1] 直连（M 自适应=计划首次爬回旧链高度行号+1；"
                      "门：滞后 >60 mrad 才触发）——消回溯俯冲与块首急停，参考链"
                      "全程前向，臂不停车不回摆；1:1 替换不加拍不占墙钟，末行=原 "
-                     "rows[M−1] 与 EMA 状态链一致。与 --rtc-horizon 叠加属双重"
+                     "rows[M−1] 与 EMA 状态链一致。与 --execution-horizon 叠加属双重"
                      "消缝（推理侧+执行侧），A/B 时分开评估")
-ap.add_argument("--rtc-horizon", type=int, default=None,
+ap.add_argument("--execution-horizon", "--rtc-horizon",
+                dest="rtc_horizon", type=int, default=None,
                 help="推理侧 RTC 前缀引导窗口（行数）：>0 启用（lerobot 默认 10），"
                      "0=关；默认见 [lerobot] 档。前缀=旧块未消费尾段重锚进新块坐标系")
 ap.add_argument("--rtc-max-w", type=float, default=10.0,
@@ -491,16 +501,16 @@ g1_config.apply(args, {
     "ckpt": ("lerobot", "ckpt"),
     "prompt": ("lerobot", "prompt"),
     "rounds": ("lerobot", "rounds"),
-    "n_action_steps": ("lerobot", "n_action_steps"),
-    "skip_install": ("lerobot", "skip_install"),
-    "seam_overlap_alpha": ("lerobot", "seam_overlap_alpha"),
+    "n_action_steps": ("lerobot", "execute_actions_per_chunk"),
+    "skip_install": ("lerobot", "skip_frames"),
+    "seam_overlap_alpha": ("lerobot", "fusion_alpha"),
     "cmd_every": ("lerobot", "cmd_every"),
-    "ema_alpha": ("lerobot", "ema_alpha"),
+    "ema_alpha": ("lerobot", "filter_alpha"),
     "grip_state_cmd": ("lerobot", "grip_state_cmd"),
-    "delta_max": ("lerobot", "delta_max"),
+    "delta_max": ("lerobot", "max_joint_delta_per_step"),
     "burst_reserve_ms": ("lerobot", "burst_reserve_ms"),
     "nav_suspend": ("lerobot", "nav_suspend"),
-    "rtc_horizon": ("lerobot", "rtc_horizon"),
+    "rtc_horizon": ("lerobot", "execution_horizon"),
     "head_crop": ("lerobot", "head_crop"),
     "cache_frames": ("loop", "cache_frames"),
     "max_excursion": ("loop", "max_excursion"),
@@ -508,7 +518,7 @@ g1_config.apply(args, {
     "grip_speed": ("gripper", "speed"),
     "grip_effort": ("gripper", "effort"),
     "grip_chg": ("gripper", "chg"),
-})
+}, path=args.config)
 
 # None 哨兵回落（配方旗标 argparse 默认改 None 交给三态回填，此处补脚本旧默认）
 if args.seam_overlap_alpha is None:
@@ -535,17 +545,17 @@ if args.rtc_horizon > 0 and "rtc" not in pathlib.Path(str(args.ckpt)).name.lower
 
 
 if args.ref_offset and not args.skip_install:
-    raise SystemExit("--ref-offset 须与 --skip-install 同用（偏移定义在新计划行 0 上）")
+    raise SystemExit("--ref-offset 须与 --skip-frames 同用（偏移定义在新计划行 0 上）")
 if args.entry_fill_dip and not args.entry_match:
     raise SystemExit("--entry-fill-dip 需要 --entry-match（填补在入口匹配流内执行）")
 if args.entry_match:
     if args.skip_install or args.ref_offset:
-        raise SystemExit("--entry-match 与 --skip-install/--ref-offset 互斥"
+        raise SystemExit("--entry-match 与 --skip-frames/--ref-offset 互斥"
                          "（入口匹配按位姿选行，取代时钟跳帧）")
     if args.blend:
         raise SystemExit("--entry-match 与 --blend 互斥（同回放台口径）")
     if args.ema_alpha <= 0:
-        raise SystemExit("--entry-match 须配 --ema-alpha>0：方向/导程判据作用在"
+        raise SystemExit("--entry-match 须配 --filter-alpha>0：方向/导程判据作用在"
                          "滤波后的行序列上，裸行序列的模型抖动会打死方向门"
                          "（回放台 v1 教训）")
 if args.seam_overlap_alpha > 0:
@@ -555,15 +565,15 @@ if args.seam_overlap_alpha > 0:
         ("--blend", args.blend),
         ("--ref-offset", args.ref_offset)) if _on]
     if _ovp_bad:
-        raise SystemExit(f"--seam-overlap-alpha 与 {_ovp_bad} 互斥：重叠混接以"
+        raise SystemExit(f"--fusion-alpha 与 {_ovp_bad} 互斥：重叠混接以"
                          "「旧流惯性项」取代全部缝口机制（同事栈语义），叠加会"
                          "双重滤波")
     if not args.skip_install:
-        raise SystemExit("--seam-overlap-alpha 须配 --skip-install：混接对齐键="
+        raise SystemExit("--fusion-alpha 须配 --skip-frames：混接对齐键="
                          "「取图→落地流逝拍数」，即跳帧安装的偏移；无对齐则新旧"
                          "计划错位混接（时间维 OOD）")
     if args.ema_alpha > 0:
-        print("⚠ --seam-overlap-alpha 与 --ema-alpha 同开：EMA 再滤一遍混接行，"
+        print("⚠ --fusion-alpha 与 --filter-alpha 同开：EMA 再滤一遍混接行，"
               "收敛新计划更慢（同事栈臂维无 EMA）；A/B 判读时注意此差异")
 if args.fps > 40:
     raise SystemExit(f"--fps {args.fps} > 40 拒绝：tick {1000 / args.fps:.1f}ms 低于"
@@ -571,7 +581,7 @@ if args.fps > 40:
 if args.frames_per_row < 1:
     raise SystemExit("--frames-per-row 须 ≥ 1")
 if args.rtc_horizon < 0:
-    raise SystemExit("--rtc-horizon 须 ≥ 0（0=关）")
+    raise SystemExit("--execution-horizon 须 ≥ 0（0=关）")
 if args.cmd_every < 1:
     raise SystemExit("--cmd-every 须 ≥ 1（1=纯 30Hz 直发零变）")
 if args.cmd_first_only and args.cmd_every <= 1:
@@ -614,9 +624,9 @@ if args.grip_ss:
     if not (0.0 <= GRIP_SS[1] < GRIP_SS[0] <= 100.0):
         raise SystemExit("--grip-ss 需 0 ≤ 合阈 < 开阈 ≤ 100（带内=迟滞防抖）")
 if args.n_action_steps < 0:
-    raise SystemExit("--n-action-steps 须 ≥ 0（0=换块即预取）")
+    raise SystemExit("--execute-actions-per-chunk 须 ≥ 0（0=换块即预取）")
 if args.n_action_steps == 0 and not (args.skip_install or args.entry_match):
-    raise SystemExit("水位 0（换块即预取）须配 --skip-install 或 --entry-match："
+    raise SystemExit("水位 0（换块即预取）须配 --skip-frames 或 --entry-match："
                      "推理落地时新块行 0 的墙钟槽位必已流逝 ~10 拍，不跳帧安装"
                      "=每块首拍系统性回走（110411 锯齿同源）；entry-match 按"
                      "位姿选行达到同一目的（不消费历史槽位）")
@@ -1460,9 +1470,9 @@ def build_rows(cur, prev0=None, offset=None, seam=False):
     relative_actions_processor 把臂维动作转成 delta（相对本块预测时刻臂位
     BASE_ARM）——行目标不是 chunk 绝对值，须加回 BASE_ARM（换块时随 job 更新）。
     链式：rows[0]=cur 向行 0 绝对位限幅挪一步，rows[k]=rows[k−1] 再向行 k 挪——
-    每行位移 ≤ --delta-max，且逐行夹在 cur 与 chunk 绝对位之间（包络盒凸性 →
+    每行位移 ≤ --max-joint-delta-per-step，且逐行夹在 cur 与 chunk 绝对位之间（包络盒凸性 →
     行目标自动在包络内；样条过冲由 build_block_stream 的帧级钳位兜底）。
-    EMA：--ema-alpha>0 时状态跨块连续（infer_policy action_filter 同款语义，
+    EMA：--filter-alpha>0 时状态跨块连续（infer_policy action_filter 同款语义，
     2026-10-12 对照判明块内重启版对接缝无效）：新块 rows[0] 先与上块末行滤波
     输出混合再起链，接缝首行同样被滤；首块/循环起点无历史即以 rows[0] 播种。
     滤波对象=链钳后的绝对行目标（与同事"钳位→滤波"同序），凸组合仍在包络内。

@@ -227,39 +227,46 @@ high-frequency control usage"）。**默认 N=1=纯 30Hz 直发（原生 lerobot
 逐项覆盖=CLI 显式传参；布尔档显式关=--no-X 反关旗标。常用覆写例：
 
 ```bash
-# 无 RTC A/B（前缀引导关；skip-install/overlap 与 RTC 无关照常生效）
-~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_traj.py --exec --rtc-horizon 0
+# 无 RTC A/B（前缀引导关；skip-frames/fusion 与 RTC 无关照常生效）
+~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_traj.py --exec --execution-horizon 0
 # place 相（place 训练无裁剪；grip-state-cmd 按任务语义决定，place=回读语义须反关）
 ~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_traj.py --exec --no-head-crop --no-grip-state-cmd
 # 醒着导航 A/B（编排器 --no-nav-suspend 同款语义）
 ~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_traj.py --exec --no-nav-suspend
 ```
 
-档内逐项语义（=同事 lerobot 栈忠实复刻）：
-
-逐项语义（=同事 lerobot 栈忠实复刻）：
+档内逐项语义（=同事 lerobot 栈忠实复刻；**旗标名已对齐同事栈词汇**——
+主名=同事键名，旧名全部保留为 CLI 别名不破坏肌肉记忆，[lerobot] 档键名
+同名对齐。`--head-crop` 不对齐：同事 `crop_to_training_aspect` 是
+letterbox-vs-crop 另一功能，挂同名会造虚假等价）：
 - **爪=关节流（`--grip-path joint`，10-21 起默认）**：dim7/15 并回
   `set_joint_commands`（velocity=0.15 速度帽、effort=10、tfs 同臂）——
   lerobot 采集本体语义。旧 `set_gripper_command` 行程控制器路判明=训练外
   注入行为（onset=0.12s+行程/速度+0.03 m/s 下限+吞令，P5 极限梯/P6 端点
   对照破案），`--grip-path cmd` 降级逃生门/复现对照；爪各门（chg/
   min-interval/ss/send-every/preclose）仅该路适用，配 joint 会被拒
-- `--skip-install`=同事 skip_frames（观测→落地流逝拍墙钟对齐跳帧）；
-  `--n-action-steps 0` 水位 0=换块即预取（块长≈推理时延，须配 skip-install）
-- `--seam-overlap-alpha 0.7`=同事 weighted_average 换块混接（0.3 旧+0.7 新）；
-  与 entry-match/seam-alpha/blend/ref-offset 互斥
+- `--skip-frames`（原 --skip-install，别名保留）=同事 rtc_controller
+  `skip_frames` 同名参数（观测→落地流逝拍墙钟对齐跳帧）；
+  `--execute-actions-per-chunk 0`（原 --n-action-steps）水位 0=换块即预取
+  （块长≈推理时延，须配 skip-frames；同事 yaml 顶层同名键）
+- `--fusion-alpha 0.7`（原 --seam-overlap-alpha）=同事 rtc.fusion_method
+  "weighted" 换块融合（同事=窗口内线性 ramp，我们=恒定 α 简化版，0.3 旧
+  +0.7 新）；与 entry-match/seam-alpha/blend/ref-offset 互斥
 - `cmd_every = 1`=纯 30Hz 直发
-- `--ema-alpha 0.3`=同事 action_filter 同款——**dim23 全维单滤镜：臂+爪一个
+- `--filter-alpha 0.3`（原 --ema-alpha）=同事 action_filter.lowpass.alpha
+  同名同值——**dim23 全维单滤镜：臂+爪一个
   α**（robot_controller.py:110 实锤；10-21 定档统一，爪 EMA 默认跟随臂，
-  `--grip-ema-alpha` 仅 A/B 单独覆盖用，0=爪不滤）；EMA 滤模型爪列翻转
+  `--grip-filter-alpha`（原 --grip-ema-alpha）仅 A/B 单独覆盖用，0=爪不滤）；EMA 滤模型爪列翻转
   （125953 实证治本）
 - `--grip-state-cmd`：state 爪维喂指令值（**pick 必带**，忘带=R 爪全程 0%）
-- `--delta-max 0.05`（链钳封版）+`--burst-reserve-ms 0`+`--nav-suspend`
+- `--max-joint-delta-per-step 0.05`（原 --delta-max；同事 control 段同名键
+  同值；链钳封版）+`--burst-reserve-ms 0`+`--nav-suspend`
   （推理 −55ms；只用于臂上任务+底盘不动窗口）
-- `--rtc-horizon 10 --head-crop`：**ckpt 耦合项**——仅配
+- `--execution-horizon 10`（原 --rtc-horizon；同事 rtc.execution_horizon
+  同名）+`--head-crop`：**ckpt 耦合项**——仅配
   sft1012_training_rtc_d10（prefix 条件训练）且 pick 相带；place 训练无
   裁剪=place 相勿带 --head-crop；未经 RTC 条件训练的 ckpt 勿带
-  --rtc-horizon（引擎引导会把 chunk 拉弯=伸歪/固定位空抓，10-16 定罪）
+  --execution-horizon（引擎引导会把 chunk 拉弯=伸歪/固定位空抓，10-16 定罪）
 - 铁则：R 合爪段（~19-24s）勿 q（实宽钉 30-50mm=抓住/80+=按空+臂上抬）；
   stall 签名（|Δcmd| 正常臂不动）=物理急停勿等 q；⚠ --fps 勿带
   （15Hz 事故=时间维 OOD→包络停机）
@@ -278,7 +285,8 @@ high-frequency control usage"）。**默认 N=1=纯 30Hz 直发（原生 lerobot
 - **无速度概念**：速度=帧间距/帧周期，由样条与行差涌现；删 --speed/
   --arrive-div/--cmd-every/--const-speed 全家，新增 --frames-per-row（默认 1
   纯 30Hz 直发；N>1 时 SDK 单帧调用须 <(tick−预留)÷N，持续丢拍就降 N）/
-  --burst-reserve-ms（默认 6）/--interp（cubic）/--ema-alpha（0=关，行目标
+  --burst-reserve-ms（默认 6）/--interp（cubic）/--filter-alpha（原
+  --ema-alpha；0=关，行目标
   低通的执行侧兜底杠杆；10-10 归因实锤模型输出抖动后这是候选抑制手段）
 - **换块拍多 ~11ms**（cubic 插值构建）→ 每块至多 1 次丢拍重锚，属预期；
   帧突发绝不追发（tick 绝对截止铁律同 native）

@@ -35,16 +35,19 @@ BUILTIN = {
         "ckpt": "/home/galbot/holy/models/pi05_g1_training_rtc_d10_deploy",
         "prompt": "Left arm pick up A. Right arm pick up A.",
         "rounds": 200,            # 轮
-        "n_action_steps": 0,      # 0=换块即取新计划（水位 0；新鲜度第一杠杆）
-        "skip_install": True,     # 换块跳帧安装（同事 skip_frames）
-        "seam_overlap_alpha": 0.7,  # 换块重叠混接（同事 weighted_average）
-        "cmd_every": 1,           # 纯流式直发（合步 N>1 与 overlap 相性未验）
-        "ema_alpha": 0.3,         # 行目标 EMA（dim23 全维；爪维默认跟随此值）
+        "execute_actions_per_chunk": 0,  # 0=换块即取新计划（水位 0；新鲜度第一杠杆）
+        "skip_frames": True,      # 换块跳帧安装（同事 rtc_controller.add_chunk 同名参数）
+        "fusion_alpha": 0.7,      # 换块融合权重（同事 rtc.fusion_method:"weighted"；
+                                  # 同事=线性 ramp，我们=恒定 α 凸组合简化版）
+        "cmd_every": 1,           # 纯流式直发（本脚本扩展；同事无合步概念）
+        "filter_alpha": 0.3,      # 行目标 EMA（同事 action_filter.lowpass.alpha 同名；
+                                  # dim23 全维，爪维默认跟随此值）
         "grip_state_cmd": True,   # state 爪维喂指令值（数据集语义；忘带=R 爪死 0）
-        "delta_max": 0.05,        # rad/步（对原始增量 0.00% 截断=封版）
-        "burst_reserve_ms": 0.0,  # 纯流式无突发预算
-        "nav_suspend": True,      # 搁置导航栈（醒着 +60ms 税，低延迟必带）
-        "rtc_horizon": 10,        # 前缀引导（trained-RTC 权重专属，抹剩余接缝）
+        "max_joint_delta_per_step": 0.05,  # rad/步（同事 control 段同名键，值同 0.05）
+        "burst_reserve_ms": 0.0,  # 纯流式无突发预算（本脚本扩展）
+        "nav_suspend": True,      # 搁置导航栈（醒着 +60ms 税，低延迟必带；本机特有）
+        "execution_horizon": 10,  # 前缀引导（同事 rtc.execution_horizon 同名；
+                                  # trained-RTC 权重专属，抹剩余接缝）
         "head_crop": True,        # 头图裁剪放大（sft_1012 训练同款；place 相勿带）
     },
     "warmup": {
@@ -137,10 +140,20 @@ _KNOWN_LOOP_KEYS = {
     "switch_dist", "chunk_mode", "traj_dt", "catch_timeout",
 }
 _KNOWN_LEROBOT_KEYS = {
-    "ckpt", "prompt", "rounds", "n_action_steps", "skip_install",
-    "seam_overlap_alpha", "cmd_every", "ema_alpha", "grip_state_cmd",
-    "delta_max", "burst_reserve_ms", "nav_suspend", "rtc_horizon",
-    "head_crop",
+    "ckpt", "prompt", "rounds", "execute_actions_per_chunk", "skip_frames",
+    "fusion_alpha", "cmd_every", "filter_alpha", "grip_state_cmd",
+    "max_joint_delta_per_step", "burst_reserve_ms", "nav_suspend",
+    "execution_horizon", "head_crop",
+}
+# 2026-10-21 晚：[lerobot] 键名与同事栈词汇对齐（ba51649 当日落地即改，
+# 无外部 toml 存量），命中旧键硬报错（同 [loop] 先例：防静默回落内置默认）
+_RENAMED_LEROBOT_KEYS = {
+    "n_action_steps": "execute_actions_per_chunk",
+    "skip_install": "skip_frames",
+    "seam_overlap_alpha": "fusion_alpha",
+    "ema_alpha": "filter_alpha",
+    "delta_max": "max_joint_delta_per_step",
+    "rtc_horizon": "execution_horizon",
 }
 
 
@@ -169,6 +182,12 @@ def load(path=DEFAULT_PATH):
                   + ", ".join(sorted(unknown)))
     lerobot = data.get("lerobot")
     if isinstance(lerobot, dict):
+        for old, new in _RENAMED_LEROBOT_KEYS.items():
+            if old in lerobot:
+                raise SystemExit(
+                    f"[config] {p} [lerobot].{old} 已改名 {new}"
+                    f"（2026-10-21 键名对齐同事栈词汇），请更新 toml；"
+                    f"旧键硬报错防静默回落内置默认")
         unknown = set(lerobot) - _KNOWN_LEROBOT_KEYS
         if unknown:
             print(f"[config] ⚠ {p} [lerobot] 未认键（tomllib 静默忽略，请核对拼写）: "

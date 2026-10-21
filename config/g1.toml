@@ -174,14 +174,14 @@ ctrl_hz = 30.0      # 控制频率，Hz（=数据集 fps；chunk 窗口=horizon�
 ckpt = "/home/galbot/holy/models/pi05_g1_training_rtc_d10_deploy"
 prompt = "Left arm pick up A. Right arm pick up A."
 rounds = 200             # 轮
-n_action_steps = 0       # 0=换块即取新计划（水位 0；新鲜度是接缝第一杠杆）
-skip_install = true      # 换块跳帧安装（同事 skip_frames 墙钟对齐）；反关 --no-skip-install
-seam_overlap_alpha = 0.7 # 换块重叠混接，新计划权重（同事 weighted_average）
-cmd_every = 1            # 纯流式直发（合步 N>1 与 overlap 相性未验勿混）
-ema_alpha = 0.3          # 行目标 EMA（dim23 全维；爪维默认跟随此值）
+execute_actions_per_chunk = 0  # 0=换块即取新计划（水位 0；新鲜度是接缝第一杠杆）；同事同名键
+skip_frames = true       # 换块跳帧安装（同事 rtc_controller 同名参数）；反关 --no-skip-frames〔CLI 仍收旧名 --skip-install〕
+fusion_alpha = 0.7       # 换块融合权重（同事 rtc.fusion_method:"weighted"，我们=恒定 α 简化版）〔旧名 --seam-overlap-alpha〕
+cmd_every = 1            # 纯流式直发（本脚本扩展，同事无合步概念）
+filter_alpha = 0.3       # 行目标 EMA（同事 action_filter.lowpass.alpha 同名；dim23 全维；爪维默认跟随）〔旧名 --ema-alpha〕
 grip_state_cmd = true    # state 爪维喂指令值（数据集语义；忘带=R 爪死 0）；反关 --no-grip-state-cmd
-delta_max = 0.05         # rad/步（对原始增量 0.00% 截断=封版）
+max_joint_delta_per_step = 0.05  # rad/步（同事 control 段同名键同值；对原始增量 0.00% 截断=封版）〔旧名 --delta-max〕
 burst_reserve_ms = 0.0   # 纯流式无突发预算
 nav_suspend = true       # 闭环期搁置导航栈 7 进程（醒着 +60ms 税）；反关 --no-nav-suspend
-rtc_horizon = 10         # 前缀引导窗口（trained-RTC 权重专属，抹剩余接缝；0=关）
+execution_horizon = 10   # 前缀引导窗口（同事 rtc.execution_horizon 同名；trained-RTC 权重专属；0=关）〔旧名 --rtc-horizon〕
 head_crop = true         # 头图裁剪放大（sft_1012 训练同款；place 相勿带）；反关 --no-head-crop
