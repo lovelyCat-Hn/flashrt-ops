@@ -26,6 +26,14 @@
      行程 4.00s=119.5mm÷0.03 → 速度下限钳位 0.03 实锤）；接管格未跑成
      （0.01 起步理论 12s 超 10s 超时窗）——executor 恒发 0.15 单速，接管 vs
      继承对现役门无影响，不再补测。preclose 据此判死。〕
+  P6 关节路径夹爪格——同事 infer_policy 栈从不调 set_gripper_command：夹爪
+     是 23 维关节向量第 8/16 维走 set_joint_commands(tfs=0)（piper 关节固件
+     路径，真机 250Hz 密流无 onset 无冻结；lerobot 采集语义原样）。本相位
+     直接单测关节路径三格：A 单发 onset+速度形状（pursuit k×gap vs 恒速帽）；
+     B 密流 ±5mm 微摆 3s+静默（P3 同格换路径，判冻结/照跟）；C velocity=0.01
+     单发（判关节路有无速度下限）。若 A 起步 <0.3s + B 不冻 = 定律确属
+     set_gripper_command 端点专属，traj 线爪维切关节路径（对齐训练语义）
+     的依据成立。
   P3 密发复现（chg 门模拟）——0.1s 间隔连发 3s 微摆目标（模拟裸 chg 门），
      随后静默 2.5s：密发期宽度冻结 + 静默期一次补走 = 111901 定律现场复现。
 
@@ -43,7 +51,11 @@ import csv
 import pathlib
 import time
 
-from galbot_sdk.g1 import GalbotRobot, G1JointGroup
+try:
+    from galbot_sdk.g1 import GalbotRobot, G1JointGroup, JointCommand
+except ImportError:                       # 旧 SDK 无 JointCommand 导出
+    from galbot_sdk.g1 import GalbotRobot, G1JointGroup
+    JointCommand = None
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--ckpt", default="/home/galbot/holy/models/pi05_g1_onlypick_deploy")
@@ -330,6 +342,92 @@ def phase_p5(robot, group, side):
     settle(robot, group, need=1.2, timeout=15.0)
 
 
+def _joint_send(robot, group, width, vel, eff=10.0):
+    """夹爪作关节组单条 set_joint_commands（同事栈同款：position=width_m、
+    tfs=0）；返回 status 字符串。"""
+    cmd = JointCommand()
+    cmd.position = float(width)
+    cmd.velocity = float(vel)
+    cmd.effort = float(eff)
+    return robot.set_joint_commands([cmd], [group], [], 0.0)
+
+
+def phase_p6(robot, group, side):
+    """P6 关节路径夹爪格（对照同事 infer_policy）：A 单发 onset+速度形状；
+    B 密流微摆+静默（P3 同格换路径）；C velocity=0.01 单发判下限。
+    全程只动单爪零臂运动。"""
+    if JointCommand is None:
+        print("P6: SDK 无 JointCommand 导出，跳过")
+        return
+    print("P6 关节路径夹爪（set_joint_commands tfs=0，同事栈路线）:")
+    robot.set_gripper_command(group, WMAX, args.speed, args.effort, False)
+    settle(robot, group)
+
+    def trace(seconds, ph, sender=None):
+        stc = sender() if sender is not None else "-"
+        first = None
+        t_end = time.perf_counter() + seconds
+        while time.perf_counter() < t_end:
+            tel = time.perf_counter() - t0
+            gs = robot.get_gripper_state(group)
+            if gs is not None:
+                age = (time.time_ns() - gs.timestamp_ns) / 1e9 if getattr(gs, "timestamp_ns", 0) else float("nan")
+                rows.append([side, ph, round(tel, 3), round(gs.width * 1000, 2),
+                             round(gs.velocity, 4), int(gs.is_moving), round(age, 3),
+                             str(stc).replace("ControlStatus.", "")])
+                if first is None and abs(gs.velocity) > 0.005:
+                    first = tel
+            time.sleep(1.0 / args.poll_hz)
+        return first
+
+    # A: 单发 onset + 速度形状
+    t0 = time.perf_counter()
+    fm = trace(3.0, "P6j_single", sender=lambda: _joint_send(robot, group, WMIN, args.speed))
+    seg = [r for r in rows if r[1] == "P6j_single"]
+    vmax = max((abs(r[4]) for r in seg), default=0.0)
+    if fm is None:
+        print(f"  A 单发: 3s 未动 ⚠（关节路径也有起步问题？）")
+    else:
+        shape = "pursuit（指数追踪，起步快衰减）" if vmax > args.speed * 1.3 else \
+                f"恒速帽 ≈{args.speed}（行程控制器式）"
+        print(f"  A 单发: onset {fm:.2f}s | max|v|={vmax:.3f} → {shape}")
+    # B: 密流微摆 + 静默
+    robot.set_gripper_command(group, WMAX, args.speed, args.effort, False)
+    settle(robot, group)
+    t0 = time.perf_counter()
+    n = 0
+    while time.perf_counter() - t0 < 3.0:
+        tel = time.perf_counter() - t0
+        tgt = WMID + (5.0 / 1000.0) * (1 if int(tel / 0.1) % 2 else -1)
+        _joint_send(robot, group, tgt, args.speed)
+        n += 1
+        gs = robot.get_gripper_state(group)
+        if gs is not None:
+            age = (time.time_ns() - gs.timestamp_ns) / 1e9 if getattr(gs, "timestamp_ns", 0) else float("nan")
+            rows.append([side, "P6j_dense", round(tel, 3), round(gs.width * 1000, 2),
+                         round(gs.velocity, 4), int(gs.is_moving), round(age, 3), "SENT"])
+        time.sleep(0.1)
+    gs = robot.get_gripper_state(group)
+    w_dense = gs.width * 1000.0 if gs else float("nan")
+    t0 = time.perf_counter()
+    trace(2.5, "P6j_silence")
+    gs = robot.get_gripper_state(group)
+    w_end = gs.width * 1000.0 if gs else float("nan")
+    print(f"  B 密流 {n} 条 ±5mm → 密发末 {w_dense:.1f}mm | 静默后 {w_end:.1f}mm"
+          f"（补走 {abs(w_end - w_dense):.1f}mm；≈0=密流照跟无冻结）")
+    # C: velocity=0.01 单发判下限
+    robot.set_gripper_command(group, WMAX, args.speed, args.effort, False)
+    settle(robot, group)
+    t0 = time.perf_counter()
+    trace(3.0, "P6j_slowvel", sender=lambda: _joint_send(robot, group, WMIN, 0.01))
+    seg = [r for r in rows if r[1] == "P6j_slowvel"]
+    vmax = max((abs(r[4]) for r in seg), default=0.0)
+    print(f"  C 速度 0.01: max|v|={vmax:.3f} → "
+          + ("速度被理会（无下限）" if 0.005 < vmax < 0.03 else
+             f"执行 {vmax:.3f}（钳帽/pursuit，velocity 维存疑，看 CSV 形状）"))
+    settle(robot, group, need=1.2, timeout=15.0)
+
+
 def phase_p3(robot, group, side):
     """P3 密发复现：0.1s 连发微摆目标 3s（模拟裸 chg 门），静默 2.5s。"""
     print("P3 密发复现（0.1s 连发 3s → 静默 2.5s）:")
@@ -362,7 +460,7 @@ for side in sides:
     gs = robot.get_gripper_state(group)
     print(f"起始宽度 {(gs.width * 1000 if gs else float('nan')):.1f} mm")
     for fn, ph in ((phase_p1, "p1"), (phase_p2, "p2"), (phase_p4, "p4"),
-                   (phase_p5, "p5"), (phase_p3, "p3")):
+                   (phase_p5, "p5"), (phase_p6, "p6"), (phase_p3, "p3")):
         if _run(ph):
             fn(robot, group, side)
 
@@ -375,6 +473,7 @@ with out_p.open("w", newline="") as f:
 print(f"\n曲线已落盘: {out_p}")
 print("判读: P1 左右爪 onset 对比（10-13 左爪=0.91s）；P2 停顿>0.3s=重启律实锤"
       "（174428 已判=证伪·在途同向平滑）；P4 停顿>0.3s=在途反向重启实锤（事件门"
-      "反向豁免判死）；P5 梯=固件最小可执行速度+接管格（≥0.08=接管→--grip-preclose "
-      "可行；全梯未启动=preclose 判死候选）；"
+      "反向豁免判死）；P5 梯已判=onset=0.12+D/v+下限 0.03（185317）；"
+      "P6 关节路径（同事栈）：A onset<0.3s+B 密流不冻=定律属 set_gripper_command "
+      "端点专属、traj 爪维切关节路径依据成立；"
       "P3 密发期冻结+静默期补走=165556 阶梯机制现场复现。")
