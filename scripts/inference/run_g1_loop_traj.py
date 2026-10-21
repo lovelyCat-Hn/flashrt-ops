@@ -380,6 +380,32 @@ ap.add_argument("--grip-path", choices=["cmd", "joint"], default="joint",
                      "joint 路无该定律、门无对象（传了会被拒）。"
                      "速度下限 0.03 m/s 双路径共享（电机级），0.15 不受影响。"
                      "默认 joint。")
+ap.add_argument("--grip-hold-on-stall", action="store_true", default=False,
+                help="憋死保持（2026-10-21 力矩碰撞案；仅 --grip-path joint）："
+                     "抓到物体后模型按训练语义持续发全闭指令，位置伺服以有限速度"
+                     "反复撞进物体（每拍重发=斜坡重启≥0.03 m/s）。本机制检测"
+                     "「指令显著深于实宽且实宽平台（物理被撑住）」→ 爪流改发"
+                     "实宽−margin（钳位保持，位置误差≈margin=轻微恒定夹紧），"
+                     "消反复撞击；模型指令上穿实宽+exit（想开爪）即恢复流式。"
+                     "判据用每拍新鲜物理回读（p50 10ms）。默认关。")
+ap.add_argument("--grip-hold-gap-mm", type=float, default=5.0,
+                help="保持进入门 mm：指令宽度 ≤ 实宽−gap 才算「深指令」（"
+                     "防 EMA 尾部微抖误触发）。默认 5.0")
+ap.add_argument("--grip-hold-exit-mm", type=float, default=3.0,
+                help="保持退出门 mm：指令宽度 ≥ 实宽+exit=模型想开爪，恢复流式"
+                     "并清平台史（防近阈抖动闪断）。默认 3.0")
+ap.add_argument("--grip-hold-margin-mm", type=float, default=3.0,
+                help="保持段钳位余量 mm：下发目标=实宽−margin，即保有的恒定"
+                     "夹紧量。0=目标=实宽（零夹紧，物易松脱）。默认 3.0")
+ap.add_argument("--grip-hold-plateau-mm", type=float, default=0.8,
+                help="平台判据 mm：连续 window 拍实宽 max−min ≤ 此值才算物理"
+                     "被撑住（正在合爪途中不触发）。默认 0.8")
+ap.add_argument("--grip-hold-window", type=int, default=5,
+                help="平台窗（发送拍数，30Hz 下 5 拍≈167ms）。默认 5")
+ap.add_argument("--grip-effort-hold", type=float, default=4.0,
+                help="保持段 effort（N·m 级力矩上限）：官方文档明文爪关节 "
+                     "effort 字段生效=最大夹持力限制（galbot_robot.hpp "
+                     "set_gripper_command 语义）。0=沿用常规 10。默认 4.0")
 ap.add_argument("--config", default=g1_config.DEFAULT_PATH,
                 help="配置文件路径（优先级 CLI > config > 内置默认）")
 ap.add_argument("--log-file", default=None,
@@ -937,9 +963,19 @@ if args.grip:
                              "（joint 路径无 onset/吞令定律，各门无对象；"
                              "10-21 P6 三格实证）")
     else:
+        if args.grip_hold_on_stall:
+            raise SystemExit("--grip-hold-on-stall 仅 --grip-path joint 支持"
+                             "（憋死保持改写关节流目标；cmd 路是降级逃生门，"
+                             "不加新行为）")
         print("爪路径=行程控制器（--grip-path cmd【逃生门/复现对照】）："
               "set_gripper_command 老路，各门适用——该路 onset=0.12s+行程/速度"
               "+0.03 下限+吞令=训练外注入行为（10-21 P6 破案），默认已不走")
+    if args.grip_hold_on_stall:
+        print(f"[grip-hold] 憋死保持开：指令≤实宽−{args.grip_hold_gap_mm}mm 且"
+              f"实宽平台({args.grip_hold_window}拍≤{args.grip_hold_plateau_mm}mm)"
+              f"→钳 实宽−{args.grip_hold_margin_mm}mm@effort"
+              f"{'沿用' if args.grip_effort_hold <= 0 else args.grip_effort_hold}"
+              f"；指令≥实宽+{args.grip_hold_exit_mm}mm 退出恢复流式")
     if args.grip_send_every > 0:
         print(f"爪定时静默制: 每 {args.grip_send_every} 机会拍 1 条"
               f"（≈{30.0 / args.grip_send_every:.1f}Hz、静默 "
@@ -1358,7 +1394,8 @@ def send_grip(robot, chunk_row):
         if GRIP_SS is not None:
             _GRIP_SS_SENT[name] = (now, p)
         _gs = robot.get_gripper_state(getattr(G1JointGroup, name))
-        _phys = f" 实{_gs.width * 1000:.1f}mm" if _gs is not None else " 实?"
+        _phys = (f" 实{_gs.width * 1000:.1f}mm F{_gs.effort:.1f}N"
+                 if _gs is not None else " 实?")
         parts.append(f"{name[0].upper()} {p:.1f}%→{w * 1000:.0f}mm@{spd:.2f}{_tag}"
                      f"{_phys} {str(st).replace('ControlStatus.', '')}"
                      + (f"({why})" if why else ""))
@@ -1368,6 +1405,9 @@ def send_grip(robot, chunk_row):
 # --grip-path joint：爪维走关节固件路径的独立 EMA 状态（与 cmd 路径 _GRIP_EMA
 # 分开，A/B 切路径不串状态）
 _GRIPJ_EMA = {}
+# --grip-hold-on-stall 憋死保持状态（每爪独立）：on=保持中；hist=实宽平台窗；
+# enters=累计进入次数（汇总打印）
+_GRIPJ_HOLD = {}
 
 
 def send_grip_joint(robot, chunk_row, tfs_s):
@@ -1385,6 +1425,11 @@ def send_grip_joint(robot, chunk_row, tfs_s):
 
     GRIP["sent"] 照常更新 → --grip-state-cmd / 遥测 / sent_peak 持物签名
     无感知路径切换。
+
+    --grip-hold-on-stall（2026-10-21 力矩碰撞案）：模型按训练语义持物段持续
+    发全闭指令，位置伺服每拍重发=斜坡重启反复撞进物体。检测「指令≤实宽−gap
+    且实宽平台」→ 改发 实宽−margin@effort_hold（钳位保持）；指令上穿
+    实宽+exit（想开爪）→ 恢复流式并清平台史。只改物理下发，不改指令记账。
     """
     if GRIP is None:
         return None
@@ -1399,17 +1444,48 @@ def send_grip_joint(robot, chunk_row, tfs_s):
             p = p if prev is None else \
                 args.grip_ema_alpha * p + (1.0 - args.grip_ema_alpha) * prev
             _GRIPJ_EMA[name] = p
-        GRIP["sent"][name] = p
+        GRIP["sent"][name] = p   # 记模型意图（state-cmd/sent_peak 语义不变；
+                                 # hold 只改物理下发，不改指令记账）
         w = GRIP["wmin"] + p / 100.0 * (GRIP["wmax"] - GRIP["wmin"])
+        _gs = robot.get_gripper_state(getattr(G1JointGroup, name))
+        w_sent, eff_sent, _tag = w, 10.0, ""
+        if args.grip_hold_on_stall and _gs is not None:
+            phys = _gs.width
+            h = _GRIPJ_HOLD.setdefault(name, {"on": False, "hist": [],
+                                              "enters": 0})
+            h["hist"].append(phys)
+            _win = max(2, int(args.grip_hold_window))
+            while len(h["hist"]) > _win:
+                del h["hist"][:-_win]
+            _plateau = (len(h["hist"]) >= _win and
+                        (max(h["hist"]) - min(h["hist"])) * 1000.0
+                        <= args.grip_hold_plateau_mm)
+            if h["on"]:
+                if w >= phys + args.grip_hold_exit_mm / 1000.0:
+                    h["on"] = False
+                    h["hist"].clear()   # 退出清史：再进须新平台（防近阈闪断）
+                    _tag = " HOLD退出"
+            elif _plateau and w <= phys - args.grip_hold_gap_mm / 1000.0:
+                h["on"] = True
+                h["enters"] += 1
+                _tag = " HOLD进入"
+            if h["on"]:
+                # 钳位保持：目标=实宽−margin（跟随实宽重算，位置误差恒
+                # =margin=轻微夹紧无撞击）；effort 可降（官方语义=夹持力上限）
+                w_sent = max(0.0, phys - args.grip_hold_margin_mm / 1000.0)
+                if args.grip_effort_hold > 0:
+                    eff_sent = args.grip_effort_hold
+                _tag = _tag or " HOLD"
         c = JointCommand()
-        c.position = float(w)
+        c.position = float(w_sent)
         c.velocity = float(GRIP["speed"])   # 速度帽语义：恒速段被钳在此值
-        c.effort = 10.0
+        c.effort = float(eff_sent)
         cmds.append(c)
         groups.append(getattr(G1JointGroup, name))
-        _gs = robot.get_gripper_state(getattr(G1JointGroup, name))
-        _phys = f" 实{_gs.width * 1000:.1f}mm" if _gs is not None else " 实?"
-        parts.append(f"{name[0].upper()} {p:.1f}%→{w * 1000:.0f}mm@j{_phys}")
+        _phys = (f" 实{_gs.width * 1000:.1f}mm F{_gs.effort:.1f}N"
+                 if _gs is not None else " 实?")
+        parts.append(f"{name[0].upper()} {p:.1f}%→{w_sent * 1000:.0f}mm@j"
+                     f"{_phys}{_tag}")
     st = robot.set_joint_commands(cmds, joint_groups=groups,
                                   time_from_start_s=tfs_s)
     ok = str(st).startswith("ControlStatus.SUCCESS")
@@ -2240,7 +2316,13 @@ if GRIP and args.do_exec:
     for name, _ in GRIP["names"]:
         gs = robot.get_gripper_state(getattr(G1JointGroup, name))
         if gs is not None:
-            print(f"夹爪终态 {name}: {gs.width * 1000:.1f} mm (moving={gs.is_moving})")
+            print(f"夹爪终态 {name}: {gs.width * 1000:.1f} mm "
+                  f"(moving={gs.is_moving} 力={gs.effort:.1f}N)")
+    if args.grip_hold_on_stall and _GRIPJ_HOLD:
+        _hs = "  ".join(f"{n.split('_')[0].upper()} 进{v['enters']}"
+                        f"{'/保持中' if v['on'] else ''}"
+                        for n, v in _GRIPJ_HOLD.items())
+        print(f"爪憋死保持统计: {_hs}")
 fin = read_joints(robot, ARM_NAMES)
 exc = float(np.max(np.abs(fin - HOME))) * 1000
 print(f"\n== 汇总（{n_swapped} 块 / {len(tick_ms)} 拍 / tick {TICK * 1000:.1f} ms / "

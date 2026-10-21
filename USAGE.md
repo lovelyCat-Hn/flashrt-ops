@@ -245,6 +245,23 @@ letterbox-vs-crop 另一功能，挂同名会造虚假等价）：
   注入行为（onset=0.12s+行程/速度+0.03 m/s 下限+吞令，P5 极限梯/P6 端点
   对照破案），`--grip-path cmd` 降级逃生门/复现对照；爪各门（chg/
   min-interval/ss/send-every/preclose）仅该路适用，配 joint 会被拒
+- **憋死保持 `--grip-hold-on-stall`（2026-10-21 力矩碰撞案，默认关，
+  待真机 A/B）**：SDK V1.8.1 全链排查确认无力控/阻抗入口（控制器名册全
+  PVT、JointCommand 无 kp/kd——`set_joint_commands_batch` 文档串里的
+  Kp/Kd 属文档超前于实现；臂 effort 被官方文档明文忽略），爪唯一力域
+  旋钮=关节路径 effort（官方语义=最大夹持力上限）。抓到物体后模型按
+  训练语义持续发全闭指令→位置伺服每拍重发=斜坡重启反复撞进物体
+  （力矩碰撞声的来源）。本机制：检测「指令≤实宽−gap 且实宽平台
+  （物理被撑住）」→ 爪流改发 `实宽−margin`@`effort_hold`（跟随实宽
+  重算，位置误差恒=margin=轻微恒定夹紧，无撞击）；模型指令上穿
+  `实宽+exit`（想开爪）→ 恢复流式并清平台史。判据=每拍新鲜物理回读
+  （p50 10ms），只改物理下发不改指令记账（--grip-state-cmd/sent_peak
+  语义不变）。旋钮：`--grip-hold-gap-mm 5`（进门）/`--grip-hold-exit-mm 3`
+  （出门）/`--grip-hold-margin-mm 3`（保有夹紧量）/`--grip-hold-plateau-mm
+  0.8`+`--grip-hold-window 5`（平台窗）/`--grip-effort-hold 4`（0=沿用
+  10）。日志 `[实 X.Xmm F X.XN]`=实时夹持力回读（GripperState.effort，
+  定阈值看这个），进入/退出打 `HOLD进入/退出` 标签，汇总行打进入次数。
+  仅 --grip-path joint 支持
 - `--skip-frames`（原 --skip-install，别名保留）=同事 rtc_controller
   `skip_frames` 同名参数（观测→落地流逝拍墙钟对齐跳帧）；
   `--execute-actions-per-chunk 0`（原 --n-action-steps）水位 0=换块即预取

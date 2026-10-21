@@ -17,6 +17,10 @@
              GRIP 速度帽、effort=10（同事同款，非 cmd 路 30）；密流每拍必发
              （无 chg 门）；EMA 独立状态；GRIP["sent"] 照更（喂 state-cmd）；
              tfs 透传；dry 不发。
+  T5 憋死保持 --grip-hold-on-stall（2026-10-21 力矩碰撞案）：平台窗未满=
+             正常流式；平台满+深指令=进入（钳实宽−margin@effort_hold）；
+             指令记账=模型意图不变；实宽变化→目标跟随；指令上穿实宽+exit=
+             退出当拍发模型目标；退出清史→再进须新平台；effort_hold=0=沿用10。
 """
 import ast
 import types
@@ -41,9 +45,10 @@ class G1JointGroup:
 
 
 class GS:
-    def __init__(self, width, velocity):
+    def __init__(self, width, velocity, effort=0.0):
         self.width = width
         self.velocity = velocity
+        self.effort = effort
         self.is_moving = abs(velocity) > 0.005
         self.timestamp_ns = 0
 
@@ -83,16 +88,25 @@ def make_ns(clock):
           "G1JointGroup": G1JointGroup, "JointCommand": JointCommand,
           "GRIP_SS": None,
           "_GRIP_EMA": {}, "_GRIP_SENT_AT": {}, "_GRIP_PRE_HIST": {},
-          "_GRIP_BEAT": 0, "_GRIPJ_EMA": {}}
+          "_GRIP_BEAT": 0, "_GRIPJ_EMA": {}, "_GRIPJ_HOLD": {}}
     mod = ast.Module(body=FNS, type_ignores=[])
     exec(compile(mod, "<send_grip+send_grip_joint>", "exec"), ns)
     return ns
 
 
-def args_of(min_interval=0.0, preclose=0.0, ema=0.0):
+def args_of(min_interval=0.0, preclose=0.0, ema=0.0,
+            hold=False, gap=5.0, exit_mm=3.0, margin=3.0,
+            plateau=0.8, window=5, effort_hold=4.0):
     return types.SimpleNamespace(do_exec=True, grip_send_every=0,
                                  grip_min_interval=min_interval,
-                                 grip_preclose=preclose, grip_ema_alpha=ema)
+                                 grip_preclose=preclose, grip_ema_alpha=ema,
+                                 grip_hold_on_stall=hold,
+                                 grip_hold_gap_mm=gap,
+                                 grip_hold_exit_mm=exit_mm,
+                                 grip_hold_margin_mm=margin,
+                                 grip_hold_plateau_mm=plateau,
+                                 grip_hold_window=window,
+                                 grip_effort_hold=effort_hold)
 
 
 def grip_of(chg=2.0):
@@ -236,6 +250,70 @@ ns3.update(GRIP=grip_of(), args=args_of(), robot=FakeRobot())
 ns3["args"].do_exec = False
 _dry = ns3["send_grip_joint"](ns3["robot"], {7: 50.0, 15: 50.0}, 0.0)
 check("dry 不发", _dry == "dry（不下发）" and not ns3["robot"].jcalls)
+
+# ── T5 憋死保持 ──
+print("T5 憋死保持 --grip-hold-on-stall（2026-10-21 力矩碰撞案）")
+clock = [40.0]
+ns = make_ns(clock)
+ns.update(GRIP=grip_of(), args=args_of(hold=True), robot=FakeRobot())
+robot, sgj = ns["robot"], ns["send_grip_joint"]
+
+# 前 4 拍：实宽被物撑在 42mm，指令 5%（=6mm，深指令 gap 36mm）但平台窗未满
+for _ in range(4):
+    robot.state[G1JointGroup.right_gripper] = GS(0.042, 0.0)
+    robot.jcalls.clear()
+    sgj(robot, {7: 5.0, 15: 90.0}, 0.0)
+    jc = robot.jcalls[0][1][0]
+check("平台窗未满=正常流式（pos 6mm/eff 10）",
+      jc[0] == 0.006 and jc[2] == 10.0, f"{jc}")
+
+# 第 5 拍：平台满 → 进入保持：钳 39mm@eff4
+robot.jcalls.clear()
+sgj(robot, {7: 5.0, 15: 90.0}, 0.0)
+jc = robot.jcalls[0][1][0]
+check("平台满+深指令=进入保持（钳实宽−3mm）", abs(jc[0] - 0.039) < 1e-9, f"{jc}")
+check("保持段 effort 降 4", jc[2] == 4.0, f"{jc}")
+check("指令记账=模型意图（state-cmd/sent_peak 语义不变）",
+      ns["GRIP"]["sent"]["right_gripper"] == 5.0)
+check("左爪不受牵连（90%=108mm 正常发）",
+      abs(robot.jcalls[0][1][1][0] - 0.108) < 1e-9)
+
+# 持物中实宽被顶开（物滑动）→ 目标跟随实宽重算
+robot.state[G1JointGroup.right_gripper] = GS(0.045, 0.0)
+robot.jcalls.clear()
+sgj(robot, {7: 5.0, 15: 90.0}, 0.0)
+jc = robot.jcalls[0][1][0]
+check("保持中跟随实宽（45mm→钳42mm）", abs(jc[0] - 0.042) < 1e-9, f"{jc}")
+
+# 模型想开爪：指令 90%（108mm ≥ 45+3）→ 退出，当拍直接发模型目标
+robot.jcalls.clear()
+sgj(robot, {7: 90.0, 15: 90.0}, 0.0)
+jc = robot.jcalls[0][1][0]
+check("指令上穿实宽+exit=退出当拍发模型目标",
+      abs(jc[0] - 0.108) < 1e-9 and jc[2] == 10.0, f"{jc}")
+
+# 退出清史：再合须新平台（1-4 拍不进，第 5 拍才进）
+reentered = None
+for k in range(1, 8):
+    robot.state[G1JointGroup.right_gripper] = GS(0.045, 0.0)
+    robot.jcalls.clear()
+    sgj(robot, {7: 5.0, 15: 90.0}, 0.0)
+    if abs(robot.jcalls[0][1][0][0] - 0.042) < 1e-9:
+        reentered = k
+        break
+check("退出清史→再进须新平台窗（第5拍）", reentered == 5, f"第{reentered}拍")
+
+# effort_hold=0：保持段沿用 10（只钳位不降压）
+ns = make_ns(clock)
+ns.update(GRIP=grip_of(), args=args_of(hold=True, effort_hold=0.0),
+          robot=FakeRobot())
+robot, sgj = ns["robot"], ns["send_grip_joint"]
+for _ in range(5):
+    robot.state[G1JointGroup.right_gripper] = GS(0.042, 0.0)
+    sgj(robot, {7: 5.0, 15: 90.0}, 0.0)
+jc = robot.jcalls[-1][1][0]
+check("effort_hold=0=保持段沿用 10", jc[2] == 10.0, f"{jc}")
+check("钳位仍生效", abs(jc[0] - 0.039) < 1e-9, f"{jc}")
 
 print(f"\n{'全绿' if not FAIL else 'FAIL: ' + ', '.join(FAIL)}")
 raise SystemExit(1 if FAIL else 0)
