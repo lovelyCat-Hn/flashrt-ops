@@ -327,18 +327,19 @@ ap.add_argument("--grip-preclose", type=float, default=0.0,
                      "（0.01 指令实测执行 0.03）且起步延迟 onset=0.12s+行程/速度"
                      "——爬速 0.03 全行程起步要 ~4.1s，爬速越慢起步越晚，"
                      "「低速吸收死区」前提整体不成立。旗标保留仅供复现对照。0=关。")
-ap.add_argument("--grip-path", choices=["cmd", "joint"], default="cmd",
-                help="爪下发路径（10-21 P6 破案：onset=0.12s+行程/速度＋吞令整条"
-                     "定律属 set_gripper_command 端点专属；同事 infer_policy 的爪="
-                     "dim7/15 并回 set_joint_commands 流=lerobot 采集同语义，"
-                     "P6 三格实证 onset≈0.14s 纯 L 与行程无关、velocity=速度帽"
-                     "（0.15→0.1500 被尊重）、密流不冻）。"
-                     "cmd=set_gripper_command（现役，走 chg/min-interval/ss/"
-                     "send-every/preclose 各门）；joint=双爪作关节组每发送拍一包"
-                     "（set_joint_commands(groups=[right_gripper,left_gripper], "
-                     "tfs 与臂同参），各门全旁路、EMA 照带、effort=10 同事同款）。"
-                     "速度下限 0.03 m/s 双路径共享（电机级），现役 0.15 不受影响。"
-                     "默认 cmd。")
+ap.add_argument("--grip-path", choices=["cmd", "joint"], default="joint",
+                help="爪下发路径（10-21 P6 破案+用户定案默认 joint：onset=0.12s+"
+                     "行程/速度＋吞令整条定律属 set_gripper_command 端点专属，"
+                     "该路=训练外注入行为；joint=dim7/15 并回 set_joint_commands "
+                     "关节流=lerobot 采集/同事 infer_policy 本体语义，P6 三格实证 "
+                     "onset≈0.14s 纯 L 与行程无关、velocity=速度帽（0.15→0.1500 "
+                     "被尊重）、密流不冻；双爪一包每发送拍一包，各门全旁路、"
+                     "EMA 照带、effort=10 同事同款）。"
+                     "cmd=set_gripper_command【降级=逃生门/复现对照】——爪各门"
+                     "（chg/min-interval/ss/send-every/preclose）只在此路适用，"
+                     "joint 路无该定律、门无对象（传了会被拒）。"
+                     "速度下限 0.03 m/s 双路径共享（电机级），0.15 不受影响。"
+                     "默认 joint。")
 ap.add_argument("--config", default=g1_config.DEFAULT_PATH,
                 help="配置文件路径（优先级 CLI > config > 内置默认）")
 ap.add_argument("--log-file", default=None,
@@ -807,7 +808,7 @@ if args.grip:
     print(f"夹爪下发开启: 0%→{wmin} m | 100%→{wmax} m | 速度 {args.grip_speed} m/s | "
           f"力矩 {args.grip_effort} N | 变化阈值 {args.grip_chg}%")
     if args.grip_path == "joint":
-        print("爪路径=关节流（--grip-path joint）：双爪作关节组并入 "
+        print("爪路径=关节流（--grip-path joint，10-21 起默认）：双爪作关节组并入 "
               "set_joint_commands（tfs 与臂同参、velocity=速度帽 0.15 被尊重、"
               "effort=10 同事同款）；chg/min-interval/send-every/ss/preclose "
               "各门全旁路（10-21 P6 三格实证：onset 0.12+D/v 律属 "
@@ -821,6 +822,10 @@ if args.grip:
             raise SystemExit(f"--grip-path joint 与 {'/'.join(_gp_bad)} 互斥"
                              "（joint 路径无 onset/吞令定律，各门无对象；"
                              "10-21 P6 三格实证）")
+    else:
+        print("爪路径=行程控制器（--grip-path cmd【逃生门/复现对照】）："
+              "set_gripper_command 老路，各门适用——该路 onset=0.12s+行程/速度"
+              "+0.03 下限+吞令=训练外注入行为（10-21 P6 破案），默认已不走")
     if args.grip_send_every > 0:
         print(f"爪定时静默制: 每 {args.grip_send_every} 机会拍 1 条"
               f"（≈{30.0 / args.grip_send_every:.1f}Hz、静默 "
@@ -1116,6 +1121,11 @@ def env_first_violation(ch):
 
 def send_grip(robot, chunk_row):
     """chunk 行 dim7/dim15（0~100%）→ 标定宽度下发（超阈值才发，非阻塞）。
+
+    ⚠ 10-21 起默认路径是 send_grip_joint（--grip-path joint=lerobot 采集
+    语义）；本函数=set_gripper_command 行程控制器路【逃生门/复现对照】，
+    下列各门只在此路适用（该路 onset=0.12s+行程/速度+吞令=训练外注入行为，
+    P6 三格破案在案）。
 
     只发不查不等待（拖死控制环）；终态核对放循环结束后。回读新鲜（10-13
     标定 p50 10ms），实际下发拍顺带采样一次物理实宽进日志（[实 X.Xmm]），
