@@ -6,10 +6,12 @@
   配方固化在 config/g1.toml [lerobot] 档（三态 CLI > [lerobot] > 内置：
   逐项覆盖=CLI 显式传参；布尔档显式关=--no-X 反关旗标；日志 [config]
   覆盖行可核对生效来源）。旗标/档键名已对齐同事栈词汇
-  （execute_actions_per_chunk/skip_frames/fusion_alpha/filter_alpha/
+  （execute_actions_per_chunk/skip_frames/aggregate_fn〔上游
+  AGGREGATE_FUNCTIONS 注册表；--fusion-alpha=连续 α 逃生门〕/filter_alpha/
   max_joint_delta_per_step/execution_horizon；旧旗标名保留为 CLI 别名）。
   等价 CLI 展开：
-    --rounds 200 --execute-actions-per-chunk 0 --skip-frames --fusion-alpha 0.7
+    --rounds 200 --execute-actions-per-chunk 0 --skip-frames
+    --aggregate-fn weighted_average
     --cmd-every 1 --filter-alpha 0.3 --grip-state-cmd --max-joint-delta-per-step 0.05
     --burst-reserve-ms 0 --nav-suspend --execution-horizon 10 --head-crop
     --ckpt models/pi05_g1_training_rtc_d10_deploy
@@ -216,6 +218,15 @@ ap.add_argument("--seam-alpha", type=float, default=0.0,
                      "一次放出成新凸点）。削块首 EMA 衰减尾峰值，稳态零税")
 ap.add_argument("--seam-beats", type=int, default=4,
                 help="接缝窗拍数=α 爬坡长（默认 4）；--seam-alpha 0 时无效")
+ap.add_argument("--aggregate-fn", dest="aggregate_fn",
+                choices=("weighted_average", "latest_only", "average",
+                         "conservative"),
+                help="换块融合函数名（上游 lerobot async_inference/configs.py "
+                     "AGGREGATE_FUNCTIONS 注册表逐名对应，α=新计划权重）："
+                     "weighted_average=0.7【官方默认，固定 λ 0.3 旧+0.7 新】/"
+                     "latest_only=1.0（=混接关，新块全量）/average=0.5/"
+                     "conservative=0.3（旧主导——灌爪冻 4mm 案配方，勿用）。"
+                     "连续 α 覆盖=A/B 逃生门 --fusion-alpha（显式给则赢过本旗标）")
 ap.add_argument("--fusion-alpha", "--seam-overlap-alpha",
                 dest="seam_overlap_alpha", type=float, default=None,
                 help="重叠混接权重（新计划权重，0=关；默认见 [lerobot] 档）：同事 lerobot 栈"
@@ -503,7 +514,7 @@ g1_config.apply(args, {
     "rounds": ("lerobot", "rounds"),
     "n_action_steps": ("lerobot", "execute_actions_per_chunk"),
     "skip_install": ("lerobot", "skip_frames"),
-    "seam_overlap_alpha": ("lerobot", "fusion_alpha"),
+    "aggregate_fn": ("lerobot", "aggregate_fn"),
     "cmd_every": ("lerobot", "cmd_every"),
     "ema_alpha": ("lerobot", "filter_alpha"),
     "grip_state_cmd": ("lerobot", "grip_state_cmd"),
@@ -521,8 +532,19 @@ g1_config.apply(args, {
 }, path=args.config)
 
 # None 哨兵回落（配方旗标 argparse 默认改 None 交给三态回填，此处补脚本旧默认）
+# 换块融合：注册表名→α（上游 AGGREGATE_FUNCTIONS 逐名对应）；--fusion-alpha
+# 显式给=连续覆盖赢过注册表名（打印可观测）
+_AGG_FN_ALPHA = {"weighted_average": 0.7, "latest_only": 1.0,
+                 "average": 0.5, "conservative": 0.3}
 if args.seam_overlap_alpha is None:
-    args.seam_overlap_alpha = 0.0
+    if args.aggregate_fn is not None:
+        args.seam_overlap_alpha = _AGG_FN_ALPHA[args.aggregate_fn]
+    else:
+        args.seam_overlap_alpha = 0.0
+elif args.aggregate_fn is not None:
+    print(f"[config] --fusion-alpha {args.seam_overlap_alpha:g} 显式覆盖 "
+          f"--aggregate-fn {args.aggregate_fn}"
+          f"（注册表 α={_AGG_FN_ALPHA[args.aggregate_fn]:g}）")
 if args.cmd_every is None:
     args.cmd_every = 1
 if args.ema_alpha is None:
@@ -565,7 +587,7 @@ if args.seam_overlap_alpha > 0:
         ("--blend", args.blend),
         ("--ref-offset", args.ref_offset)) if _on]
     if _ovp_bad:
-        raise SystemExit(f"--fusion-alpha 与 {_ovp_bad} 互斥：重叠混接以"
+        raise SystemExit(f"--aggregate-fn/--fusion-alpha 与 {_ovp_bad} 互斥：重叠混接以"
                          "「旧流惯性项」取代全部缝口机制（同事栈语义），叠加会"
                          "双重滤波")
     if not args.skip_install:

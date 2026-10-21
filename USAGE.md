@@ -249,9 +249,13 @@ letterbox-vs-crop 另一功能，挂同名会造虚假等价）：
   `skip_frames` 同名参数（观测→落地流逝拍墙钟对齐跳帧）；
   `--execute-actions-per-chunk 0`（原 --n-action-steps）水位 0=换块即预取
   （块长≈推理时延，须配 skip-frames；同事 yaml 顶层同名键）
-- `--fusion-alpha 0.7`（原 --seam-overlap-alpha）=同事 rtc.fusion_method
-  "weighted" 换块融合（同事=窗口内线性 ramp，我们=恒定 α 简化版，0.3 旧
-  +0.7 新）；与 entry-match/seam-alpha/blend/ref-offset 互斥
+- `--aggregate-fn weighted_average`=上游 lerobot async_inference
+  AGGREGATE_FUNCTIONS 注册表官方默认（**0.3 旧+0.7 新固定 λ**；注册表另含
+  latest_only=全新=混接关 / average=0.5 / conservative=0.3 旧主导——灌爪冻
+  4mm 案配方勿用；连续 α A/B 逃生门=`--fusion-alpha`，原
+  --seam-overlap-alpha。同事 g1_pick_place 变体 fusion_method="weighted"
+  是窗口线性 ramp 另一函数，我们恒定 α 混接忠于上游）；与
+  entry-match/seam-alpha/blend/ref-offset 互斥
 - `cmd_every = 1`=纯 30Hz 直发
 - `--filter-alpha 0.3`（原 --ema-alpha）=同事 action_filter.lowpass.alpha
   同名同值——**dim23 全维单滤镜：臂+爪一个

@@ -176,7 +176,7 @@ prompt = "Left arm pick up A. Right arm pick up A."
 rounds = 200             # 轮
 execute_actions_per_chunk = 0  # 0=换块即取新计划（水位 0；新鲜度是接缝第一杠杆）；同事同名键
 skip_frames = true       # 换块跳帧安装（同事 rtc_controller 同名参数）；反关 --no-skip-frames〔CLI 仍收旧名 --skip-install〕
-fusion_alpha = 0.7       # 换块融合权重（同事 rtc.fusion_method:"weighted"，我们=恒定 α 简化版）〔旧名 --seam-overlap-alpha〕
+aggregate_fn = "weighted_average"  # 换块融合函数（上游 lerobot AGGREGATE_FUNCTIONS 注册表官方默认：0.3 旧+0.7 新固定 λ；可填 latest_only/average/conservative；连续 α 覆盖=CLI --fusion-alpha）〔旧键 fusion_alpha/seam_overlap_alpha 已并入〕
 cmd_every = 1            # 纯流式直发（本脚本扩展，同事无合步概念）
 filter_alpha = 0.3       # 行目标 EMA（同事 action_filter.lowpass.alpha 同名；dim23 全维；爪维默认跟随）〔旧名 --ema-alpha〕
 grip_state_cmd = true    # state 爪维喂指令值（数据集语义；忘带=R 爪死 0）；反关 --no-grip-state-cmd

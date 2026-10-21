@@ -37,8 +37,9 @@ BUILTIN = {
         "rounds": 200,            # 轮
         "execute_actions_per_chunk": 0,  # 0=换块即取新计划（水位 0；新鲜度第一杠杆）
         "skip_frames": True,      # 换块跳帧安装（同事 rtc_controller.add_chunk 同名参数）
-        "fusion_alpha": 0.7,      # 换块融合权重（同事 rtc.fusion_method:"weighted"；
-                                  # 同事=线性 ramp，我们=恒定 α 凸组合简化版）
+        "aggregate_fn": "weighted_average",  # 换块融合函数（上游 lerobot async_inference
+                                  # AGGREGATE_FUNCTIONS 注册表，官方默认；α=0.7 新固
+                                  # 定 λ 0.3 旧+0.7 新；连续 α 覆盖=CLI --fusion-alpha）
         "cmd_every": 1,           # 纯流式直发（本脚本扩展；同事无合步概念）
         "filter_alpha": 0.3,      # 行目标 EMA（同事 action_filter.lowpass.alpha 同名；
                                   # dim23 全维，爪维默认跟随此值）
@@ -141,16 +142,17 @@ _KNOWN_LOOP_KEYS = {
 }
 _KNOWN_LEROBOT_KEYS = {
     "ckpt", "prompt", "rounds", "execute_actions_per_chunk", "skip_frames",
-    "fusion_alpha", "cmd_every", "filter_alpha", "grip_state_cmd",
+    "aggregate_fn", "cmd_every", "filter_alpha", "grip_state_cmd",
     "max_joint_delta_per_step", "burst_reserve_ms", "nav_suspend",
     "execution_horizon", "head_crop",
 }
-# 2026-10-21 晚：[lerobot] 键名与同事栈词汇对齐（ba51649 当日落地即改，
+# 2026-10-21 晚：[lerobot] 键名与同事栈/上游 lerobot 词汇对齐（当日落地即改，
 # 无外部 toml 存量），命中旧键硬报错（同 [loop] 先例：防静默回落内置默认）
 _RENAMED_LEROBOT_KEYS = {
     "n_action_steps": "execute_actions_per_chunk",
     "skip_install": "skip_frames",
-    "seam_overlap_alpha": "fusion_alpha",
+    "seam_overlap_alpha": "aggregate_fn",
+    "fusion_alpha": "aggregate_fn",
     "ema_alpha": "filter_alpha",
     "delta_max": "max_joint_delta_per_step",
     "rtc_horizon": "execution_horizon",
