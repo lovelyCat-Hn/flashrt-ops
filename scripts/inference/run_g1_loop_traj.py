@@ -327,6 +327,18 @@ ap.add_argument("--grip-preclose", type=float, default=0.0,
                      "（0.01 指令实测执行 0.03）且起步延迟 onset=0.12s+行程/速度"
                      "——爬速 0.03 全行程起步要 ~4.1s，爬速越慢起步越晚，"
                      "「低速吸收死区」前提整体不成立。旗标保留仅供复现对照。0=关。")
+ap.add_argument("--grip-path", choices=["cmd", "joint"], default="cmd",
+                help="爪下发路径（10-21 P6 破案：onset=0.12s+行程/速度＋吞令整条"
+                     "定律属 set_gripper_command 端点专属；同事 infer_policy 的爪="
+                     "dim7/15 并回 set_joint_commands 流=lerobot 采集同语义，"
+                     "P6 三格实证 onset≈0.14s 纯 L 与行程无关、velocity=速度帽"
+                     "（0.15→0.1500 被尊重）、密流不冻）。"
+                     "cmd=set_gripper_command（现役，走 chg/min-interval/ss/"
+                     "send-every/preclose 各门）；joint=双爪作关节组每发送拍一包"
+                     "（set_joint_commands(groups=[right_gripper,left_gripper], "
+                     "tfs 与臂同参），各门全旁路、EMA 照带、effort=10 同事同款）。"
+                     "速度下限 0.03 m/s 双路径共享（电机级），现役 0.15 不受影响。"
+                     "默认 cmd。")
 ap.add_argument("--config", default=g1_config.DEFAULT_PATH,
                 help="配置文件路径（优先级 CLI > config > 内置默认）")
 ap.add_argument("--log-file", default=None,
@@ -794,6 +806,21 @@ if args.grip:
             "chg": args.grip_chg, "sent": {}, "sent_peak": {}}
     print(f"夹爪下发开启: 0%→{wmin} m | 100%→{wmax} m | 速度 {args.grip_speed} m/s | "
           f"力矩 {args.grip_effort} N | 变化阈值 {args.grip_chg}%")
+    if args.grip_path == "joint":
+        print("爪路径=关节流（--grip-path joint）：双爪作关节组并入 "
+              "set_joint_commands（tfs 与臂同参、velocity=速度帽 0.15 被尊重、"
+              "effort=10 同事同款）；chg/min-interval/send-every/ss/preclose "
+              "各门全旁路（10-21 P6 三格实证：onset 0.12+D/v 律属 "
+              "set_gripper_command 端点专属），EMA 照带")
+        _gp_bad = [n for n, _v in (
+            ("--grip-min-interval", args.grip_min_interval),
+            ("--grip-send-every", args.grip_send_every),
+            ("--grip-ss", args.grip_ss),
+            ("--grip-preclose", args.grip_preclose)) if _v]
+        if _gp_bad:
+            raise SystemExit(f"--grip-path joint 与 {'/'.join(_gp_bad)} 互斥"
+                             "（joint 路径无 onset/吞令定律，各门无对象；"
+                             "10-21 P6 三格实证）")
     if args.grip_send_every > 0:
         print(f"爪定时静默制: 每 {args.grip_send_every} 机会拍 1 条"
               f"（≈{30.0 / args.grip_send_every:.1f}Hz、静默 "
@@ -1212,6 +1239,58 @@ def send_grip(robot, chunk_row):
                      f"{_phys} {str(st).replace('ControlStatus.', '')}"
                      + (f"({why})" if why else ""))
     return "  ".join(parts)
+
+
+# --grip-path joint：爪维走关节固件路径的独立 EMA 状态（与 cmd 路径 _GRIP_EMA
+# 分开，A/B 切路径不串状态）
+_GRIPJ_EMA = {}
+
+
+def send_grip_joint(robot, chunk_row, tfs_s):
+    """--grip-path joint：夹爪 dim7/15 并回 set_joint_commands 流（10-21 P6 破案）。
+
+    同事 infer_policy / lerobot 采集语义原样：position=width_m、
+    velocity=速度帽（P6j 实测 0.15→0.1500 被尊重，非 pursuit 追踪）、
+    effort=10（同事默认；非 set_gripper_command 路的 30）、tfs 与臂同参。
+    「onset=0.12s+行程/速度＋吞令」整条定律属 set_gripper_command 端点
+    （P6 三格实证：关节路径 onset≈0.14s 纯 L 与行程无关、密流照跟不冻），
+    故 chg/min-interval/send-every/ss/preclose 各门在此全部旁路——每发送拍
+    无条件发当前 EMA 值（密流在该路径免费，P6j_dense 实证）。EMA 照带
+    （独立状态 _GRIPJ_EMA）。双爪一包：groups=[right_gripper,left_gripper]
+    顺序=命令序（P6 单组已验组写安全；group 模式读的顺序坑不适用于写）。
+
+    GRIP["sent"] 照常更新 → --grip-state-cmd / 遥测 / sent_peak 持物签名
+    无感知路径切换。
+    """
+    if GRIP is None:
+        return None
+    if not args.do_exec:
+        return "dry（不下发）"
+    parts = []
+    cmds, groups = [], []
+    for name, dim in GRIP["names"]:
+        p = float(np.clip(chunk_row[dim], 0.0, 100.0))
+        if args.grip_ema_alpha > 0:
+            prev = _GRIPJ_EMA.get(name)
+            p = p if prev is None else \
+                args.grip_ema_alpha * p + (1.0 - args.grip_ema_alpha) * prev
+            _GRIPJ_EMA[name] = p
+        GRIP["sent"][name] = p
+        w = GRIP["wmin"] + p / 100.0 * (GRIP["wmax"] - GRIP["wmin"])
+        c = JointCommand()
+        c.position = float(w)
+        c.velocity = float(GRIP["speed"])   # 速度帽语义：恒速段被钳在此值
+        c.effort = 10.0
+        cmds.append(c)
+        groups.append(getattr(G1JointGroup, name))
+        _gs = robot.get_gripper_state(getattr(G1JointGroup, name))
+        _phys = f" 实{_gs.width * 1000:.1f}mm" if _gs is not None else " 实?"
+        parts.append(f"{name[0].upper()} {p:.1f}%→{w * 1000:.0f}mm@j{_phys}")
+    st = robot.set_joint_commands(cmds, joint_groups=groups,
+                                  time_from_start_s=tfs_s)
+    ok = str(st).startswith("ControlStatus.SUCCESS")
+    return "  ".join(parts) + (" jOK" if ok else
+                               f" j{str(st).replace('ControlStatus.', '')}")
 
 
 # ── ① SDK 初始化 + 模型 ──
@@ -1943,7 +2022,9 @@ while not aborted:
                 seam_first = d_mrad          # 接缝尖峰：换块首发 |Δcmd|
             else:
                 seam_rest.append(d_mrad)
-            gp = send_grip(robot, chunk[tgi])
+            gp = (send_grip_joint(robot, chunk[tgi], args.tfs_ms / 1000.0)
+                  if args.grip_path == "joint"
+                  else send_grip(robot, chunk[tgi]))
             gap0 = float(np.max(np.abs(tgt - cur)))
             if (args.entry_match and gap0 >= GAP_EPS
                     and _grp_n == args.cmd_every):

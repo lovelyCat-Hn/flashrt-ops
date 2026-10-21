@@ -1,16 +1,22 @@
 #!/usr/bin/env python
-"""send_grip 事件门（--grip-min-interval）与预合爪爬行（--grip-preclose）离线单测。
+"""send_grip 事件门（--grip-min-interval）/预合爪爬行（--grip-preclose）/
+关节路径（--grip-path joint）离线单测。
 
-零 SDK、零运动：ast 抽取 run_g1_loop_traj.py 的 send_grip 源码，在伪造命名空间
-（假 robot/假时钟）里喂全行流断言门判定时序。背景=d835c6e 教训（首版 last_cmd
-无守护→门永不触发，143851 实锤；门类逻辑必须全行流单测，不能只看单点）。
+零 SDK、零运动：ast 抽取 run_g1_loop_traj.py 的 send_grip / send_grip_joint
+源码，在伪造命名空间（假 robot/假时钟）里喂全行流断言门判定时序。
+背景=d835c6e 教训（首版 last_cmd 无守护→门永不触发，143851 实锤；门类逻辑
+必须全行流单测，不能只看单点）。
 
-判据（定律终版 174428）：
+判据（定律终版 174428；T4=10-21 P6 破案）：
   T1 事件门  首拍必发；意图没动（<max(chg,3%)）永不发（零travel重发只会重置
              静默钟）；间隔未满+静止=hold；间隔未满+在途=发（P2/P4：同向反向
              均平滑零罚，183232）；间隔≥N=发。
   T2 爬行    意图下行未平稳=爬速；窗内平稳=正常速；首拍（史短）=正常速。
   T3 回归    min_interval=0 时行为与旧 chg 门逐拍一致。
+  T4 关节路径 双爪一包（groups 序=命令序）；position=宽度映射、velocity=
+             GRIP 速度帽、effort=10（同事同款，非 cmd 路 30）；密流每拍必发
+             （无 chg 门）；EMA 独立状态；GRIP["sent"] 照更（喂 state-cmd）；
+             tfs 透传；dry 不发。
 """
 import ast
 import types
@@ -20,8 +26,8 @@ import numpy as np
 
 SRC = "/home/galbot/holy/scripts/inference/run_g1_loop_traj.py"
 tree = ast.parse(open(SRC).read())
-fn = next(n for n in tree.body
-          if isinstance(n, ast.FunctionDef) and n.name == "send_grip")
+FNS = [n for n in tree.body if isinstance(n, ast.FunctionDef)
+       and n.name in ("send_grip", "send_grip_joint")]
 
 
 class _Grp:
@@ -42,14 +48,29 @@ class GS:
         self.timestamp_ns = 0
 
 
+class JointCommand:
+    def __init__(self):
+        self.position = None
+        self.velocity = None
+        self.effort = None
+
+
 class FakeRobot:
     def __init__(self):
         self.state = {G1JointGroup.right_gripper: GS(0.108, 0.0),
                       G1JointGroup.left_gripper: GS(0.108, 0.0)}
         self.calls = []
+        self.jcalls = []    # (group 名序, [(pos, vel, eff)...], tfs_s)
 
     def set_gripper_command(self, grp, w, spd, eff, blk):
         self.calls.append((grp.nm, round(w, 4), round(spd, 4)))
+        return "ControlStatus.SUCCESS"
+
+    def set_joint_commands(self, cmds, joint_groups=(), joint_names=(),
+                           time_from_start_s=0.0):
+        self.jcalls.append(([g.nm for g in joint_groups],
+                            [(c.position, c.velocity, c.effort) for c in cmds],
+                            time_from_start_s))
         return "ControlStatus.SUCCESS"
 
     def get_gripper_state(self, grp):
@@ -59,11 +80,12 @@ class FakeRobot:
 def make_ns(clock):
     """伪造命名空间：假 time.monotonic 可控，其余为当前门配置。"""
     ns = {"np": np, "time": types.SimpleNamespace(monotonic=lambda: clock[0]),
-          "G1JointGroup": G1JointGroup, "GRIP_SS": None,
+          "G1JointGroup": G1JointGroup, "JointCommand": JointCommand,
+          "GRIP_SS": None,
           "_GRIP_EMA": {}, "_GRIP_SENT_AT": {}, "_GRIP_PRE_HIST": {},
-          "_GRIP_BEAT": 0}
-    mod = ast.Module(body=[fn], type_ignores=[])
-    exec(compile(mod, "<send_grip>", "exec"), ns)
+          "_GRIP_BEAT": 0, "_GRIPJ_EMA": {}}
+    mod = ast.Module(body=FNS, type_ignores=[])
+    exec(compile(mod, "<send_grip+send_grip_joint>", "exec"), ns)
     return ns
 
 
@@ -172,6 +194,48 @@ send_grip(robot, {7: 90.5, 15: 90.0})           # Δ0.5 < 2 → hold
 check("Δ<chg=hold", len(robot.calls) == n0)
 send_grip(robot, {7: 93.0, 15: 90.0})           # Δ3 ≥ 2 → 发
 check("Δ≥chg=发", len(robot.calls) == n0 + 1)
+
+# ── T4 关节路径 ──
+print("T4 关节路径 send_grip_joint（10-21 P6 破案：定律属 set_gripper_command 端点）")
+clock = [30.0]
+ns = make_ns(clock)
+ns.update(GRIP=grip_of(), args=args_of(), robot=FakeRobot())
+robot, send_grip_joint = ns["robot"], ns["send_grip_joint"]
+
+send_grip_joint(robot, {7: 90.0, 15: 10.0}, 0.33)
+check("双爪一包：groups 序=命令序、宽度映射对",
+      len(robot.jcalls) == 1
+      and robot.jcalls[0][0] == ["right_gripper", "left_gripper"]
+      and [p for p, _, _ in robot.jcalls[0][1]] == [0.108, 0.012],
+      f"{robot.jcalls}")
+jc = robot.jcalls[0][1]
+check("velocity=速度帽 0.15 / effort=10（同事同款非 cmd 路 30）",
+      all(v == 0.15 and e == 10.0 for _, v, e in jc), f"{jc}")
+check("tfs 透传（与臂同参）", robot.jcalls[0][2] == 0.33)
+check("GRIP['sent'] 照更（喂 --grip-state-cmd/sent_peak）",
+      ns["GRIP"]["sent"] == {"right_gripper": 90.0, "left_gripper": 10.0})
+
+robot.jcalls.clear()
+for _ in range(5):
+    send_grip_joint(robot, {7: 90.0, 15: 10.0}, 0.0)
+check("密流每拍必发（无 chg/min-interval 门，P6j_dense）",
+      len(robot.jcalls) == 5)
+
+ns2 = make_ns(clock)
+ns2.update(GRIP=grip_of(), args=args_of(ema=0.3), robot=FakeRobot())
+r2, sgj2 = ns2["robot"], ns2["send_grip_joint"]
+sgj2(r2, {7: 100.0, 15: 0.0}, 0.0)
+r2.jcalls.clear()
+sgj2(r2, {7: 0.0, 15: 100.0}, 0.0)
+ps = [p for p, _, _ in r2.jcalls[0][1]]
+check("EMA 独立状态（α=0.3：100→0 首拍=70%→0.084m）",
+      all(abs(a - b) < 1e-9 for a, b in zip(ps, [0.084, 0.036])), f"{ps}")
+
+ns3 = make_ns(clock)
+ns3.update(GRIP=grip_of(), args=args_of(), robot=FakeRobot())
+ns3["args"].do_exec = False
+_dry = ns3["send_grip_joint"](ns3["robot"], {7: 50.0, 15: 50.0}, 0.0)
+check("dry 不发", _dry == "dry（不下发）" and not ns3["robot"].jcalls)
 
 print(f"\n{'全绿' if not FAIL else 'FAIL: ' + ', '.join(FAIL)}")
 raise SystemExit(1 if FAIL else 0)
