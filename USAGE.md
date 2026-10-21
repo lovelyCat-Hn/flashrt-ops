@@ -252,15 +252,19 @@ letterbox-vs-crop 另一功能，挂同名会造虚假等价）：
   旋钮=关节路径 effort（官方语义=最大夹持力上限）。抓到物体后模型按
   训练语义持续发全闭指令→位置伺服每拍重发=斜坡重启反复撞进物体
   （力矩碰撞声的来源）。本机制：检测「指令≤实宽−gap 且实宽平台
-  （物理被撑住）」→ 爪流改发 `实宽−margin`@`effort_hold`（跟随实宽
-  重算，位置误差恒=margin=轻微恒定夹紧，无撞击）；模型指令上穿
-  `实宽+exit`（想开爪）→ 恢复流式并清平台史。判据=每拍新鲜物理回读
-  （p50 10ms），只改物理下发不改指令记账（--grip-state-cmd/sent_peak
-  语义不变）。旋钮：`--grip-hold-gap-mm 5`（进门）/`--grip-hold-exit-mm 3`
-  （出门）/`--grip-hold-margin-mm 3`（保有夹紧量）/`--grip-hold-plateau-mm
-  0.8`+`--grip-hold-window 5`（平台窗）/`--grip-effort-hold 4`（0=沿用
-  10）。日志 `[实 X.Xmm F X.XN]`=实时夹持力回读（GripperState.effort，
-  定阈值看这个），进入/退出打 `HOLD进入/退出` 标签，汇总行打进入次数。
+  （物理被撑住）」→ 爪流改发「进入时实宽−margin」**冻结目标**@`effort_hold`
+  （⚠勿逐拍跟随实宽=棘轮碾进：接触面一让步目标再进 margin，144325 首跑
+  实证被拖走 56-72mm；冻结后刚性物同样钉死、软物最多压进 margin 一次）；
+  模型指令上穿 `实宽+exit`（想开爪）→ 恢复流式并清平台史。判据=每拍新鲜
+  物理回读（p50 10ms），只改物理下发不改指令记账（--grip-state-cmd/
+  sent_peak 语义不变）。旋钮：`--grip-hold-gap-mm 5`（进门）/
+  `--grip-hold-exit-mm 3`（出门）/`--grip-hold-margin-mm 3`（保有夹紧量）/
+  `--grip-hold-plateau-mm 0.8`+`--grip-hold-window 5`（平台窗）/
+  `--grip-effort-hold 4`（0=沿用10）。日志 `[实 X.Xmm eff X.X]`：
+  eff=GripperState.effort **单位未知勿按牛顿判读**（144325 实证饱和轨
+  100、全开 114mm 也 100，头文件 "Newtons" 被推翻；行为像电机负载百分比，
+  自由运动 5-9/遇阻 40-49/堵死=100，可当堵转指示器），进入/退出打
+  `HOLD进入/退出` 标签，汇总行打进入次数。
   仅 --grip-path joint 支持
 - `--skip-frames`（原 --skip-install，别名保留）=同事 rtc_controller
   `skip_frames` 同名参数（观测→落地流逝拍墙钟对齐跳帧）；

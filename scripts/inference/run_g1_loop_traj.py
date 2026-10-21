@@ -973,7 +973,7 @@ if args.grip:
     if args.grip_hold_on_stall:
         print(f"[grip-hold] 憋死保持开：指令≤实宽−{args.grip_hold_gap_mm}mm 且"
               f"实宽平台({args.grip_hold_window}拍≤{args.grip_hold_plateau_mm}mm)"
-              f"→钳 实宽−{args.grip_hold_margin_mm}mm@effort"
+              f"→钳 进入时实宽−{args.grip_hold_margin_mm}mm（冻结不跟随）@effort"
               f"{'沿用' if args.grip_effort_hold <= 0 else args.grip_effort_hold}"
               f"；指令≥实宽+{args.grip_hold_exit_mm}mm 退出恢复流式")
     if args.grip_send_every > 0:
@@ -1394,7 +1394,9 @@ def send_grip(robot, chunk_row):
         if GRIP_SS is not None:
             _GRIP_SS_SENT[name] = (now, p)
         _gs = robot.get_gripper_state(getattr(G1JointGroup, name))
-        _phys = (f" 实{_gs.width * 1000:.1f}mm F{_gs.effort:.1f}N"
+        # eff 回读单位未知（144325 实证：饱和轨 100、全开 114mm 也 100，
+        # 头文件 "Newtons" 被推翻）——只当负载/堵转指示，勿按牛顿判读
+        _phys = (f" 实{_gs.width * 1000:.1f}mm eff{_gs.effort:.1f}"
                  if _gs is not None else " 实?")
         parts.append(f"{name[0].upper()} {p:.1f}%→{w * 1000:.0f}mm@{spd:.2f}{_tag}"
                      f"{_phys} {str(st).replace('ControlStatus.', '')}"
@@ -1428,8 +1430,9 @@ def send_grip_joint(robot, chunk_row, tfs_s):
 
     --grip-hold-on-stall（2026-10-21 力矩碰撞案）：模型按训练语义持物段持续
     发全闭指令，位置伺服每拍重发=斜坡重启反复撞进物体。检测「指令≤实宽−gap
-    且实宽平台」→ 改发 实宽−margin@effort_hold（钳位保持）；指令上穿
-    实宽+exit（想开爪）→ 恢复流式并清平台史。只改物理下发，不改指令记账。
+    且实宽平台」→ 改发 进入时实宽−margin 冻结目标@effort_hold（钳位保持；
+    ⚠勿逐拍跟随实宽=棘轮碾进，144325 首跑实证）；指令上穿实宽+exit
+    （想开爪）→ 恢复流式并清平台史。只改物理下发，不改指令记账。
     """
     if GRIP is None:
         return None
@@ -1452,7 +1455,7 @@ def send_grip_joint(robot, chunk_row, tfs_s):
         if args.grip_hold_on_stall and _gs is not None:
             phys = _gs.width
             h = _GRIPJ_HOLD.setdefault(name, {"on": False, "hist": [],
-                                              "enters": 0})
+                                              "enters": 0, "tgt": None})
             h["hist"].append(phys)
             _win = max(2, int(args.grip_hold_window))
             while len(h["hist"]) > _win:
@@ -1464,15 +1467,20 @@ def send_grip_joint(robot, chunk_row, tfs_s):
                 if w >= phys + args.grip_hold_exit_mm / 1000.0:
                     h["on"] = False
                     h["hist"].clear()   # 退出清史：再进须新平台（防近阈闪断）
+                    h["tgt"] = None
                     _tag = " HOLD退出"
             elif _plateau and w <= phys - args.grip_hold_gap_mm / 1000.0:
                 h["on"] = True
                 h["enters"] += 1
+                # 进入时冻结目标（144325 首跑教训：若逐拍跟随 实宽−margin
+                # 会棘轮——接触面一让步目标再进 margin，慢速碾进 56-72mm；
+                # 冻结后刚性物同样钉死、软物/空爪最多压进 margin 一次）
+                h["tgt"] = max(0.0,
+                               phys - args.grip_hold_margin_mm / 1000.0)
                 _tag = " HOLD进入"
             if h["on"]:
-                # 钳位保持：目标=实宽−margin（跟随实宽重算，位置误差恒
-                # =margin=轻微夹紧无撞击）；effort 可降（官方语义=夹持力上限）
-                w_sent = max(0.0, phys - args.grip_hold_margin_mm / 1000.0)
+                # 目标恒定：位置误差恒定=夹持不加深；物滑动也只压 margin 一次
+                w_sent = h["tgt"]
                 if args.grip_effort_hold > 0:
                     eff_sent = args.grip_effort_hold
                 _tag = _tag or " HOLD"
@@ -1482,7 +1490,9 @@ def send_grip_joint(robot, chunk_row, tfs_s):
         c.effort = float(eff_sent)
         cmds.append(c)
         groups.append(getattr(G1JointGroup, name))
-        _phys = (f" 实{_gs.width * 1000:.1f}mm F{_gs.effort:.1f}N"
+        # eff 回读单位未知（144325 实证：饱和轨 100、全开 114mm 也 100，
+        # 头文件 "Newtons" 被推翻）——只当负载/堵转指示，勿按牛顿判读
+        _phys = (f" 实{_gs.width * 1000:.1f}mm eff{_gs.effort:.1f}"
                  if _gs is not None else " 实?")
         parts.append(f"{name[0].upper()} {p:.1f}%→{w_sent * 1000:.0f}mm@j"
                      f"{_phys}{_tag}")
@@ -2317,7 +2327,7 @@ if GRIP and args.do_exec:
         gs = robot.get_gripper_state(getattr(G1JointGroup, name))
         if gs is not None:
             print(f"夹爪终态 {name}: {gs.width * 1000:.1f} mm "
-                  f"(moving={gs.is_moving} 力={gs.effort:.1f}N)")
+                  f"(moving={gs.is_moving} eff={gs.effort:.1f})")
     if args.grip_hold_on_stall and _GRIPJ_HOLD:
         _hs = "  ".join(f"{n.split('_')[0].upper()} 进{v['enters']}"
                         f"{'/保持中' if v['on'] else ''}"

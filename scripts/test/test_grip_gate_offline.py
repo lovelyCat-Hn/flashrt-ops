@@ -19,7 +19,8 @@
              tfs 透传；dry 不发。
   T5 憋死保持 --grip-hold-on-stall（2026-10-21 力矩碰撞案）：平台窗未满=
              正常流式；平台满+深指令=进入（钳实宽−margin@effort_hold）；
-             指令记账=模型意图不变；实宽变化→目标跟随；指令上穿实宽+exit=
+             指令记账=模型意图不变；实宽让步→目标冻结不跟随（棘轮修复
+             144325）；指令上穿实宽+exit=
              退出当拍发模型目标；退出清史→再进须新平台；effort_hold=0=沿用10。
 """
 import ast
@@ -278,12 +279,14 @@ check("指令记账=模型意图（state-cmd/sent_peak 语义不变）",
 check("左爪不受牵连（90%=108mm 正常发）",
       abs(robot.jcalls[0][1][1][0] - 0.108) < 1e-9)
 
-# 持物中实宽被顶开（物滑动）→ 目标跟随实宽重算
+# 持物中实宽让步/被顶开 → 目标冻结不动（棘轮修复 144325：勿跟随实宽，
+# 否则接触面一让步目标再进 margin=慢速碾进）
 robot.state[G1JointGroup.right_gripper] = GS(0.045, 0.0)
 robot.jcalls.clear()
 sgj(robot, {7: 5.0, 15: 90.0}, 0.0)
 jc = robot.jcalls[0][1][0]
-check("保持中跟随实宽（45mm→钳42mm）", abs(jc[0] - 0.042) < 1e-9, f"{jc}")
+check("保持中目标冻结（实宽让到 45mm 仍钳39mm）",
+      abs(jc[0] - 0.039) < 1e-9, f"{jc}")
 
 # 模型想开爪：指令 90%（108mm ≥ 45+3）→ 退出，当拍直接发模型目标
 robot.jcalls.clear()
