@@ -5,7 +5,7 @@
   run_g1_loop_traj.py --exec --rounds 200 \\
     --n-action-steps 0 --skip-install --seam-overlap-alpha 0.7 \\
     --cmd-every 1 \\
-    --ema-alpha 0.3 --grip-ema-alpha 0.3 --grip-state-cmd \\
+    --ema-alpha 0.3 --grip-state-cmd \\
     --delta-max 0.05 --burst-reserve-ms 0 --nav-suspend \\
     --rtc-horizon 10 --head-crop \\
     --ckpt models/pi05_g1_training_rtc_d10_deploy
@@ -13,7 +13,8 @@
   dim7/15 并回 set_joint_commands，P6 破案后 10-21 定档）、tfs=0、
   30Hz 直发（cmd-every 1）、skip-install=同事 skip_frames、
   overlap 0.7=同事 weighted_average（0.3 旧+0.7 新）、EMA=同事
-  action_filter、水位 0=换块即预取；+trained-RTC（--rtc-horizon 10
+  action_filter（dim23 全维：臂+爪同 α，--grip-ema-alpha 默认跟随、
+  仅 A/B 单独覆盖）、水位 0=换块即预取；+trained-RTC（--rtc-horizon 10
   须配 sft1012_training_rtc_d10 权重，--head-crop pick 相必带——
   place 相/非此 ckpt 勿带）。逐项依据见 USAGE §3.8。
 
@@ -229,12 +230,13 @@ ap.add_argument("--ema-alpha", type=float, default=0.0,
                      "（接缝首行同样被滤，infer_policy 同款语义；10-12 判明块内"
                      "重启版对接缝无效）——接缝/深尾垃圾的执行侧兜底杠杆；首跑"
                      "先 0 判读样条本身")
-ap.add_argument("--grip-ema-alpha", type=float, default=0.0,
-                help="爪指令 EMA 低通系数（0=关，默认）：grip%% 流逐拍平滑后再进"
-                     "发送判定。臂维 EMA（--ema-alpha）管不了爪：build_rows 只滤"
-                     " [:7]+[8:15]，爪维 dim7/15 直通 send_grip。⚠单独用治不了"
-                     "冻结（111901 终审：病根=每条新指令重启行程，细流仍是流）；"
-                     "与 --grip-ss 配套做去抖穿越判定，候选 0.1")
+ap.add_argument("--grip-ema-alpha", type=float, default=None,
+                help="爪指令 EMA 低通系数。默认 None=跟随 --ema-alpha（10-21 "
+                     "定档：同事 action_filter=dim23 全维单滤镜 robot_controller"
+                     ".py:110，臂+爪一个 α 一致性；joint 路爪也走 "
+                     "set_joint_commands，分旋钮是分路时代遗产）。显式传值=爪单独"
+                     "覆盖（A/B 用），0=爪不滤。grip%% 流逐拍平滑后再进发送判定"
+                     "（治模型爪列翻转：125953 实证 EMA 滤反转即治本）")
 ap.add_argument("--grip-ss", type=str, default="",
                 help="爪状态机「开阈,合阈」如 50,35（空=关，默认）：平滑后爪%%"
                      "≥开阈→置开态发一次、≤合阈→置合态发一次、带内不发；无翻转"
@@ -538,6 +540,10 @@ g1_config.apply(args, {
 })
 if args.no_grip:
     args.grip = False
+if args.grip_ema_alpha is None:
+    # 10-21 定档：同事 action_filter=dim23 全维单滤镜（robot_controller.py:110）
+    # ——爪跟随臂 α，一个旋钮；显式传 --grip-ema-alpha 才单独覆盖（A/B 用）
+    args.grip_ema_alpha = args.ema_alpha
 GRIP_SS = None      # --grip-ss 解析结果（开阈, 合阈）；None=关（旧 chg 门行为）。
                     # ⚠ 初值必须在解析前且此后勿再赋 None：模块后段再置 None 会
                     # 盖掉解析值（125953 教训：banner 先打印、循环时已被抹）
@@ -560,7 +566,9 @@ print(f"[loop-traj] tick {TICK * 1000:.1f} ms（{args.fps} Hz）| 轨迹流 "
       f"{args.frames_per_row} 帧/行（≈{args.fps * args.frames_per_row}Hz {args.interp}"
       f"）| 突发预算 {TICK * 1000 - args.burst_reserve_ms:.1f} ms/行"
       f" | EMA α={args.ema_alpha:g}"
-      + (f" | 爪EMA α={args.grip_ema_alpha:g}" if args.grip_ema_alpha > 0 else "")
+      + (f" | 爪EMA α={args.grip_ema_alpha:g}"
+         + ("（随臂）" if args.grip_ema_alpha == args.ema_alpha else "（单独）")
+         if args.grip_ema_alpha > 0 else "")
       + (f" | 合步 1/{args.cmd_every}"
          + ("·仅首组，组后流式" if args.cmd_first_only else "")
          + (f"，缝侧细笔 {'/'.join(map(str, args.cmd_every_ramp))}→{args.cmd_every}"

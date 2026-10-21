@@ -221,7 +221,7 @@ high-frequency control usage"）。**默认 N=1=纯 30Hz 直发（原生 lerobot
 ~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_traj.py --exec --rounds 200 \
   --n-action-steps 0 --skip-install --seam-overlap-alpha 0.7 \
   --cmd-every 1 \
-  --ema-alpha 0.3 --grip-ema-alpha 0.3 --grip-state-cmd \
+  --ema-alpha 0.3 --grip-state-cmd \
   --delta-max 0.05 --burst-reserve-ms 0 --nav-suspend \
   --rtc-horizon 10 --head-crop \
   --ckpt ~/holy/models/pi05_g1_training_rtc_d10_deploy
@@ -239,8 +239,10 @@ high-frequency control usage"）。**默认 N=1=纯 30Hz 直发（原生 lerobot
 - `--seam-overlap-alpha 0.7`=同事 weighted_average 换块混接（0.3 旧+0.7 新）；
   与 entry-match/seam-alpha/blend/ref-offset 互斥
 - `--cmd-every 1`=纯 30Hz 直发（默认值，显式写出仅为可读）
-- `--ema-alpha 0.3`=同事 action_filter 同款（臂）；`--grip-ema-alpha 0.3`=爪 EMA
-  （滤模型爪列翻转，10-20 首战全绿档）
+- `--ema-alpha 0.3`=同事 action_filter 同款——**dim23 全维单滤镜：臂+爪一个
+  α**（robot_controller.py:110 实锤；10-21 定档统一，爪 EMA 默认跟随臂，
+  `--grip-ema-alpha` 仅 A/B 单独覆盖用，0=爪不滤）；EMA 滤模型爪列翻转
+  （125953 实证治本）
 - `--grip-state-cmd`：state 爪维喂指令值（**pick 必带**，忘带=R 爪全程 0%）
 - `--delta-max 0.05`（链钳封版）+`--burst-reserve-ms 0`+`--nav-suspend`
   （推理 −55ms；只用于臂上任务+底盘不动窗口）
