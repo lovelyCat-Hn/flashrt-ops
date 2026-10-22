@@ -92,7 +92,8 @@ def make_ns(clock):
           "G1JointGroup": G1JointGroup, "JointCommand": JointCommand,
           "GRIP_SS": None,
           "_GRIP_EMA": {}, "_GRIP_SENT_AT": {}, "_GRIP_PRE_HIST": {},
-          "_GRIP_BEAT": 0, "_GRIPJ_EMA": {}, "_GRIPJ_HOLD": {}}
+          "_GRIP_BEAT": 0, "_GRIPJ_EMA": {}, "_GRIPJ_HOLD": {},
+          "_GRIPJ_TX": 0}
     mod = ast.Module(body=FNS, type_ignores=[])
     exec(compile(mod, "<send_grip+send_grip_joint>", "exec"), ns)
     return ns
@@ -101,7 +102,7 @@ def make_ns(clock):
 def args_of(min_interval=0.0, preclose=0.0, ema=0.0,
             hold=False, gap=5.0, exit_mm=3.0, margin=3.0,
             plateau=0.8, window=5, effort_hold=4.0, hold_vel=0.05,
-            relax=0.3, relax_eff=90.0, quiet=0):
+            relax=0.3, relax_eff=90.0, quiet=0, gj=1):
     return types.SimpleNamespace(do_exec=True, grip_send_every=0,
                                  grip_min_interval=min_interval,
                                  grip_preclose=preclose, grip_ema_alpha=ema,
@@ -115,7 +116,8 @@ def args_of(min_interval=0.0, preclose=0.0, ema=0.0,
                                  grip_hold_vel=hold_vel,
                                  grip_hold_relax_mm=relax,
                                  grip_hold_relax_eff=relax_eff,
-                                 grip_hold_quiet_n=quiet)
+                                 grip_hold_quiet_n=quiet,
+                                 gripj_every=gj)
 
 
 def grip_of(chg=2.0):
@@ -494,6 +496,34 @@ robot.jcalls.clear()
 out = sgj(robot, {7: 5.0, 15: 5.0}, 0.0)
 check("双爪皆静默=无 set_joint_commands 调用+返回 j静",
       not robot.jcalls and out.endswith("j静"), f"{out[-20:]}")
+
+# ── T9 爪通道节流 --gripj-every（10-22 合步 A/B：对爪正对臂负，拆通道） ──
+print("T9 爪节流 --gripj-every 2（臂照旧 30Hz；爪隔拍发、状态机照常跑）")
+clock = [100.0]
+ns = make_ns(clock)
+ns.update(GRIP=grip_of(),
+          args=args_of(hold=True, margin=1.0, relax=0.0, quiet=0, gj=2),
+          robot=FakeRobot())
+robot, sgj = ns["robot"], ns["send_grip_joint"]
+robot.state[G1JointGroup.right_gripper] = GS(0.034, 0.0)
+seq = []
+for _ in range(8):
+    robot.jcalls.clear()
+    sgj(robot, {7: 5.0, 15: 90.0}, 0.0)
+    seq.append("right_gripper" in robot.jcalls[0][0] if robot.jcalls else False)
+check("爪隔拍发（T F T F T F T F）",
+      seq == [True, False] * 4, f"{seq}")
+
+# hold 状态机窗口按调用拍走（30Hz 墙钟）：gj=2 下窗满 5 拍=调用 5 次
+robot.jcalls.clear()
+sgj(robot, {7: 5.0, 15: 90.0}, 0.0)     # 第 9 调用=发送拍
+check("hold 窗口按 30Hz 调用计（进 hold 后发钳位 33mm）",
+      abs(robot.jcalls[0][1][0][0] - 0.033) < 1e-9, f"{robot.jcalls[0][1][0]}")
+
+# 跳拍行打「跳」标签（jcalls 空拍无包，返回 j静）
+robot.jcalls.clear()
+out = sgj(robot, {7: 5.0, 15: 90.0}, 0.0)
+check("节流拍无爪包+返回 j静", not robot.jcalls and out.endswith("j静"))
 
 print(f"\n{'全绿' if not FAIL else 'FAIL: ' + ', '.join(FAIL)}")
 raise SystemExit(1 if FAIL else 0)

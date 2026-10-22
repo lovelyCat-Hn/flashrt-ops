@@ -424,6 +424,15 @@ ap.add_argument("--grip-hold-quiet-n", type=int, default=9,
                      "指令包=真静默，让最后一条走完收工；读回/退出/外松评估"
                      "照常（不依赖发送），退出或外松步即重新武装 N 拍。"
                      "0=关（每拍重发）。默认 9")
+ap.add_argument("--gripj-every", type=int, default=1,
+                help="爪通道单独节流 N（臂不受影响，照旧 30Hz 直发；爪每 N "
+                     "拍发 1 条）。10-22 合步 A/B 判读：合步对爪正向（发送"
+                     "减半=「每令打断」减半→爪平稳）、对臂负向（参考阶梯化"
+                     "×指数追踪 v≈2.6×gap=冲刺-滑停速度方波=阶梯式抖动，"
+                     "合步线销案）——本旋钮把爪的好处拆出来臂不陪绑。hold "
+                     "状态机照常每拍跑（窗口墙钟不变），仅物理下发被节流，"
+                     "被跳拍打「跳」标签。1=每拍（默认）。与 --cmd-every 的"
+                     "区别：那个臂爪一起并组（臂会阶梯），这个只动爪。")
 ap.add_argument("--grip-hold-plateau-mm", type=float, default=0.8,
                 help="平台判据 mm：连续 window 拍实宽 max−min ≤ 此值才算物理"
                      "被撑住（正在合爪途中不触发）。默认 0.8")
@@ -1015,6 +1024,10 @@ if args.grip:
             print(f"[grip-hold] 真静默制开：进 hold/外松步后发 {args.grip_hold_quiet_n} "
                   f"拍即停发该爪（静默期固件走完最后一条收工；读回评估照常，"
                   f"退出/外松自动重新武装）")
+    if args.gripj_every > 1:
+        print(f"[grip] 爪通道节流: 每 {args.gripj_every} 拍发 1 条"
+              f"（{30.0 / args.gripj_every:.1f}Hz；臂照旧 30Hz 直发，"
+              f"hold 状态机照常 30Hz 跑、窗口墙钟不变）")
     if args.grip_send_every > 0:
         print(f"爪定时静默制: 每 {args.grip_send_every} 机会拍 1 条"
               f"（≈{30.0 / args.grip_send_every:.1f}Hz、静默 "
@@ -1451,6 +1464,8 @@ _GRIPJ_EMA = {}
 # rail=eff 贴轨连续拍数（自动外松节拍器）；relax_n=累计外松步数（汇总打印）；
 # quiet=距上次武装的已发拍数（静默制节拍器）；silent_n=累计静默拍数（汇总打印）
 _GRIPJ_HOLD = {}
+# --gripj-every 爪通道节拍器（全局连续拍，不随换块复位）
+_GRIPJ_TX = 0
 
 
 def send_grip_joint(robot, chunk_row, tfs_s):
@@ -1483,11 +1498,18 @@ def send_grip_joint(robot, chunk_row, tfs_s):
     100+响（112 拍无衰减）——每拍重发冻结目标虽逐位相同，但 10-20 爪定律=每条
     新令打断在途从头重来，密发把爪永远钉在起步段 settle 不了。进 hold/外松步后
     只发 N 拍即停发该爪（固件执行最后一条收工），读回/退出/外松评估照常。
+    --gripj-every 爪通道节流（10-22 合步 A/B 判读）：仅物理下发被节流，
+    状态机照常每拍跑（窗口墙钟不变）。
     """
     if GRIP is None:
         return None
     if not args.do_exec:
         return "dry（不下发）"
+    global _GRIPJ_TX
+    _tx = True
+    if args.gripj_every > 1:
+        _tx = _GRIPJ_TX % args.gripj_every == 0
+        _GRIPJ_TX += 1
     parts = []
     cmds, groups = [], []
     for name, dim in GRIP["names"]:
@@ -1587,13 +1609,15 @@ def send_grip_joint(robot, chunk_row, tfs_s):
         c.position = float(w_sent)
         c.velocity = float(vel_sent)        # 速度帽语义：恒速段被钳在此值
         c.effort = float(eff_sent)
-        if not _skip:       # 静默制：该爪本拍退出指令包（读回照常）
+        if not _skip and _tx:   # 静默制/节流：该爪本拍退出指令包（读回照常）
             cmds.append(c)
             groups.append(getattr(G1JointGroup, name))
         # eff 回读单位未知（144325 实证：饱和轨 100、全开 114mm 也 100，
         # 头文件 "Newtons" 被推翻）——只当负载/堵转指示，勿按牛顿判读
         _phys = (f" 实{_gs.width * 1000:.1f}mm eff{_gs.effort:.1f}"
                  if _gs is not None else " 实?")
+        if not _tx and not _skip:
+            _tag = f"{_tag} 跳" if _tag else " 跳"
         parts.append(f"{name[0].upper()} {p:.1f}%→{w_sent * 1000:.0f}mm@j"
                      f"{_phys}{_tag}")
     if not cmds:    # 双爪皆静默：本拍无指令包
