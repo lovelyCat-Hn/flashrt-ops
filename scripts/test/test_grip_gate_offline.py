@@ -101,7 +101,7 @@ def make_ns(clock):
 def args_of(min_interval=0.0, preclose=0.0, ema=0.0,
             hold=False, gap=5.0, exit_mm=3.0, margin=3.0,
             plateau=0.8, window=5, effort_hold=4.0, hold_vel=0.05,
-            relax=0.3, relax_eff=90.0):
+            relax=0.3, relax_eff=90.0, quiet=0):
     return types.SimpleNamespace(do_exec=True, grip_send_every=0,
                                  grip_min_interval=min_interval,
                                  grip_preclose=preclose, grip_ema_alpha=ema,
@@ -114,7 +114,8 @@ def args_of(min_interval=0.0, preclose=0.0, ema=0.0,
                                  grip_effort_hold=effort_hold,
                                  grip_hold_vel=hold_vel,
                                  grip_hold_relax_mm=relax,
-                                 grip_hold_relax_eff=relax_eff)
+                                 grip_hold_relax_eff=relax_eff,
+                                 grip_hold_quiet_n=quiet)
 
 
 def grip_of(chg=2.0):
@@ -421,6 +422,78 @@ for _ in range(25):
     robot.jcalls.clear()
     sgj(robot, {7: 5.0, 15: 90.0}, 0.0)
 check("relax=0=纯钳位不松", abs(robot.jcalls[0][1][0][0] - 0.033) < 1e-9)
+
+# ── T8 保持段真静默制（101418 定案：零误差仍 eff 贴轨=密发钉在起步段） ──
+print("T8 真静默制 --grip-hold-quiet-n 2（发满 N 拍停发该爪，固件走完收工）")
+clock = [80.0]
+ns = make_ns(clock)
+ns.update(GRIP=grip_of(),
+          args=args_of(hold=True, margin=1.0, relax=0.0, quiet=2),
+          robot=FakeRobot())
+robot, sgj = ns["robot"], ns["send_grip_joint"]
+robot.state[G1JointGroup.right_gripper] = GS(0.034, 0.0)
+
+# 平台窗 5 拍进（拍5=武装1），武装发满 2 拍后右爪退出指令包
+groups_seq = []
+for _ in range(8):
+    robot.jcalls.clear()
+    sgj(robot, {7: 5.0, 15: 90.0}, 0.0)
+    groups_seq.append(tuple(robot.jcalls[0][0]) if robot.jcalls else ())
+check("武装期双爪都在包里", all("right_gripper" in g for g in groups_seq[:6]),
+      f"{groups_seq[:6]}")
+check("发满 quiet-n=右爪静默（包里只剩左爪）",
+      all("right_gripper" not in g and "left_gripper" in g
+          for g in groups_seq[6:]), f"{groups_seq[6:]}")
+
+# 静默期照常读回评估：模型想开爪→当拍退出并恢复右爪发送
+robot.state[G1JointGroup.right_gripper] = GS(0.034, 0.0)
+robot.jcalls.clear()
+sgj(robot, {7: 90.0, 15: 90.0}, 0.0)
+check("静默中退出当拍恢复发送（双爪在包）",
+      "right_gripper" in robot.jcalls[0][0], f"{robot.jcalls[0][0]}")
+check("退出后右爪发模型目标 108mm",
+      abs(robot.jcalls[0][1][0][0] - 0.108) < 1e-9)
+
+# 静默中外松步=重新武装：贴轨 6 拍→步进→再发 2 拍→归寂
+ns = make_ns(clock)
+ns.update(GRIP=grip_of(),
+          args=args_of(hold=True, margin=1.0, relax=0.3, relax_eff=90.0,
+                       quiet=2),
+          robot=FakeRobot())
+robot, sgj = ns["robot"], ns["send_grip_joint"]
+robot.state[G1JointGroup.right_gripper] = GS(0.034, 0.0, effort=100.0)
+for _ in range(5):
+    sgj(robot, {7: 5.0, 15: 90.0}, 0.0)          # 进 hold（武装1）
+seq = []
+for _ in range(10):
+    robot.jcalls.clear()
+    sgj(robot, {7: 5.0, 15: 90.0}, 0.0)
+    _r = robot.jcalls[0][1][0] if "right_gripper" in robot.jcalls[0][0] \
+        else None
+    seq.append((bool(_r), None if _r is None else round(_r[0], 4)))
+# 拍序：武2→静(rail3)→静(4)→静(5)→贴轨满6步进+武装1(33.3)→武2(33.3)→静×4
+check("静默→外松步重新武装→再静默（拍序 T F F F T T F F F F）",
+      [s[0] for s in seq] ==
+      [True, False, False, False, True, True, False, False, False, False],
+      f"{[s[0] for s in seq]}")
+check("外松步当拍按新目标 33.3 下发",
+      seq[4][1] == 0.0333 and seq[5][1] == 0.0333, f"{seq[4]}")
+
+# 双爪皆静默=整拍无包（jcall 列表空）且返回 j静
+clock = [90.0]
+ns = make_ns(clock)
+ns.update(GRIP=grip_of(),
+          args=args_of(hold=True, margin=1.0, relax=0.0, quiet=2),
+          robot=FakeRobot())
+robot, sgj = ns["robot"], ns["send_grip_joint"]
+for _ in range(6):
+    robot.state[G1JointGroup.right_gripper] = GS(0.034, 0.0)
+    robot.state[G1JointGroup.left_gripper] = GS(0.034, 0.0)
+    sgj(robot, {7: 5.0, 15: 5.0}, 0.0)
+robot.jcalls.clear()
+out = sgj(robot, {7: 5.0, 15: 5.0}, 0.0)
+check("双爪皆静默=无 set_joint_commands 调用+返回 j静",
+      not robot.jcalls and out.endswith("j静"), f"{out[-20:]}")
 
 print(f"\n{'全绿' if not FAIL else 'FAIL: ' + ', '.join(FAIL)}")
 raise SystemExit(1 if FAIL else 0)

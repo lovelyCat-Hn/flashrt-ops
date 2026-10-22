@@ -415,6 +415,15 @@ ap.add_argument("--grip-hold-relax-eff", type=float, default=90.0,
                      "勿按力判读）：保持段连续 6 拍 ≥ 此值才外松一步；40-49"
                      "级瞬态不触发。嫌物松脱=调高（≥100 等效关）；仍响="
                      "调低（更早松）。默认 90")
+ap.add_argument("--grip-hold-quiet-n", type=int, default=9,
+                help="保持段真静默制（101418 定案）：外松到零误差后 eff 仍"
+                     "恒贴轨 100+响——每拍重发冻结目标虽逐位相同，但 10-20 "
+                     "爪定律=每条新令打断在途从头重来，密发把爪永远钉在起步"
+                     "段 settle 不了。本机制：进 hold/每次外松步后只发 N 拍"
+                     "（0.3s，够走完 onset 0.14s+最后一程），之后该爪退出"
+                     "指令包=真静默，让最后一条走完收工；读回/退出/外松评估"
+                     "照常（不依赖发送），退出或外松步即重新武装 N 拍。"
+                     "0=关（每拍重发）。默认 9")
 ap.add_argument("--grip-hold-plateau-mm", type=float, default=0.8,
                 help="平台判据 mm：连续 window 拍实宽 max−min ≤ 此值才算物理"
                      "被撑住（正在合爪途中不触发）。默认 0.8")
@@ -1002,6 +1011,10 @@ if args.grip:
             print(f"[grip-hold] 自动外松开：保持中 eff≥{args.grip_hold_relax_eff:g} "
                   f"持续 6 拍→目标外松 {args.grip_hold_relax_mm:g}mm"
                   f"（上限=进入时实宽，零误差伺服停追；单向不回紧）")
+        if args.grip_hold_quiet_n > 0:
+            print(f"[grip-hold] 真静默制开：进 hold/外松步后发 {args.grip_hold_quiet_n} "
+                  f"拍即停发该爪（静默期固件走完最后一条收工；读回评估照常，"
+                  f"退出/外松自动重新武装）")
     if args.grip_send_every > 0:
         print(f"爪定时静默制: 每 {args.grip_send_every} 机会拍 1 条"
               f"（≈{30.0 / args.grip_send_every:.1f}Hz、静默 "
@@ -1435,7 +1448,8 @@ def send_grip(robot, chunk_row):
 _GRIPJ_EMA = {}
 # --grip-hold-on-stall 憋死保持状态（每爪独立）：on=保持中；hist=实宽平台窗；
 # enters=累计进入次数（汇总打印）；tgt=冻结目标；floor=进入时实宽（外松上限）；
-# rail=eff 贴轨连续拍数（自动外松节拍器）；relax_n=累计外松步数（汇总打印）
+# rail=eff 贴轨连续拍数（自动外松节拍器）；relax_n=累计外松步数（汇总打印）；
+# quiet=距上次武装的已发拍数（静默制节拍器）；silent_n=累计静默拍数（汇总打印）
 _GRIPJ_HOLD = {}
 
 
@@ -1465,6 +1479,10 @@ def send_grip_joint(robot, chunk_row, tfs_s):
     ——1mm 时 156/159 拍仍贴轨可闻声）。SDK 无阻抗模式，执行侧导纳仿真：eff
     贴轨持续 6 拍→目标外松一步，直到 eff 掉头或目标=进入时实宽（零误差停追）。
     单向只松不紧=无棘轮。
+    真静默制（--grip-hold-quiet-n，101418 定案）：外松到零误差后 eff 仍恒贴轨
+    100+响（112 拍无衰减）——每拍重发冻结目标虽逐位相同，但 10-20 爪定律=每条
+    新令打断在途从头重来，密发把爪永远钉在起步段 settle 不了。进 hold/外松步后
+    只发 N 拍即停发该爪（固件执行最后一条收工），读回/退出/外松评估照常。
     """
     if GRIP is None:
         return None
@@ -1484,12 +1502,14 @@ def send_grip_joint(robot, chunk_row, tfs_s):
         w = GRIP["wmin"] + p / 100.0 * (GRIP["wmax"] - GRIP["wmin"])
         _gs = robot.get_gripper_state(getattr(G1JointGroup, name))
         w_sent, eff_sent, vel_sent, _tag = w, 10.0, GRIP["speed"], ""
+        _skip = False
         if args.grip_hold_on_stall and _gs is not None:
             phys = _gs.width
             h = _GRIPJ_HOLD.setdefault(name, {"on": False, "hist": [],
                                               "enters": 0, "tgt": None,
                                               "floor": None,
-                                              "rail": 0, "relax_n": 0})
+                                              "rail": 0, "relax_n": 0,
+                                              "quiet": 0, "silent_n": 0})
             # 双史窗口：(实宽, 本拍指令是否够深)。进入须「实宽平台」∧「深指令
             # 持续满窗」——150603 死锁教训：爪静停开位时模型刚下合令，只看
             # 当拍深指令会误进（onset 未到爪还没动）→ 冻结在开位=意图永不上
@@ -1512,6 +1532,7 @@ def send_grip_joint(robot, chunk_row, tfs_s):
                     h["tgt"] = None
                     h["floor"] = None
                     h["rail"] = 0
+                    h["quiet"] = 0
                     _tag = " HOLD退出"
             elif _plateau and _deep_all:
                 h["on"] = True
@@ -1521,6 +1542,7 @@ def send_grip_joint(robot, chunk_row, tfs_s):
                 h["tgt"] = max(0.0,
                                phys - args.grip_hold_margin_mm / 1000.0)
                 h["floor"] = phys   # 外松上限=进入时实宽（零误差=停追静音）
+                h["quiet"] = 0      # 重新武装：进 hold 先发满 quiet-n 拍
                 _tag = " HOLD进入"
             if h["on"]:
                 if args.grip_hold_relax_mm > 0 and h["floor"] is not None:
@@ -1539,6 +1561,7 @@ def send_grip_joint(robot, chunk_row, tfs_s):
                                        / 1000.0)
                         h["rail"] = 0
                         h["relax_n"] += 1
+                        h["quiet"] = 0   # 外松步重新武装：发满 quiet-n 拍
                         _tag = f" HOLD松{h['tgt'] * 1000:.1f}"
                 # 目标恒定=稳态误差恒为 margin（观测 093335：误差即伺服持续
                 # 内顶驱动力，故 margin 1mm+保持段速度帽放软双管压声）
@@ -1548,18 +1571,33 @@ def send_grip_joint(robot, chunk_row, tfs_s):
                 if args.grip_hold_vel > 0:
                     vel_sent = min(args.grip_hold_vel, GRIP["speed"])
                 _tag = _tag or " HOLD"
+                if args.grip_hold_quiet_n > 0:
+                    # 静默制（101418 定案）：外松到零误差 eff 仍恒贴轨+响——
+                    # 每拍重发虽逐位相同，但 10-20 爪定律=每条新令打断在途
+                    # 从头重来，密发把爪永远钉在起步段 settle 不了。发满
+                    # quiet-n 拍后本爪退出指令包=真静默，让最后一条走完收工；
+                    # 读回/退出/外松评估照常（不依赖发送）。
+                    if h["quiet"] >= args.grip_hold_quiet_n:
+                        _skip = True
+                        h["silent_n"] += 1
+                        _tag = " HOLD静"
+                    else:
+                        h["quiet"] += 1
         c = JointCommand()
         c.position = float(w_sent)
         c.velocity = float(vel_sent)        # 速度帽语义：恒速段被钳在此值
         c.effort = float(eff_sent)
-        cmds.append(c)
-        groups.append(getattr(G1JointGroup, name))
+        if not _skip:       # 静默制：该爪本拍退出指令包（读回照常）
+            cmds.append(c)
+            groups.append(getattr(G1JointGroup, name))
         # eff 回读单位未知（144325 实证：饱和轨 100、全开 114mm 也 100，
         # 头文件 "Newtons" 被推翻）——只当负载/堵转指示，勿按牛顿判读
         _phys = (f" 实{_gs.width * 1000:.1f}mm eff{_gs.effort:.1f}"
                  if _gs is not None else " 实?")
         parts.append(f"{name[0].upper()} {p:.1f}%→{w_sent * 1000:.0f}mm@j"
                      f"{_phys}{_tag}")
+    if not cmds:    # 双爪皆静默：本拍无指令包
+        return "  ".join(parts) + " j静"
     st = robot.set_joint_commands(cmds, joint_groups=groups,
                                   time_from_start_s=tfs_s)
     ok = str(st).startswith("ControlStatus.SUCCESS")
@@ -2396,6 +2434,7 @@ if GRIP and args.do_exec:
         _hs = "  ".join(f"{n.split('_')[0].upper()} 进{v['enters']}"
                         f"{'/保持中' if v['on'] else ''}"
                         f"{'/松' + str(v['relax_n']) if v['relax_n'] else ''}"
+                        f"{'/静' + str(v['silent_n']) if v['silent_n'] else ''}"
                         for n, v in _GRIPJ_HOLD.items())
         print(f"爪憋死保持统计: {_hs}")
 fin = read_joints(robot, ARM_NAMES)
