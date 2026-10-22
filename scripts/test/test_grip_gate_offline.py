@@ -100,7 +100,7 @@ def make_ns(clock):
 
 def args_of(min_interval=0.0, preclose=0.0, ema=0.0,
             hold=False, gap=5.0, exit_mm=3.0, margin=3.0,
-            plateau=0.8, window=5, effort_hold=4.0):
+            plateau=0.8, window=5, effort_hold=4.0, hold_vel=0.05):
     return types.SimpleNamespace(do_exec=True, grip_send_every=0,
                                  grip_min_interval=min_interval,
                                  grip_preclose=preclose, grip_ema_alpha=ema,
@@ -110,7 +110,8 @@ def args_of(min_interval=0.0, preclose=0.0, ema=0.0,
                                  grip_hold_margin_mm=margin,
                                  grip_hold_plateau_mm=plateau,
                                  grip_hold_window=window,
-                                 grip_effort_hold=effort_hold)
+                                 grip_effort_hold=effort_hold,
+                                 grip_hold_vel=hold_vel)
 
 
 def grip_of(chg=2.0):
@@ -277,6 +278,8 @@ sgj(robot, {7: 5.0, 15: 90.0}, 0.0)
 jc = robot.jcalls[0][1][0]
 check("平台满+深指令=进入保持（钳实宽−3mm）", abs(jc[0] - 0.039) < 1e-9, f"{jc}")
 check("保持段 effort 降 4", jc[2] == 4.0, f"{jc}")
+check("保持段速度帽放软 0.05（093335：稳态误差=每拍重武装内顶）",
+      jc[1] == 0.05, f"{jc}")
 check("指令记账=模型意图（state-cmd/sent_peak 语义不变）",
       ns["GRIP"]["sent"]["right_gripper"] == 5.0)
 check("左爪不受牵连（90%=108mm 正常发）",
@@ -295,8 +298,8 @@ check("保持中目标冻结（实宽让到 45mm 仍钳39mm）",
 robot.jcalls.clear()
 sgj(robot, {7: 90.0, 15: 90.0}, 0.0)
 jc = robot.jcalls[0][1][0]
-check("指令上穿实宽+exit=退出当拍发模型目标",
-      abs(jc[0] - 0.108) < 1e-9 and jc[2] == 10.0, f"{jc}")
+check("指令上穿实宽+exit=退出当拍发模型目标（速度恢复 0.15）",
+      abs(jc[0] - 0.108) < 1e-9 and jc[2] == 10.0 and jc[1] == 0.15, f"{jc}")
 
 # 退出清史：再合须新平台（1-4 拍不进，第 5 拍才进）
 reentered = None

@@ -258,7 +258,10 @@ letterbox-vs-crop 另一功能，挂同名会造虚假等价）：
   模型指令上穿 `实宽+exit`（想开爪）→ 恢复流式并清平台史。判据=每拍新鲜
   物理回读（p50 10ms），只改物理下发不改指令记账（--grip-state-cmd/
   sent_peak 语义不变）。旋钮：`--grip-hold-gap-mm 5`（进门）/
-  `--grip-hold-exit-mm 3`（出门）/`--grip-hold-margin-mm 3`（保有夹紧量）/
+  `--grip-hold-exit-mm 3`（出门）/`--grip-hold-margin-mm 1`（保有夹紧量=
+  稳态位置误差=伺服持续内顶驱动力：093335 观测 3mm 误差仍可闻声→默认
+  1mm；0=零夹紧物易松脱）+`--grip-hold-vel 0.05`（保持段速度帽：每拍重
+  武装的合爪斜坡速度，小=顶得轻；电机下限 0.03；0=沿用 0.15）/
   `--grip-hold-plateau-mm 0.8`+`--grip-hold-window 12`（憋死判定窗：
   进入须「实宽平台」∧「深指令持续满窗」——窗短于爪 onset+行程会误进：
   144325 跟随版棘轮碾进 56-72mm、150603 冻结版冻结在开位死锁全程不闭合，

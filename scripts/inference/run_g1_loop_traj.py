@@ -394,9 +394,14 @@ ap.add_argument("--grip-hold-gap-mm", type=float, default=5.0,
 ap.add_argument("--grip-hold-exit-mm", type=float, default=3.0,
                 help="保持退出门 mm：指令宽度 ≥ 实宽+exit=模型想开爪，恢复流式"
                      "并清平台史（防近阈抖动闪断）。默认 3.0")
-ap.add_argument("--grip-hold-margin-mm", type=float, default=3.0,
-                help="保持段钳位余量 mm：下发目标=实宽−margin，即保有的恒定"
-                     "夹紧量。0=目标=实宽（零夹紧，物易松脱）。默认 3.0")
+ap.add_argument("--grip-hold-margin-mm", type=float, default=1.0,
+                help="保持段钳位余量 mm：下发目标=实宽−margin=保有的恒定"
+                     "夹紧量=稳态位置误差（观测 093335：误差即伺服持续内顶"
+                     "的驱动力，3mm 仍可闻声）。0=零夹紧物易松脱。默认 1.0")
+ap.add_argument("--grip-hold-vel", type=float, default=0.05,
+                help="保持段下发速度帽 m/s：每拍重武装的合爪斜坡速度，小=顶"
+                     "得轻（电机下限 0.03，0.05 留余量；0=沿用 GRIP 速度帽"
+                     "0.15）。默认 0.05")
 ap.add_argument("--grip-hold-plateau-mm", type=float, default=0.8,
                 help="平台判据 mm：连续 window 拍实宽 max−min ≤ 此值才算物理"
                      "被撑住（正在合爪途中不触发）。默认 0.8")
@@ -976,7 +981,8 @@ if args.grip:
         print(f"[grip-hold] 憋死保持开：指令≤实宽−{args.grip_hold_gap_mm}mm "
               f"持续满窗({args.grip_hold_window}拍)且实宽平台"
               f"(≤{args.grip_hold_plateau_mm}mm)"
-              f"→钳 进入时实宽−{args.grip_hold_margin_mm}mm（冻结不跟随）@effort"
+              f"→钳 进入时实宽−{args.grip_hold_margin_mm}mm（冻结不跟随）"
+              f"@vel{args.grip_hold_vel:g}/effort"
               f"{'沿用' if args.grip_effort_hold <= 0 else args.grip_effort_hold}"
               f"；指令≥实宽+{args.grip_hold_exit_mm}mm 退出恢复流式")
     if args.grip_send_every > 0:
@@ -1454,7 +1460,7 @@ def send_grip_joint(robot, chunk_row, tfs_s):
                                  # hold 只改物理下发，不改指令记账）
         w = GRIP["wmin"] + p / 100.0 * (GRIP["wmax"] - GRIP["wmin"])
         _gs = robot.get_gripper_state(getattr(G1JointGroup, name))
-        w_sent, eff_sent, _tag = w, 10.0, ""
+        w_sent, eff_sent, vel_sent, _tag = w, 10.0, GRIP["speed"], ""
         if args.grip_hold_on_stall and _gs is not None:
             phys = _gs.width
             h = _GRIPJ_HOLD.setdefault(name, {"on": False, "hist": [],
@@ -1489,14 +1495,17 @@ def send_grip_joint(robot, chunk_row, tfs_s):
                                phys - args.grip_hold_margin_mm / 1000.0)
                 _tag = " HOLD进入"
             if h["on"]:
-                # 目标恒定：位置误差恒定=夹持不加深；物滑动也只压 margin 一次
+                # 目标恒定=稳态误差恒为 margin（观测 093335：误差即伺服持续
+                # 内顶驱动力，故 margin 1mm+保持段速度帽放软双管压声）
                 w_sent = h["tgt"]
                 if args.grip_effort_hold > 0:
                     eff_sent = args.grip_effort_hold
+                if args.grip_hold_vel > 0:
+                    vel_sent = min(args.grip_hold_vel, GRIP["speed"])
                 _tag = _tag or " HOLD"
         c = JointCommand()
         c.position = float(w_sent)
-        c.velocity = float(GRIP["speed"])   # 速度帽语义：恒速段被钳在此值
+        c.velocity = float(vel_sent)        # 速度帽语义：恒速段被钳在此值
         c.effort = float(eff_sent)
         cmds.append(c)
         groups.append(getattr(G1JointGroup, name))
