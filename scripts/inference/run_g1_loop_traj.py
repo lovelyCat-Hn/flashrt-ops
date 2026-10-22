@@ -402,6 +402,19 @@ ap.add_argument("--grip-hold-vel", type=float, default=0.05,
                 help="保持段下发速度帽 m/s：每拍重武装的合爪斜坡速度，小=顶"
                      "得轻（电机下限 0.03，0.05 留余量；0=沿用 GRIP 速度帽"
                      "0.15）。默认 0.05")
+ap.add_argument("--grip-hold-relax-mm", type=float, default=0.3,
+                help="保持段 eff 闭环自动外松步长 mm（执行侧导纳仿真）。"
+                     "095207 实证：1mm 稳态误差下伺服仍满驱（eff 恒贴饱和轨"
+                     "100，156/159 拍）=「有差就追」是位置伺服天性，收小 "
+                     "margin 治不了声。SDK 无阻抗模式可切（10-21 五路彻查"
+                     "在案），只能在目标侧松：eff≥阈值持续 6 拍(0.2s)→冻结"
+                     "目标外移一步，直到 eff 掉头或目标=进入时实宽（零误差"
+                     "=伺服停追=静音）。单向只松不紧=无棘轮。0=关。默认 0.3")
+ap.add_argument("--grip-hold-relax-eff", type=float, default=90.0,
+                help="自动外松触发阈值（eff 回读是非牛顿负载/堵转轨指示，"
+                     "勿按力判读）：保持段连续 6 拍 ≥ 此值才外松一步；40-49"
+                     "级瞬态不触发。嫌物松脱=调高（≥100 等效关）；仍响="
+                     "调低（更早松）。默认 90")
 ap.add_argument("--grip-hold-plateau-mm", type=float, default=0.8,
                 help="平台判据 mm：连续 window 拍实宽 max−min ≤ 此值才算物理"
                      "被撑住（正在合爪途中不触发）。默认 0.8")
@@ -985,6 +998,10 @@ if args.grip:
               f"@vel{args.grip_hold_vel:g}/effort"
               f"{'沿用' if args.grip_effort_hold <= 0 else args.grip_effort_hold}"
               f"；指令≥实宽+{args.grip_hold_exit_mm}mm 退出恢复流式")
+        if args.grip_hold_relax_mm > 0:
+            print(f"[grip-hold] 自动外松开：保持中 eff≥{args.grip_hold_relax_eff:g} "
+                  f"持续 6 拍→目标外松 {args.grip_hold_relax_mm:g}mm"
+                  f"（上限=进入时实宽，零误差伺服停追；单向不回紧）")
     if args.grip_send_every > 0:
         print(f"爪定时静默制: 每 {args.grip_send_every} 机会拍 1 条"
               f"（≈{30.0 / args.grip_send_every:.1f}Hz、静默 "
@@ -1417,7 +1434,8 @@ def send_grip(robot, chunk_row):
 # 分开，A/B 切路径不串状态）
 _GRIPJ_EMA = {}
 # --grip-hold-on-stall 憋死保持状态（每爪独立）：on=保持中；hist=实宽平台窗；
-# enters=累计进入次数（汇总打印）
+# enters=累计进入次数（汇总打印）；tgt=冻结目标；floor=进入时实宽（外松上限）；
+# rail=eff 贴轨连续拍数（自动外松节拍器）；relax_n=累计外松步数（汇总打印）
 _GRIPJ_HOLD = {}
 
 
@@ -1442,6 +1460,11 @@ def send_grip_joint(robot, chunk_row, tfs_s):
     且实宽平台」→ 改发 进入时实宽−margin 冻结目标@effort_hold（钳位保持；
     ⚠勿逐拍跟随实宽=棘轮碾进，144325 首跑实证）；指令上穿实宽+exit
     （想开爪）→ 恢复流式并清平台史。只改物理下发，不改指令记账。
+    自动外松（--grip-hold-relax-mm，095207 定案）：钳位后稳态误差=margin 仍
+    使伺服满驱（eff 恒贴饱和轨 100，「有差就追」=位置伺服天性，收 margin 无效
+    ——1mm 时 156/159 拍仍贴轨可闻声）。SDK 无阻抗模式，执行侧导纳仿真：eff
+    贴轨持续 6 拍→目标外松一步，直到 eff 掉头或目标=进入时实宽（零误差停追）。
+    单向只松不紧=无棘轮。
     """
     if GRIP is None:
         return None
@@ -1464,7 +1487,9 @@ def send_grip_joint(robot, chunk_row, tfs_s):
         if args.grip_hold_on_stall and _gs is not None:
             phys = _gs.width
             h = _GRIPJ_HOLD.setdefault(name, {"on": False, "hist": [],
-                                              "enters": 0, "tgt": None})
+                                              "enters": 0, "tgt": None,
+                                              "floor": None,
+                                              "rail": 0, "relax_n": 0})
             # 双史窗口：(实宽, 本拍指令是否够深)。进入须「实宽平台」∧「深指令
             # 持续满窗」——150603 死锁教训：爪静停开位时模型刚下合令，只看
             # 当拍深指令会误进（onset 未到爪还没动）→ 冻结在开位=意图永不上
@@ -1485,6 +1510,8 @@ def send_grip_joint(robot, chunk_row, tfs_s):
                     h["on"] = False
                     h["hist"].clear()   # 退出清史：再进须新平台（防近阈闪断）
                     h["tgt"] = None
+                    h["floor"] = None
+                    h["rail"] = 0
                     _tag = " HOLD退出"
             elif _plateau and _deep_all:
                 h["on"] = True
@@ -1493,8 +1520,26 @@ def send_grip_joint(robot, chunk_row, tfs_s):
                 # 碾进；冻结后刚性物同样钉死、软物最多压进 margin 一次）
                 h["tgt"] = max(0.0,
                                phys - args.grip_hold_margin_mm / 1000.0)
+                h["floor"] = phys   # 外松上限=进入时实宽（零误差=停追静音）
                 _tag = " HOLD进入"
             if h["on"]:
+                if args.grip_hold_relax_mm > 0 and h["floor"] is not None:
+                    # eff 闭环自动外松（执行侧导纳仿真，095207 实证：1mm 误差
+                    # 仍伺服满驱 eff 恒贴轨=「有差就追」天性，收 margin 治不了
+                    # 声）。贴轨满 6 拍→目标外移一步；eff 掉头或到进入时实宽
+                    # （零误差）即停。单向只松不紧=无棘轮回旋余地。先于
+                    # w_sent 赋值：步进当拍即按新目标下发。
+                    if _gs.effort >= args.grip_hold_relax_eff:
+                        h["rail"] += 1
+                    else:
+                        h["rail"] = 0
+                    if h["rail"] >= 6 and h["tgt"] < h["floor"] - 1e-6:
+                        h["tgt"] = min(h["floor"],
+                                       h["tgt"] + args.grip_hold_relax_mm
+                                       / 1000.0)
+                        h["rail"] = 0
+                        h["relax_n"] += 1
+                        _tag = f" HOLD松{h['tgt'] * 1000:.1f}"
                 # 目标恒定=稳态误差恒为 margin（观测 093335：误差即伺服持续
                 # 内顶驱动力，故 margin 1mm+保持段速度帽放软双管压声）
                 w_sent = h["tgt"]
@@ -2350,6 +2395,7 @@ if GRIP and args.do_exec:
     if args.grip_hold_on_stall and _GRIPJ_HOLD:
         _hs = "  ".join(f"{n.split('_')[0].upper()} 进{v['enters']}"
                         f"{'/保持中' if v['on'] else ''}"
+                        f"{'/松' + str(v['relax_n']) if v['relax_n'] else ''}"
                         for n, v in _GRIPJ_HOLD.items())
         print(f"爪憋死保持统计: {_hs}")
 fin = read_joints(robot, ARM_NAMES)

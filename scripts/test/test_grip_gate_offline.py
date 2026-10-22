@@ -100,7 +100,8 @@ def make_ns(clock):
 
 def args_of(min_interval=0.0, preclose=0.0, ema=0.0,
             hold=False, gap=5.0, exit_mm=3.0, margin=3.0,
-            plateau=0.8, window=5, effort_hold=4.0, hold_vel=0.05):
+            plateau=0.8, window=5, effort_hold=4.0, hold_vel=0.05,
+            relax=0.3, relax_eff=90.0):
     return types.SimpleNamespace(do_exec=True, grip_send_every=0,
                                  grip_min_interval=min_interval,
                                  grip_preclose=preclose, grip_ema_alpha=ema,
@@ -111,7 +112,9 @@ def args_of(min_interval=0.0, preclose=0.0, ema=0.0,
                                  grip_hold_plateau_mm=plateau,
                                  grip_hold_window=window,
                                  grip_effort_hold=effort_hold,
-                                 grip_hold_vel=hold_vel)
+                                 grip_hold_vel=hold_vel,
+                                 grip_hold_relax_mm=relax,
+                                 grip_hold_relax_eff=relax_eff)
 
 
 def grip_of(chg=2.0):
@@ -361,6 +364,63 @@ for k in range(8):
     sents.append(robot.jcalls[0][1][0][0])
 check("行程中永不进（实宽每拍走 5mm，每拍发意图 12mm 非钳位）",
       all(abs(x - 0.012) < 1e-9 for x in sents), f"{sents}")
+
+# ── T7 eff 闭环自动外松（095207 定案：1mm 稳态误差仍伺服满驱 eff 恒贴轨） ──
+print("T7 自动外松 --grip-hold-relax-mm 0.3（执行侧导纳仿真，单向不回紧）")
+clock = [70.0]
+ns = make_ns(clock)
+ns.update(GRIP=grip_of(), args=args_of(hold=True, margin=1.0),
+          robot=FakeRobot())
+robot, sgj = ns["robot"], ns["send_grip_joint"]
+
+# 进入保持：实宽 34mm、margin 1 → 钳 33mm；eff 回读贴轨 100。
+# 平台窗 5 拍：前 4 拍流式发意图，第 5 拍才进
+robot.state[G1JointGroup.right_gripper] = GS(0.034, 0.0, effort=100.0)
+seq = []
+for _ in range(5):
+    robot.jcalls.clear()
+    sgj(robot, {7: 5.0, 15: 90.0}, 0.0)
+    seq.append(robot.jcalls[0][1][0][0])
+check("平台窗第 5 拍进入钳 33mm", abs(seq[4] - 0.033) < 1e-9,
+      f"{[f'{x:.4f}' for x in seq]}")
+
+# 贴轨须连续满 6 拍才松一步（进拍即计 1）：再 4 拍不动、第 5 拍 33→33.3
+seq = []
+for _ in range(6):
+    robot.jcalls.clear()
+    sgj(robot, {7: 5.0, 15: 90.0}, 0.0)
+    seq.append(robot.jcalls[0][1][0][0])
+check("贴轨不满 6 拍不松", all(abs(x - 0.033) < 1e-9 for x in seq[:4]),
+      f"{[f'{x:.4f}' for x in seq]}")
+check("第 5 拍外松一步 →33.3mm", abs(seq[4] - 0.0333) < 1e-9, f"{seq[4]:.4f}")
+
+# eff 掉头（负载降）→ 计数清零停松
+robot.state[G1JointGroup.right_gripper] = GS(0.034, 0.0, effort=45.0)
+for _ in range(10):
+    robot.jcalls.clear()
+    sgj(robot, {7: 5.0, 15: 90.0}, 0.0)
+check("eff 掉头停松（钉在 33.3）",
+      abs(robot.jcalls[0][1][0][0] - 0.0333) < 1e-9)
+
+# 再贴轨：继续松到进入时实宽 34.0 封顶（零误差停追，永不开过 floor）
+robot.state[G1JointGroup.right_gripper] = GS(0.034, 0.0, effort=100.0)
+last = None
+for _ in range(40):
+    robot.jcalls.clear()
+    sgj(robot, {7: 5.0, 15: 90.0}, 0.0)
+    last = robot.jcalls[0][1][0][0]
+check("持续贴轨松到 floor=34.0 封顶", abs(last - 0.034) < 1e-9, f"{last:.4f}")
+
+# relax=0 关闭：整段钉死在钳位
+ns = make_ns(clock)
+ns.update(GRIP=grip_of(),
+          args=args_of(hold=True, margin=1.0, relax=0.0), robot=FakeRobot())
+robot, sgj = ns["robot"], ns["send_grip_joint"]
+robot.state[G1JointGroup.right_gripper] = GS(0.034, 0.0, effort=100.0)
+for _ in range(25):
+    robot.jcalls.clear()
+    sgj(robot, {7: 5.0, 15: 90.0}, 0.0)
+check("relax=0=纯钳位不松", abs(robot.jcalls[0][1][0][0] - 0.033) < 1e-9)
 
 print(f"\n{'全绿' if not FAIL else 'FAIL: ' + ', '.join(FAIL)}")
 raise SystemExit(1 if FAIL else 0)
