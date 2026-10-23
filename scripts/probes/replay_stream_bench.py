@@ -70,6 +70,8 @@ RIGHT = [f"right_arm_joint{i}" for i in range(1, 8)]
 ARM_NAMES = RIGHT + LEFT
 GAP_EPS = 1e-4
 K_PURSUIT = 2.6   # 指数追踪 v≈k·gap 的 k（10-12 单发探针定案；stepwait 自校对照）
+SW_WINS_MS = (33.3, 66.7, 100.0)    # stepwait 逐窗位移实测窗（30Hz 一拍口径）
+SW_THR_MRAD = (5.0, 2.0, 1.0, 0.5)  # “执行完”多档阈值（首个采样穿入时刻）
 
 ap = argparse.ArgumentParser(description=__doc__,
                              formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -562,8 +564,12 @@ last_tgt = None    # 跨块延续（闭环同口径）：块首拍 |Δcmd| 才�
 _prev_ach = None   # 上拍实际关节（|Δact| 臂动量遥测）
 # stepwait 计时账本
 _sw_zero = _sw_to = 0
+_sw_win = {w: [] for w in SW_WINS_MS}
+_sw_thr = {t: [] for t in SW_THR_MRAD}
 _sw_conv = []      # (步长mrad, 收敛ms, 律预测ms)
 _sw_calls = []     # set_joint_commands 调用 RTT ms
+_sw_win = {}       # 逐窗位移：窗ms -> [绑定关节已走 mrad]（首个采样≥窗）
+_sw_thr = {}       # “执行完”多档：阈值mrad -> [首次穿入时刻 ms]
 _sw_k = []         # k̂ = ln(g₀ᵦ/ε)/t（绑定关节口径）
 _sw_bind = {}      # 绑定关节 idx -> 次数
 for bi, tgt_blk in enumerate(BLOCKS):
@@ -629,10 +635,13 @@ for bi, tgt_blk in enumerate(BLOCKS):
             _g0b = float(_gvec[_bind])
             _tw = time.perf_counter()
             _to = False
+            _tr = []                             # (t_ms, gap_max_mrad, 绑定关节已走mrad)
             while True:
                 _cur2 = read_joints()
+                _ts = 1000 * (time.perf_counter() - _tw)
                 _gabs = np.abs(tgt - _cur2)
                 _gm = float(_gabs.max())
+                _tr.append((_ts, _gm * 1000, (_gvec[_bind] - _gabs[_bind]) * 1000))
                 if _gm * 1000 <= args.step_done_mrad:
                     break
                 if time.perf_counter() - _tw > args.step_timeout_s:
@@ -650,8 +659,20 @@ for bi, tgt_blk in enumerate(BLOCKS):
                 _sw_conv.append((_step_m, _conv, _pred))
                 _sw_calls.append(_call_ms)
                 _sw_bind[_bind] = _sw_bind.get(_bind, 0) + 1
+                _w = []
+                for _win in SW_WINS_MS:          # 逐窗位移：首个采样≥窗
+                    _dv = next((db for ts, _, db in _tr if ts >= _win), None)
+                    if _dv is not None:
+                        _sw_win[_win].append(_dv)
+                    _w.append(_dv)
+                for _thr in SW_THR_MRAD:         # 执行完多档：首个穿入时刻
+                    if args.step_done_mrad <= _thr:
+                        _tc = next((ts for ts, gm, _ in _tr if gm <= _thr), None)
+                        if _tc is not None:
+                            _sw_thr[_thr].append(_tc)
+                _w1s = (f" | 33ms走 {_w[0]:.2f} mrad" if _w[0] is not None else "")
                 print(f"  拍{kk}: 步 {_step_m:5.1f} mrad | 令 {_call_ms:4.1f} ms | "
-                      f"收敛 {_conv:6.0f} ms（律预测 {_pred:5.0f}）| k̂ {_kk:.2f}/s")
+                      f"收敛 {_conv:6.0f} ms（律预测 {_pred:5.0f}）{_w1s} | k̂ {_kk:.2f}/s")
         print(f"── 块 {bi+1} 完成（stepwait，耗时 "
               f"{time.perf_counter()-t_blk:.1f} s）──")
         continue
@@ -717,7 +738,17 @@ if args.mode == "stepwait" and _sw_conv:
           f"10-12 单发探针）"
           + (" | 绑定关节 " + ", ".join(f"{ARM_NAMES[i]}×{n}" for i, n in _top)
              if _top else ""))
-elif args.mode == "stepwait":
+if args.mode == "stepwait" and (_sw_win[SW_WINS_MS[0]] or _sw_thr[SW_THR_MRAD[0]]):
+    _wp = " | ".join(
+        (f"{w:g}ms {np.median(_sw_win[w]):.2f} mrad(n={len(_sw_win[w])})"
+         if _sw_win[w] else f"{w:g}ms —") for w in SW_WINS_MS)
+    print(f"== stepwait 逐窗实测 == 位移（绑定关节，首个采样≥窗）: {_wp}")
+    _tp = " | ".join(
+        (f"≤{t:g} {np.median(_sw_thr[t]):.0f} ms(n={len(_sw_thr[t])})"
+         if _sw_thr[t] else f"≤{t:g} 未测(需 --step-done-mrad ≤{t:g})")
+        for t in SW_THR_MRAD)
+    print(f"== stepwait 执行完多档 == {_tp}")
+elif args.mode == "stepwait" and not _sw_conv:
     print(f"== stepwait 汇总 == 计时步 0 | 秒过 {_sw_zero} | 超时 {_sw_to}"
           "（全部步长 ≤ 阈，无计时样本——可减小 --step-done-mrad）")
 _teardown()
