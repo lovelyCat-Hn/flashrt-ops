@@ -94,14 +94,6 @@ ap.add_argument("--interp", choices=["linear", "cubic", "quintic"], default="cub
 ap.add_argument("--delta-max", type=float, default=0.05,
                 help="链式限幅 rad/行（与主脚本同义）")
 ap.add_argument("--ema-alpha", type=float, default=0.0, help="行目标 EMA（0=关）")
-ap.add_argument("--lead-k", type=float, default=0.0,
-                help="lead-comp 前馈：行目标前移 v̂/K（0=关；2.6=全补偿追逐平衡滞后 v/k）")
-ap.add_argument("--lead-alpha", type=float, default=-1.0,
-                help="v̂ 的 EMA 平滑（<0=沿用 --ema-alpha；0=不平滑）")
-ap.add_argument("--lead-max", type=float, default=0.0,
-                help="每关节前移量钳位 rad（0=不钳；防换向角部甩尾）")
-ap.add_argument("--lead-slew", type=float, default=0.0,
-                help="每行前移量变化限速 rad/行（0=不钳；治前馈微分踢臂）")
 ap.add_argument("--tfs-ms", type=float, default=0.0,
                 help="time_from_start_s 毫秒：0=fastest（默认）；"
                      "stream 帧节奏≈4.2 | direct 行节奏≈33.3")
@@ -443,9 +435,7 @@ else:
 
 
 def build_rows(cur, tgt_blk):
-    """链式限幅 + 可选 EMA + 可选 lead-comp（主脚本 build_rows 同构：每行 ≤±delta-max）。"""
-    global _lead_blk
-    _lead_blk = None
+    """链式限幅 + 可选 EMA（主脚本 build_rows 同构：每行 ≤±delta-max）。"""
     rows = np.empty_like(tgt_blk)
     prev = np.asarray(cur, dtype=np.float32)
     for kk in range(len(tgt_blk)):
@@ -458,28 +448,6 @@ def build_rows(cur, tgt_blk):
         for kk in range(1, len(rows)):
             acc = a * rows[kk] + (1.0 - a) * acc
             rows[kk] = acc
-    if args.lead_k > 0:
-        # 前馈：v̂=因果行差分（上一行口径，live 可同款），EMA 平滑后目标前移 v̂/K，
-        # 抵消追逐平衡滞后 v/k；换向处 v̂ 滞留 → 过冲，--lead-max 钳位兜底。
-        # ⚠ lead∝v̂（一阶导）→ 行间 |Δlead|∝加速度，裸用会把微分踢进指令流
-        #（163412 实证停走比 0.7→6.0%）；--lead-slew 限速是标准 derivative-kick 对策。
-        vhat = np.zeros_like(rows)
-        vhat[1:] = (rows[1:] - rows[:-1]) * float(args.fps)
-        la = float(args.lead_alpha) if args.lead_alpha >= 0 else float(args.ema_alpha)
-        if la > 0:
-            acc = vhat[0]
-            for kk in range(1, len(vhat)):
-                acc = la * vhat[kk] + (1.0 - la) * acc
-                vhat[kk] = acc
-        lead = vhat / float(args.lead_k)
-        if args.lead_max > 0:
-            lead = np.clip(lead, -args.lead_max, args.lead_max)
-        if args.lead_slew > 0:
-            for kk in range(1, len(lead)):
-                lead[kk] = np.clip(lead[kk], lead[kk-1] - args.lead_slew,
-                                   lead[kk-1] + args.lead_slew)
-        _lead_blk = lead
-        rows = rows + lead.astype(np.float32)
     return rows
 
 
@@ -519,10 +487,6 @@ print(f"[replay-bench] 模式 {args.mode} | tick {TICK*1000:.1f} ms（{args.fps}
           f"{args.step_timeout_s:g}s / 阈下秒过"
           if args.mode == "stepwait" else " | 每行一令"))
       + f" | 链式限幅 ±{args.delta_max} | EMA α={args.ema_alpha:g}"
-      + (f" | lead v̂/{args.lead_k:g}"
-         + (f" 钳±{args.lead_max:g}" if args.lead_max > 0 else "")
-         + (f" 限速{args.lead_slew*1000:g}mrad/行" if args.lead_slew > 0 else "")
-         if args.lead_k > 0 else "")
       + f" | tfs {args.tfs_ms:g} ms | 块间 hold {args.swap_gap_ms:.0f} ms"
       + (f" | 源 {os.path.basename(args.dataset.rstrip('/'))} ep{args.episode}"
          if args.dataset else "")
@@ -598,7 +562,6 @@ n_env_clip = 0
 n_skip = 0
 last_tgt = None    # 跨块延续（闭环同口径）：块首拍 |Δcmd| 才能暴露换块跳变
 _prev_ach = None   # 上拍实际关节（|Δact| 臂动量遥测）
-_lead_blk = None   # 本块 lead 前移量（lead 开时拍行加打「原目标残差」防指标污染）
 # stepwait 计时账本
 _sw_zero = _sw_to = 0
 _sw_win = {w: [] for w in SW_WINS_MS}
@@ -750,13 +713,9 @@ for bi, tgt_blk in enumerate(BLOCKS):
             act = 0.0
         _prev_ach = ach
         err = float(np.max(np.abs(ach - tgt))) * 1000
-        _err0 = ""
-        if _lead_blk is not None:
-            _e0 = float(np.max(np.abs(ach - (tgt - _lead_blk[kk])))) * 1000
-            _err0 = f"（原目标 {_e0:4.1f}）"
         print(f"  拍{kk}: |Δcmd| {d_mrad:5.1f} mrad"
               f" | 导程 {gap0*1000:5.1f} → {_fr_s}"
-              f" | 动 {act:4.1f} 残差 {err:4.1f} mrad{_err0} | replay")
+              f" | 动 {act:4.1f} 残差 {err:4.1f} mrad | replay")
     print(f"── 块 {bi+1} 完成，耗时 {1000*(time.perf_counter()-t_blk):.0f} ms ──")
     if bi < n_blocks - 1 and args.swap_gap_ms > 0:
         time.sleep(args.swap_gap_ms / 1000.0)
