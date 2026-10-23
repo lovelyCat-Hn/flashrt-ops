@@ -7,9 +7,15 @@
 逐变量 A/B 真机手感。遥测三线（|Δcmd|/导程/残差）格式与主脚本一致，
 同一解析器可直接对比闭环日志。
 
-数据源：run_g1_loop_traj --dump-chunks 落盘的 chunk_*.npz（原始 (50,16) 模型输出
+数据源一：run_g1_loop_traj --dump-chunks 落盘的 chunk_*.npz（原始 (50,16) 模型输出
 +BASE_ARM）。臂 14 维回放（爪维不喂）。语义与主脚本一致：绝对目标=BASE_ARM+chunk，
 链式限幅从**当前实际关节**出发，块间 hold --swap-gap-ms 模拟推理落地窗。
+
+数据源二：--dataset ~/holy/datasets/XXX --episode N —— 数据集 action 绝对位置流
+（30Hz 16 维，臂 0-6=右臂 / 8-14=左臂，右臂在前；剥爪维 7/15 取臂 14 维）按 50 行
+切伪块，首行=就位目标。demo 连续无推理缝，扫窗口建议 --swap-gap-ms 0；各 A/B 档
+保持同一 --delta-max 才公平（demo 最快步可能超 0.05，装载时会提示）。
+需 pyarrow 读取（flash_pyrt311 无 → 用 flashrt 环境跑，缺库时报错带命令）。
 
 A/B 维度：
   --mode stream   frames-per-row 帧插值突发（=主脚本同路径；240Hz 口径）
@@ -25,6 +31,10 @@ A/B 维度：
 用法：
   ~/holy/run.sh ~/holy/scripts/probes/replay_stream_bench.py \
       --chunks-dir logs/chunks_traj_XXXX --rounds 3 --mode stream
+  # 数据集整集回放（需 pyarrow，flashrt 环境跑）：
+  #   LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
+  #   ~/miniforge3/envs/flashrt/bin/python scripts/probes/replay_stream_bench.py \
+  #   --dataset ~/holy/datasets/pick_place_balence --episode 0 --exec
   # 干跑（零下发，打印计划即退）：去掉 --exec
 """
 import argparse
@@ -58,7 +68,12 @@ GAP_EPS = 1e-4
 
 ap = argparse.ArgumentParser(description=__doc__,
                              formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument("--chunks-dir", required=True, help="--dump-chunks 落盘目录")
+ap.add_argument("--chunks-dir", default=None,
+                help="--dump-chunks 落盘目录（与 --dataset 二选一）")
+ap.add_argument("--dataset", default=None,
+                help="lerobot 数据集目录：整集 action 绝对位置流按 50 行切伪块"
+                     "（需 pyarrow；flash_pyrt311 无，报错带替代命令）")
+ap.add_argument("--episode", type=int, default=0, help="--dataset 的 episode_index")
 ap.add_argument("--exec", dest="do_exec", action="store_true",
                 help="真机下发（不带=干跑：打印计划即退）")
 ap.add_argument("--rounds", type=int, default=3, help="回放块数上限（0=全部）")
@@ -92,6 +107,8 @@ ap.add_argument("--max-excursion", type=float, default=3.0,
 ap.add_argument("--nav-suspend", action="store_true",
                 help="循环期 SIGSTOP 冻结导航栈七进程（同 run_g1_loop_traj；默认关）")
 args = ap.parse_args()
+if bool(args.chunks_dir) == bool(args.dataset):
+    raise SystemExit("--chunks-dir 与 --dataset 恰好给一个")
 
 TICK = 1.0 / args.fps
 
@@ -312,18 +329,78 @@ def _fatal_hook(t, v, tb):
 
 sys.excepthook = _fatal_hook
 
-# ── 数据装载（chunk delta → 绝对目标，主脚本 build_rows 同一换算）──
-files = sorted(glob.glob(os.path.join(args.chunks_dir, "chunk_*.npz")))
-if not files:
-    raise SystemExit(f"目录无 chunk_*.npz：{args.chunks_dir}")
-BLOCKS = []
-for f in files:
-    d = np.load(f)
-    ch = np.asarray(d["chunk"], dtype=np.float32)         # (50,16)
-    base = np.asarray(d["base_arm"], dtype=np.float32)    # (14,)
-    BLOCKS.append(np.concatenate([ch[:, :7], ch[:, 8:15]], axis=1)
-                  + base[None, :])                        # (50,14) 绝对目标
-n_blocks = len(BLOCKS) if args.rounds <= 0 else min(args.rounds, len(BLOCKS))
+# ── 数据装载 ──
+# npz：chunk delta + BASE_ARM → 绝对目标（主脚本 build_rows 同一换算）；
+# dataset：action 绝对位置流直切（剥爪维 7/15，右臂在前）。
+def load_dataset_blocks(ds_dir, episode):
+    """lerobot 数据集一集 → (N,14) 绝对臂位置流按 50 行切伪块。"""
+    try:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+    except ImportError:
+        raise SystemExit(
+            "--dataset 需要 pyarrow（flash_pyrt311 没有）。两种走法：\n"
+            "  ① flashrt 环境跑本台（自带 pyarrow+SDK）：\n"
+            "    LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \\\n"
+            "    ~/miniforge3/envs/flashrt/bin/python " + os.path.abspath(__file__) + " \\\n"
+            "        --dataset " + ds_dir + " --episode " + str(episode) + " ...\n"
+            "  ② 给 flash_pyrt311 装 pyarrow（⚠ 勿动 numpy==1.26.4，装时核对）")
+    info = json.load(open(os.path.join(ds_dir, "meta", "info.json")))
+    fps = int(info.get("fps", 30))
+    pfiles = sorted(glob.glob(os.path.join(ds_dir,
+                                           "data", "chunk-*", "file-*.parquet")))
+    if not pfiles:
+        raise SystemExit(f"数据集无 parquet：{ds_dir}")
+    acts = None
+    for pf in pfiles:            # episode 在文件内连续（lerobot 顺序写），命中即停
+        t = pq.read_table(pf, columns=["action", "episode_index"])
+        e = np.asarray(t.column("episode_index").to_pylist())
+        idx = np.nonzero(e == episode)[0]
+        if len(idx):
+            sub = t.take(pa.array(idx))
+            acts = np.asarray(sub.column("action").to_pylist(), dtype=np.float32)
+            break
+    if acts is None or len(acts) < 2:
+        raise SystemExit(f"数据集无 episode_index={episode}（或行数 <2）")
+    if acts.shape[1] != 16:
+        raise SystemExit(f"action 维数 {acts.shape[1]} ≠ 16（维序契约变了？先查 info.json）")
+    arm = np.concatenate([acts[:, :7], acts[:, 8:15]], axis=1)   # (N,14) 绝对
+    steps = np.abs(np.diff(arm, axis=0))
+    p50, p95, mx = (float(np.percentile(steps, 50)),
+                    float(np.percentile(steps, 95)),
+                    float(steps.max()))
+    print(f"[数据集] {ds_dir} ep{episode}: {len(arm)} 行 ≈ {len(arm)/fps:.1f}s "
+          f"@ {fps}Hz | 行间步长 p50 {p50*1000:.1f} / p95 {p95*1000:.1f} / "
+          f"max {mx*1000:.1f} mrad")
+    if mx > args.delta_max:
+        print(f"[数据集] ⚠ demo 最快步 {mx*1000:.0f} > 链钳 ±{args.delta_max*1000:.0f}"
+              f" mrad：最快段会被削平；忠实回放加 --delta-max {mx:.2f}"
+              f"（各 A/B 档保持同值才公平）")
+    if args.swap_gap_ms > 0:
+        print("[数据集] 提示：demo 连续无推理缝，扫窗口建议 --swap-gap-ms 0")
+    return [arm[i:i + 50].copy() for i in range(0, len(arm), 50)]
+
+
+if args.dataset:
+    files = None
+    BLOCKS = load_dataset_blocks(args.dataset, args.episode)
+else:
+    files = sorted(glob.glob(os.path.join(args.chunks_dir, "chunk_*.npz")))
+    if not files:
+        raise SystemExit(f"目录无 chunk_*.npz：{args.chunks_dir}")
+    BLOCKS = []
+    for f in files:
+        try:
+            d = np.load(f)
+            ch = np.asarray(d["chunk"], dtype=np.float32)         # (50,16)
+            base = np.asarray(d["base_arm"], dtype=np.float32)    # (14,)
+        except Exception as e:
+            print(f"[装载] ⚠ 跳过坏 npz {os.path.basename(f)}: {e}（q 掐断常留截尾件）")
+            continue
+        BLOCKS.append(np.concatenate([ch[:, :7], ch[:, 8:15]], axis=1)
+                      + base[None, :])                        # (50,14) 绝对目标
+n_total = len(BLOCKS)
+n_blocks = n_total if args.rounds <= 0 else min(args.rounds, n_total)
 BLOCKS = BLOCKS[:n_blocks]
 per = args.frames_per_row if args.mode == "stream" else 1
 INTERP = (create_interpolator(args.interp, dim=14, input_hz=args.fps,
@@ -395,7 +472,9 @@ print(f"[replay-bench] 模式 {args.mode} | tick {TICK*1000:.1f} ms（{args.fps}
          if args.mode == "stream" else " | 每行一令")
       + f" | 链式限幅 ±{args.delta_max} | EMA α={args.ema_alpha:g}"
       + f" | tfs {args.tfs_ms:g} ms | 块间 hold {args.swap_gap_ms:.0f} ms"
-      + f" | 回放 {n_blocks}/{len(files)} 块")
+      + (f" | 源 {os.path.basename(args.dataset.rstrip('/'))} ep{args.episode}"
+         if args.dataset else "")
+      + f" | 回放 {n_blocks}/{n_total} 块")
 if args.mode == "direct" and args.tfs_ms <= 0:
     print("[提示] direct 口径天然配对 tfs≈33.3 ms（--tfs-ms 33.3）；"
           "当前 fastest arrival")
