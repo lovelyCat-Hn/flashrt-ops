@@ -568,8 +568,6 @@ _sw_win = {w: [] for w in SW_WINS_MS}
 _sw_thr = {t: [] for t in SW_THR_MRAD}
 _sw_conv = []      # (步长mrad, 收敛ms, 律预测ms)
 _sw_calls = []     # set_joint_commands 调用 RTT ms
-_sw_win = {}       # 逐窗位移：窗ms -> [绑定关节已走 mrad]（首个采样≥窗）
-_sw_thr = {}       # “执行完”多档：阈值mrad -> [首次穿入时刻 ms]
 _sw_k = []         # k̂ = ln(g₀ᵦ/ε)/t（绑定关节口径）
 _sw_bind = {}      # 绑定关节 idx -> 次数
 for bi, tgt_blk in enumerate(BLOCKS):
