@@ -117,6 +117,9 @@ ap.add_argument("--envelope", type=str,
                 help="包络护栏 json（臂 14 维钳位）")
 ap.add_argument("--max-excursion", type=float, default=3.0,
                 help="偏离起始位护栏 rad（任一关节超限即停）")
+ap.add_argument("--continuous-ref", dest="continuous_ref", action="store_true",
+                help="跨块连续参考：链锚/EMA 从上一块末行接续，不回臂位重锚"
+                     "（数据集流本连续，块首跳变=重锚惯例产物；默认关=主脚本同构重锚）")
 ap.add_argument("--nav-suspend", action="store_true",
                 help="循环期 SIGSTOP 冻结导航栈七进程（同 run_g1_loop_traj；默认关）")
 args = ap.parse_args()
@@ -435,19 +438,27 @@ else:
 
 
 def build_rows(cur, tgt_blk):
-    """链式限幅 + 可选 EMA（主脚本 build_rows 同构：每行 ≤±delta-max）。"""
+    """链式限幅 + 可选 EMA（主脚本 build_rows 同构：每行 ≤±delta-max）。
+    --continuous-ref：链锚/EMA 从上一块末行接续（跨块连续参考，不回臂位重锚）。"""
+    global _chain_state
     rows = np.empty_like(tgt_blk)
     prev = np.asarray(cur, dtype=np.float32)
+    if args.continuous_ref and _chain_state is not None:
+        prev = _chain_state.copy()
     for kk in range(len(tgt_blk)):
         prev = prev + np.clip(tgt_blk[kk] - prev,
                               -args.delta_max, args.delta_max)
         rows[kk] = prev
     if args.ema_alpha > 0:
         a = float(args.ema_alpha)
-        acc = rows[0]
-        for kk in range(1, len(rows)):
+        # 主脚本同构：携带状态时块首行也吃 EMA（否则连续模式块首=裸钳位步长）
+        carry = args.continuous_ref and _chain_state is not None
+        acc = _chain_state.copy() if carry else rows[0]
+        for kk in range(0 if carry else 1, len(rows)):
             acc = a * rows[kk] + (1.0 - a) * acc
             rows[kk] = acc
+    if args.continuous_ref:
+        _chain_state = rows[-1].copy()
     return rows
 
 
@@ -487,6 +498,7 @@ print(f"[replay-bench] 模式 {args.mode} | tick {TICK*1000:.1f} ms（{args.fps}
           f"{args.step_timeout_s:g}s / 阈下秒过"
           if args.mode == "stepwait" else " | 每行一令"))
       + f" | 链式限幅 ±{args.delta_max} | EMA α={args.ema_alpha:g}"
+      + (" | 跨块连续参考" if args.continuous_ref else "")
       + f" | tfs {args.tfs_ms:g} ms | 块间 hold {args.swap_gap_ms:.0f} ms"
       + (f" | 源 {os.path.basename(args.dataset.rstrip('/'))} ep{args.episode}"
          if args.dataset else "")
@@ -562,6 +574,7 @@ n_env_clip = 0
 n_skip = 0
 last_tgt = None    # 跨块延续（闭环同口径）：块首拍 |Δcmd| 才能暴露换块跳变
 _prev_ach = None   # 上拍实际关节（|Δact| 臂动量遥测）
+_chain_state = None  # --continuous-ref 跨块链状态（上一块末行目标）
 # stepwait 计时账本
 _sw_zero = _sw_to = 0
 _sw_win = {w: [] for w in SW_WINS_MS}
