@@ -20,6 +20,10 @@
 A/B 维度：
   --mode stream   frames-per-row 帧插值突发（=主脚本同路径；240Hz 口径）
   --mode direct   每行一次 set_joint_commands（30Hz 口径，天然配对 tfs≈33.3）
+  --mode stepwait 不按节拍：每行走完（gap≤--step-done-mrad）再发下一行，逐计
+                  收敛 ms。指数律预测 t=ln(g₀/ε)/k（k≈2.6/s，10-12 探针）内联
+                  对照并实测 k̂；⚠ 量的是伺服阶跃响应（含指数尾巴），不是流式
+                  下发的节拍下限——流式不等尾巴、步进重叠。
   --tfs-ms        0=fastest arrival（现行为）| 帧节奏≈4.2 | 行节奏≈33.3
   --interp cubic|linear|quintic / --ema-alpha / --delta-max / --frames-per-row
 
@@ -65,6 +69,7 @@ LEFT = [f"left_arm_joint{i}" for i in range(1, 8)]
 RIGHT = [f"right_arm_joint{i}" for i in range(1, 8)]
 ARM_NAMES = RIGHT + LEFT
 GAP_EPS = 1e-4
+K_PURSUIT = 2.6   # 指数追踪 v≈k·gap 的 k（10-12 单发探针定案；stepwait 自校对照）
 
 ap = argparse.ArgumentParser(description=__doc__,
                              formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -78,9 +83,10 @@ ap.add_argument("--exec", dest="do_exec", action="store_true",
                 help="真机下发（不带=干跑：打印计划即退）")
 ap.add_argument("--rounds", type=int, default=3, help="回放块数上限（0=全部）")
 ap.add_argument("--fps", type=int, default=30, help="行节拍 Hz")
-ap.add_argument("--mode", choices=["stream", "direct"], default="stream",
+ap.add_argument("--mode", choices=["stream", "direct", "stepwait"], default="stream",
                 help="stream=帧插值突发（默认，同主脚本）；"
-                     "direct=每行一令（30Hz 口径）")
+                     "direct=每行一令（30Hz 口径）；"
+                     "stepwait=走完再发（每步收敛计时）")
 ap.add_argument("--frames-per-row", type=int, default=8)
 ap.add_argument("--interp", choices=["linear", "cubic", "quintic"], default="cubic")
 ap.add_argument("--delta-max", type=float, default=0.05,
@@ -89,6 +95,11 @@ ap.add_argument("--ema-alpha", type=float, default=0.0, help="行目标 EMA（0=
 ap.add_argument("--tfs-ms", type=float, default=0.0,
                 help="time_from_start_s 毫秒：0=fastest（默认）；"
                      "stream 帧节奏≈4.2 | direct 行节奏≈33.3")
+ap.add_argument("--step-done-mrad", type=float, default=1.0,
+                help="stepwait 收敛阈：max|目标-实际|≤该值算走完（默认 1 mrad；"
+                     "ε 越小尾巴越长，t∝ln(g₀/ε)）")
+ap.add_argument("--step-timeout-s", type=float, default=3.0,
+                help="stepwait 单步超时秒（指数收敛无严格终点，防挂死）")
 ap.add_argument("--burst-reserve-ms", type=float, default=6.0,
                 help="stream 突发预算=tick−该值（0=铺满整拍）")
 ap.add_argument("--rows-per-block", type=int, default=0,
@@ -469,7 +480,10 @@ def send_burst(frames_idx_list, frames_all):
 print(f"[replay-bench] 模式 {args.mode} | tick {TICK*1000:.1f} ms（{args.fps} Hz）"
       + (f" | {args.frames_per_row} 帧/行（≈{args.fps*per:.0f}Hz {args.interp}）"
          f" | 突发预算 {TICK*1000 - args.burst_reserve_ms:.1f} ms/行"
-         if args.mode == "stream" else " | 每行一令")
+         if args.mode == "stream" else
+         (f" | 走完再发：阈 {args.step_done_mrad:g} mrad / 超时 "
+          f"{args.step_timeout_s:g}s / 阈下秒过"
+          if args.mode == "stepwait" else " | 每行一令"))
       + f" | 链式限幅 ±{args.delta_max} | EMA α={args.ema_alpha:g}"
       + f" | tfs {args.tfs_ms:g} ms | 块间 hold {args.swap_gap_ms:.0f} ms"
       + (f" | 源 {os.path.basename(args.dataset.rstrip('/'))} ep{args.episode}"
@@ -497,6 +511,14 @@ if not args.do_exec:
               f"| 首行导程 {lead0:.1f} mrad"
               + (f" | 帧 {INTERP.interpolate(np.vstack([cur[None], rows])).shape[0]}"
                  if INTERP is not None else ""))
+        if args.mode == "stepwait":
+            _eps = args.step_done_mrad / 1000.0
+            _g = d[1:].max(axis=1)
+            _act = _g[_g > _eps]
+            _pred = float(np.log(_act / _eps).sum() / K_PURSUIT) if len(_act) else 0.0
+            print(f"[干跑][stepwait] ≥阈步 {len(_act)}/{len(_g)}"
+                  f" | 预测 Σ收敛 {_pred:.1f}s（k={K_PURSUIT}/s，"
+                  f"ε={args.step_done_mrad:g} mrad；另加每步下发+读回 RTT）")
         cur = rows[-1]
         if ENV_LO14 is not None:
             cur = np.clip(cur, ENV_LO14, ENV_HI14)
@@ -538,14 +560,20 @@ n_env_clip = 0
 n_skip = 0
 last_tgt = None    # 跨块延续（闭环同口径）：块首拍 |Δcmd| 才能暴露换块跳变
 _prev_ach = None   # 上拍实际关节（|Δact| 臂动量遥测）
+# stepwait 计时账本
+_sw_zero = _sw_to = 0
+_sw_conv = []      # (步长mrad, 收敛ms, 律预测ms)
+_sw_calls = []     # set_joint_commands 调用 RTT ms
+_sw_k = []         # k̂ = ln(g₀ᵦ/ε)/t（绑定关节口径）
+_sw_bind = {}      # 绑定关节 idx -> 次数
 for bi, tgt_blk in enumerate(BLOCKS):
     cur = read_joints()
     rows = build_rows(cur, tgt_blk)
     n_rows = (len(rows) if args.rows_per_block <= 0
               else min(args.rows_per_block, len(rows)))
     rows = rows[:n_rows]
-    if args.mode == "direct" and ENV_LO14 is not None:
-        rows = np.clip(rows, ENV_LO14, ENV_HI14)    # direct 的"帧"=行本身
+    if args.mode in ("direct", "stepwait") and ENV_LO14 is not None:
+        rows = np.clip(rows, ENV_LO14, ENV_HI14)    # direct/stepwait 的"帧"=行本身
     if args.mode == "stream":
         # 换块时一次性：[cur]+行目标 样条 → 逐行分桶帧 + 帧级包络钳位（主脚本同）
         frames_all = INTERP.interpolate(
@@ -563,6 +591,70 @@ for bi, tgt_blk in enumerate(BLOCKS):
     t_blk = time.perf_counter()
     print(f"\n── 回放块 {bi+1}/{n_blocks}（行 {n_rows}）| "
           f"|Δcmd| mean {d[1:].mean()*1000:.1f} max {d[1:].max()*1000:.1f} mrad ──")
+
+    if args.mode == "stepwait":
+        _eps = args.step_done_mrad / 1000.0
+        for kk in range(n_rows):
+            cur = read_joints()
+            tgt = rows[kk]
+            gap0 = float(np.max(np.abs(tgt - cur)))
+            drift = float(np.max(np.abs(tgt - start_pos)))
+            if drift > args.max_excursion:
+                print(f"⛔ 漂移护栏：关节最大偏离 {drift*1000:.0f} mrad > "
+                      f"{args.max_excursion*1000:.0f}，停止（机械臂留在原地）")
+                _teardown()
+                os._exit(5)
+            _step_m = gap0 * 1000
+            last_tgt = tgt.copy()
+            if _step_m <= args.step_done_mrad:
+                _sw_zero += 1
+                print(f"  拍{kk}: 步 {_step_m:5.2f} mrad ≤ 阈 · 秒过")
+                continue
+            _t0 = time.perf_counter()
+            _cmds = []
+            for _ji in range(14):
+                _c = JointCommand()
+                _c.position = float(tgt[_ji])   # 标准关节只消费 position
+                _cmds.append(_c)
+            _st = robot.set_joint_commands(_cmds, joint_names=ARM_NAMES,
+                                           time_from_start_s=args.tfs_ms / 1000.0)
+            _call_ms = 1000 * (time.perf_counter() - _t0)
+            if not str(_st).startswith("ControlStatus.SUCCESS"):
+                print(f"⛔ 下发非 SUCCESS（{_st}），停止")
+                _teardown()
+                os._exit(4)
+            _pred = 1000 * float(np.log(gap0 / _eps)) / K_PURSUIT
+            _gvec = np.abs(tgt - cur)
+            _bind = int(np.argmax(_gvec))
+            _g0b = float(_gvec[_bind])
+            _tw = time.perf_counter()
+            _to = False
+            while True:
+                _cur2 = read_joints()
+                _gabs = np.abs(tgt - _cur2)
+                _gm = float(_gabs.max())
+                if _gm * 1000 <= args.step_done_mrad:
+                    break
+                if time.perf_counter() - _tw > args.step_timeout_s:
+                    _to = True
+                    break
+                time.sleep(0.001)
+            _conv = 1000 * (time.perf_counter() - _tw)
+            if _to:
+                _sw_to += 1
+                print(f"  拍{kk}: 步 {_step_m:5.1f} mrad | 令 {_call_ms:4.1f} ms | "
+                      f"⚠ 超时>{args.step_timeout_s:g}s（余 {_gm*1000:.1f} mrad）")
+            else:
+                _kk = float(np.log(max(_g0b, _eps) / _eps) / (_conv / 1000.0))
+                _sw_k.append(_kk)
+                _sw_conv.append((_step_m, _conv, _pred))
+                _sw_calls.append(_call_ms)
+                _sw_bind[_bind] = _sw_bind.get(_bind, 0) + 1
+                print(f"  拍{kk}: 步 {_step_m:5.1f} mrad | 令 {_call_ms:4.1f} ms | "
+                      f"收敛 {_conv:6.0f} ms（律预测 {_pred:5.0f}）| k̂ {_kk:.2f}/s")
+        print(f"── 块 {bi+1} 完成（stepwait，耗时 "
+              f"{time.perf_counter()-t_blk:.1f} s）──")
+        continue
 
     _next_t = time.perf_counter()
     for kk in range(n_rows):
@@ -611,4 +703,21 @@ for bi, tgt_blk in enumerate(BLOCKS):
 
 print(f"\n== 回放汇总 == 块 {n_blocks} | 免发 {n_skip} | "
       f"包络钳位帧 {n_env_clip} | 总耗时 {time.perf_counter()-t0:.1f} s")
+if args.mode == "stepwait" and _sw_conv:
+    _cs = [c for _, c, _ in _sw_conv]
+    _top = sorted(_sw_bind.items(), key=lambda x: -x[1])[:3]
+    print(f"== stepwait 汇总 == 计时步 {len(_sw_conv)} | 秒过 {_sw_zero} | "
+          f"超时 {_sw_to}"
+          f" | 步长 mrad p50/p95 {np.percentile([s for s, _, _ in _sw_conv],50):.1f}/"
+          f"{np.percentile([s for s, _, _ in _sw_conv],95):.1f}"
+          f" | 收敛 ms p50/p95/max {np.percentile(_cs,50):.0f}/"
+          f"{np.percentile(_cs,95):.0f}/{max(_cs):.0f}"
+          f" | 令 RTT p50 {np.percentile(_sw_calls,50):.1f} ms"
+          f" | k̂ 中位 {float(np.median(_sw_k)):.2f}/s（律 2.6；"
+          f"10-12 单发探针）"
+          + (" | 绑定关节 " + ", ".join(f"{ARM_NAMES[i]}×{n}" for i, n in _top)
+             if _top else ""))
+elif args.mode == "stepwait":
+    print(f"== stepwait 汇总 == 计时步 0 | 秒过 {_sw_zero} | 超时 {_sw_to}"
+          "（全部步长 ≤ 阈，无计时样本——可减小 --step-done-mrad）")
 _teardown()
