@@ -92,8 +92,9 @@ ap.add_argument("--mode", choices=["stream", "direct", "stepwait"], default="str
 ap.add_argument("--frames-per-row", type=int, default=8)
 ap.add_argument("--interp", choices=["linear", "cubic", "quintic"], default="cubic")
 ap.add_argument("--merge", type=int, default=1,
-                help="合步：每 N 行取 1 个宏步目标（块时间 N× 压缩消耗、宏步长 ×N）；"
-                     "EMA/链钳/连续参考仍按行级语义，宏步间照常 frames-per-row 插值密发")
+                help="合步（等时粗化）：滤波后每 N 行取 1 个宏步目标，每宏步占 N 拍；"
+                     "目标频率 fps/N、帧按拍均分 → 下发 fps×frames-per-row/N；"
+                     "同一轨迹同速同墙钟（非时间压缩），EMA/链钳/连续参考保持行级语义")
 ap.add_argument("--delta-max", type=float, default=0.05,
                 help="链式限幅 rad/行（与主脚本同义）")
 ap.add_argument("--ema-alpha", type=float, default=0.0, help="行目标 EMA（0=关）")
@@ -462,12 +463,12 @@ def build_rows(cur, tgt_blk):
             acc = a * rows[kk] + (1.0 - a) * acc
             rows[kk] = acc
     if args.merge > 1:
-        # 合步：滤波后每 N 行取 1 个宏步目标（末行必保=块尾位置/链状态不动，
-        # 时间压缩 N×；宏步长=N 行钳位后位移之和，行级 ±delta-max 语义不变）
+        # 合步：滤波后每 N 行取 1 个宏步目标（末行必保=块尾位置/链状态不动；
+        # 等时粗化——宏步间墙钟在流式循环展开为 N 拍，宏步长=N 行钳位位移之和，
+        # 行级 ±delta-max 语义不变）
         idx = list(range(0, len(rows), args.merge))
         if idx[-1] != len(rows) - 1:
-            idx.append(len(rows) - 1)
-        rows = rows[idx]
+            idx[-1] = len(rows) - 1   # 末行替换尾采样（宏步数=严格 ceil，墙钟精确）
     if args.continuous_ref:
         _chain_state = rows[-1].copy()
     return rows
@@ -502,9 +503,10 @@ def send_burst(frames_idx_list, frames_all):
 
 
 print(f"[replay-bench] 模式 {args.mode} | tick {TICK*1000:.1f} ms（{args.fps} Hz）"
-      + (f" | {args.frames_per_row} 帧/行（≈{args.fps*per:.0f}Hz {args.interp}）"
+      + (f" | {args.frames_per_row} 帧/行（≈{args.fps*per/args.merge:.0f}Hz {args.interp}）"
          f" | 突发预算 {TICK*1000 - args.burst_reserve_ms:.1f} ms/行"
-         + (f" | 合步×{args.merge}（宏步={args.merge} 行，时间压缩 {args.merge}×）"
+         + (f" | 合步×{args.merge}（目标 {args.fps//args.merge}Hz 宏步、每宏步 "
+            f"{args.merge} 拍、下发 ≈{args.fps*per/args.merge:.0f}Hz，块墙钟不变）"
             if args.merge > 1 else "")
          if args.mode == "stream" else
          (f" | 走完再发：阈 {args.step_done_mrad:g} mrad / 超时 "
@@ -606,6 +608,7 @@ for bi, tgt_blk in enumerate(BLOCKS):
         rows = np.clip(rows, ENV_LO14, ENV_HI14)    # direct/stepwait 的"帧"=行本身
     if args.mode == "stream":
         # 换块时一次性：[cur]+行目标 样条 → 逐行分桶帧 + 帧级包络钳位（主脚本同）
+        _macro_rows = rows          # 块头统计用宏步口径（merge 展开后 rows=拍级）
         frames_all = INTERP.interpolate(
             np.vstack([cur[None].astype(np.float32), rows]))
         if ENV_LO14 is not None:
@@ -613,13 +616,27 @@ for bi, tgt_blk in enumerate(BLOCKS):
             np.clip(frames_all, ENV_LO14[None, :], ENV_HI14[None, :],
                     out=frames_all)
             n_env_clip += int(np.sum(np.any(_pre != frames_all, axis=1)))
-        bursts = [list(range(kk * per, (kk + 1) * per)) for kk in range(n_rows)]
+        n_macro = len(rows)
+        if args.merge > 1:
+            # 等时粗化：宏步占 N 拍、帧按拍均分（下发 = fps×per/N Hz，块墙钟不变）
+            rows = np.repeat(rows, args.merge, axis=0)
+            bursts = []
+            for _m in range(n_macro):
+                for _grp in np.array_split(np.arange(_m * per, (_m + 1) * per),
+                                           args.merge):
+                    bursts.append([int(i) for i in _grp])
+        else:
+            bursts = [list(range(kk * per, (kk + 1) * per)) for kk in range(n_rows)]
+        n_rows = len(rows)
     else:
         frames_all = rows
         bursts = [[kk] for kk in range(n_rows)]
-    d = np.abs(np.diff(np.vstack([cur[None], rows]), axis=0))
+        _macro_rows = rows
+    d = np.abs(np.diff(np.vstack([cur[None], _macro_rows]), axis=0))
     t_blk = time.perf_counter()
-    print(f"\n── 回放块 {bi+1}/{n_blocks}（行 {n_rows}）| "
+    _hd = (f"拍 {n_rows} = 宏步{n_macro}×{args.merge}"
+           if args.merge > 1 and args.mode == "stream" else f"行 {n_rows}")
+    print(f"\n── 回放块 {bi+1}/{n_blocks}（{_hd}）| "
           f"|Δcmd| mean {d[1:].mean()*1000:.1f} max {d[1:].max()*1000:.1f} mrad ──")
 
     if args.mode == "stepwait":
@@ -729,7 +746,7 @@ for bi, tgt_blk in enumerate(BLOCKS):
                     print(f"⛔ 下发非 SUCCESS（{_st}），停止")
                     _teardown()
                     os._exit(4)
-            _fr_s = (f"{len(bursts[kk])}帧@{args.fps*per:.0f}Hz"
+            _fr_s = (f"{len(bursts[kk])}帧@{args.fps*per/args.merge:.0f}Hz"
                      if args.mode == "stream" else f"1令@{args.fps}Hz")
         last_tgt = tgt.copy()
         ach = read_joints()
