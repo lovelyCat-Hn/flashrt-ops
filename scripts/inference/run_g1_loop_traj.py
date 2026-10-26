@@ -247,6 +247,11 @@ ap.add_argument("--seam-boost-alpha", type=float, default=0.0,
 ap.add_argument("--seam-boost-beats", type=int, default=4,
                 help="接缝助推拍数=α 从 boost 落回主 α 的窗长（默认 4）；"
                      "--seam-boost-alpha 0 时无效")
+ap.add_argument("--grip-rawrows", action="store_true",
+                help="merge>1 时爪维默认随臂同管线（2026-10-26 用户定案：dim7/15 "
+                     "与臂同 idx 宏步粗化+同款样条逐帧插值，EMA 上移到行准备、"
+                     "换块从最后实发意图重播）；本旗标恢复旧行率流"
+                     "（每发送拍发 chunk[k] 原值，A/B 用）。merge=1 下无差别")
 ap.add_argument("--aggregate-fn", dest="aggregate_fn",
                 choices=("weighted_average", "latest_only", "average",
                          "conservative"),
@@ -747,6 +752,9 @@ if args.merge > 1:
                          "重建帧流已旁路")
     if args.merge > args.chunk_size:
         raise SystemExit(f"--merge {args.merge} > chunk 行数 {args.chunk_size}")
+else:
+    if args.grip_rawrows:
+        print("[config] --grip-rawrows 在 merge=1 下无差别（爪本来就走行率流）")
 if args.continuous_ref and (args.entry_match or args.ref_offset):
     raise SystemExit("--continuous-ref 与 --entry-match/--ref-offset 互斥"
                      "（同管换块链锚：入口匹配锚臂位/偏移平移 vs 链从 last_tgt "
@@ -1533,7 +1541,7 @@ _GRIPJ_HOLD = {}
 _GRIPJ_TX = 0
 
 
-def send_grip_joint(robot, chunk_row, tfs_s):
+def send_grip_joint(robot, chunk_row, tfs_s, frame=None):
     """--grip-path joint：夹爪 dim7/15 并回 set_joint_commands 流（10-21 P6 破案）。
 
     同事 infer_policy / lerobot 采集语义原样：position=width_m、
@@ -1577,13 +1585,18 @@ def send_grip_joint(robot, chunk_row, tfs_s):
         _GRIPJ_TX += 1
     parts = []
     cmds, groups = [], []
-    for name, dim in GRIP["names"]:
-        p = float(np.clip(chunk_row[dim], 0.0, 100.0))
-        if args.grip_ema_alpha > 0:
-            prev = _GRIPJ_EMA.get(name)
-            p = p if prev is None else \
-                args.grip_ema_alpha * p + (1.0 - args.grip_ema_alpha) * prev
-            _GRIPJ_EMA[name] = p
+    for _ni, (name, dim) in enumerate(GRIP["names"]):
+        if frame is not None:
+            # 爪随臂宏步管线（2026-10-26）：帧值已在上游行准备中 EMA+插帧，
+            # 此处只钳位——二次 EMA 会双滤波
+            p = float(np.clip(frame[_ni], 0.0, 100.0))
+        else:
+            p = float(np.clip(chunk_row[dim], 0.0, 100.0))
+            if args.grip_ema_alpha > 0:
+                prev = _GRIPJ_EMA.get(name)
+                p = p if prev is None else \
+                    args.grip_ema_alpha * p + (1.0 - args.grip_ema_alpha) * prev
+                _GRIPJ_EMA[name] = p
         GRIP["sent"][name] = p   # 记模型意图（state-cmd/sent_peak 语义不变；
                                  # hold 只改物理下发，不改指令记账）
         w = GRIP["wmin"] + p / 100.0 * (GRIP["wmax"] - GRIP["wmin"])
@@ -1747,6 +1760,9 @@ if args.rtc_horizon > 0:
 INTERP = create_interpolator(args.interp, dim=14,
                              input_hz=args.fps,
                              output_hz=args.fps * args.frames_per_row)
+GRIP_INTERP = create_interpolator(args.interp, dim=2,
+                                  input_hz=args.fps,
+                                  output_hz=args.fps * args.frames_per_row)
 
 _EMA_STATE = None   # 跨块连续 EMA 状态（上块末行滤波输出；None=尚无历史不滤波）
 _GRIP_EMA = {}      # 爪指令 EMA 状态（--grip-ema-alpha>0 时启用；跨块连续，爪流
@@ -1862,13 +1878,38 @@ def build_block_stream(cur, prev0=None, offset=None, seam=False):
             for _grp in np.array_split(np.arange(_m * per, (_m + 1) * per),
                                        args.merge):
                 bursts.append([int(i) for i in _grp])   # 空组=静默拍（per<N 时）
-        return rows, frames_all, bursts
+        # ── 爪维随臂同管线（2026-10-26 用户定案；--grip-rawrows 恢复旧行率
+        # 流）：dim7/15 与臂同 idx 宏步粗化+同款样条逐帧插帧。EMA 上移到行
+        # 准备（镜像臂 build_rows：滤波→粗化→插帧，勿在 send 端二次滤波），
+        # 换块从 GRIP['sent']（最后实发意图）重播=臂 _EMA_STATE=last_tgt 的
+        # 防瞬移镜像；首块/无历史以首行播种。起点=GRIP['sent']（prev0 镜像，
+        # 块首帧恰=上块末发值=零缝步）。帧值钳 [0,100]（样条过冲兜底）。
+        grip_frames = None
+        if GRIP is not None and not args.grip_rawrows:
+            def _sent_seed():
+                _v = [GRIP["sent"].get(n) for n, _d in GRIP["names"]]
+                return (None if any(x is None for x in _v)
+                        else np.asarray(_v, dtype=np.float32))
+            g = np.stack([chunk[:, d] for _, d in GRIP["names"]],
+                         axis=1).astype(np.float32)
+            if args.grip_ema_alpha > 0:
+                _ab = float(args.grip_ema_alpha)
+                _seed = _sent_seed()
+                acc = g[0].copy() if _seed is None else _seed.copy()
+                for _k in range(len(g)):
+                    acc = _ab * g[_k] + (1.0 - _ab) * acc
+                    g[_k] = acc
+            _seed = _sent_seed()
+            _g_start = g[0].copy() if (prev0 is None or _seed is None) else _seed
+            _g_wp = np.vstack([_g_start[None, :], g[idx]])
+            grip_frames = np.clip(GRIP_INTERP.interpolate(_g_wp), 0.0, 100.0)
+        return rows, frames_all, bursts, grip_frames
     waypoints = np.vstack([_start[None, :], rows])
     frames_all = INTERP.interpolate(waypoints)
     if ENV_LO is not None:
         np.clip(frames_all, ENV_LO14[None, :], ENV_HI14[None, :], out=frames_all)
     bursts = [list(range(kk * per, (kk + 1) * per)) for kk in range(len(rows))]
-    return rows, frames_all, bursts
+    return rows, frames_all, bursts, None
 
 
 def _rtc_prefix(new_base):
@@ -2031,7 +2072,7 @@ if not args.do_exec:
           f"{args.frames_per_row} 帧/行，链式限幅 ±{args.delta_max} rad）"
           "未下发任何命令 ==")
     _cur0 = read_joints(robot, ARM_NAMES)
-    _rows, _frames, _bursts = build_block_stream(_cur0)
+    _rows, _frames, _bursts, _gframes = build_block_stream(_cur0)
     print(f"  行 {len(_rows)} → 帧 {len(_frames)}（{args.interp}）；"
           f"全块最大帧间步长 {float(np.max(np.abs(np.diff(_frames, axis=0)))) * 1000:.3f} mrad")
     for kk in range(3):
@@ -2065,7 +2106,10 @@ if args.do_exec:
               f"（每 {args.cmd_every} 拍 1 条）" if args.cmd_every > 1 else
               (f"指令沿 合步×{args.merge}={args.fps * args.frames_per_row / args.merge:.0f}Hz"
                f"（目标 {args.fps // args.merge}Hz 宏步、每宏步 {args.merge} 拍、"
-               f"拍线|Δcmd|=帧流口径）" if args.merge > 1 else
+               f"拍线|Δcmd|=帧流口径"
+               + ("、爪随臂宏步插帧" if (GRIP is not None
+                                         and not args.grip_rawrows) else "")
+               + "）" if args.merge > 1 else
                f"指令沿 {args.fps:g}Hz 逐拍 1 条")))
           + (f"，tfs {args.tfs_ms:g} ms" if args.tfs_ms > 0 else "")
           + f"，链式限幅 ±{args.delta_max} rad/行，"
@@ -2120,7 +2164,7 @@ _old_k = 0                           # 换块时旧流下一行号
 next_t = time.perf_counter()
 swap_envelope_check()
 _cur0 = read_joints(robot, ARM_NAMES)
-rows_abs, frames_all, bursts = build_block_stream(_cur0)
+rows_abs, frames_all, bursts, grip_frames_all = build_block_stream(_cur0)
 print(f"\n── 块 1 | t+0.0s | 推理 {infer_ms.percentile(1.0) if len(infer_ms) else float('nan'):.0f} ms ──")
 print(f"[轨迹流] 行 {len(rows_abs)} → 帧 {len(frames_all)}（{args.interp} "
       f"{args.frames_per_row} 帧/行，≈{args.fps * args.frames_per_row}Hz）")
@@ -2352,7 +2396,7 @@ while not aborted:
             # 吃不满包络余量 ±0.15；残余失配仍由链式限幅回走收敛兜底。
             _plan0 = BASE_ARM + np.concatenate([chunk[0][:7], chunk[0][8:15]])
             _roff = np.clip(last_tgt - _plan0, -args.delta_max, args.delta_max)
-        rows_abs, frames_all, bursts = build_block_stream(
+        rows_abs, frames_all, bursts, grip_frames_all = build_block_stream(
             _cur_sw, prev0=_prev0, offset=_roff,
             seam=(args.entry_match and n_swapped > 1))
         # ── 重叠混接（--seam-overlap-alpha，2026-10-20 同事 lerobot 栈
@@ -2476,9 +2520,17 @@ while not aborted:
                 seam_first = d_mrad          # 接缝尖峰：换块首发 |Δcmd|
             else:
                 seam_rest.append(d_mrad)
-            gp = (send_grip_joint(robot, chunk[tgi], args.tfs_ms / 1000.0)
-                  if args.grip_path == "joint"
-                  else send_grip(robot, chunk[tgi]))
+            if grip_frames_all is not None:
+                # 爪随臂宏步帧流：发本拍末帧（突发完成时刻的插值目标，
+                # 与拍线 |Δcmd| 帧流口径同帧）；空突发=静默持有
+                _gb = bursts[tgi]
+                gp = (send_grip_joint(robot, None, args.tfs_ms / 1000.0,
+                                      frame=grip_frames_all[_gb[-1]])
+                      if _gb else None)
+            else:
+                gp = (send_grip_joint(robot, chunk[tgi], args.tfs_ms / 1000.0)
+                      if args.grip_path == "joint"
+                      else send_grip(robot, chunk[tgi]))
             if (args.entry_match and gap0 >= GAP_EPS
                     and _grp_n == args.cmd_every):
                 # g₀ 滚动窗：只记实发拍（免发拍污染中位），同回放台口径
