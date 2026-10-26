@@ -132,8 +132,11 @@ ap.add_argument("--max-joint-delta-per-step", "--delta-max",
                 help="每行目标限幅 rad（链式：每行至多向 chunk 行绝对位挪这么多；"
                      "config [loop].delta_max）")
 ap.add_argument("--fps", type=int, default=30,
-                help="行节拍频率 Hz（默认 30=训练控制率；>40 拒绝：tick 低于"
-                     "取图+SDK 硬开销 ~25ms 必丢拍）")
+                help="行节拍频率 Hz（默认 30=训练控制率）：全局节奏旋钮——tick、"
+                     "计划播放速度（模型 30Hz 语义，40=1.33× 提速 OOD）、下发率"
+                     "三者同缩放。>40 超频区放行+警告（2026-10-26 用户申请 50Hz "
+                     "实验）：tick 低于取图+SDK 硬开销 ~25ms 会丢拍重锚，建议"
+                     "每拍 1 帧（per/merge≈2）；>100 硬拒")
 ap.add_argument("--frames-per-row", type=int, default=1,
                 help="每行插值帧数：行目标样条插成 N 帧于 row-tick 内按预算匀速"
                      "突发下发 set_joint_commands。默认 1=纯 30Hz 直发（每 tick"
@@ -711,9 +714,17 @@ if args.seam_boost_alpha > 0:
         raise SystemExit("--seam-boost-alpha 与重叠混接（weighted_average/average）"
                          "互斥：同管块首 EMA 调度；latest_only（α=1.0=混接关）"
                          "不受限")
+if args.fps > 100:
+    raise SystemExit(f"--fps {args.fps} > 100 拒绝：tick {1000 / args.fps:.1f}ms 已进"
+                     "SDK 单调用时延量级，非实验范畴")
 if args.fps > 40:
-    raise SystemExit(f"--fps {args.fps} > 40 拒绝：tick {1000 / args.fps:.1f}ms 低于"
-                     "取图+SDK 硬开销 ~25ms，必然连续丢拍")
+    # 2026-10-26 用户申请 50Hz 超频实验，40+ 从硬拒改放行+大字警告：
+    # tick <25ms 下超预算拍=丢拍重锚（绝对截止配速不追发，滑点自查）。
+    # 50Hz 工程建议：每拍 1 帧（per/merge≈2，如 per2/m2=50Hz 下发）——
+    # 2 帧/拍在 reserve 0 下帧距 ~10ms，读关节+爪+打印挤不进大概率串拍。
+    print(f"⚠ --fps {args.fps} 超频放行（>40 安全区）：tick {1000 / args.fps:.1f}ms "
+          "低于取图+SDK 硬开销 ~25ms，超预算拍会丢拍重锚；建议每拍 1 帧"
+          "（per/merge≈2）并盯块时长是否 >1/fps×拍数（串拍签名）")
 if args.frames_per_row < 1:
     raise SystemExit("--frames-per-row 须 ≥ 1")
 if args.rtc_horizon < 0:
