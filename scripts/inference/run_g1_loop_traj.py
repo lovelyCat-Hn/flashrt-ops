@@ -2147,6 +2147,7 @@ seam_first = None                    # 换块后首拍 |Δcmd|（接缝尖峰，
 seam_rest = []                       # 换块后其余拍 |Δcmd|（块内均值基准）
 seam_first_all = []                  # 跨块累计：每块首拍 |Δcmd|
 seam_intra_all = []                  # 跨块累计：每块块内均值 |Δcmd|
+seam_bw_all = []                     # 跨块累计：每块首拍最负分量（缝口回走，mrad）
 
 
 def seam_flush():
@@ -2529,8 +2530,14 @@ while not aborted:
             d_mrad = float(np.max(np.abs(cmd_delta))) * 1000
             if seam_first is None:
                 seam_first = d_mrad          # 接缝尖峰：换块首发 |Δcmd|
+                # 缝口回走：首拍有符号最负分量（>0=目标倒退）。|Δcmd| 无符号
+                # 看不见它——量级正常但方向倒退=伺服减速/反打，停顿主嫌疑。
+                _bw = float(np.max(-cmd_delta)) * 1000
+                seam_bw_all.append(_bw)
+                _bw_s = f" | ⚠回走{_bw:.1f}mrad" if _bw >= 0.5 else ""
             else:
                 seam_rest.append(d_mrad)
+                _bw_s = ""
             if grip_frames_all is not None:
                 # 爪随臂宏步帧流：发本拍末帧（突发完成时刻的插值目标，
                 # 与拍线 |Δcmd| 帧流口径同帧）；空突发=静默持有
@@ -2607,6 +2614,7 @@ while not aborted:
                   f" | 导程 {gap0 * 1000:5.1f} → {fr_s}"
                   f" | 残差 {err:4.1f} mrad"
                   + (f" | 合步[{tgi}]×{_grp_n}" if _is_merged else "")
+                  + _bw_s
                   + f" | {gp if gp else st}")
 
     # ── 出口：最后一块消费到水位（或包络截短后耗尽）──
@@ -2671,6 +2679,12 @@ if seam_first_all:
           + (f"（合步口径：首发含 {args.cmd_every} 行组差，勿与直发跑直比）"
              if args.cmd_every > 1 else "")
           + (f" | 搭接触发 {blend_hits} 块" if args.blend else ""))
+if seam_bw_all:
+    _bw = np.asarray(seam_bw_all, float)
+    print(f"缝口回走（换块首拍最负分量，>0=目标倒退）: 块 {len(_bw)} | "
+          f"p50/p90/max {np.percentile(_bw, 50):.1f}/{np.percentile(_bw, 90):.1f}/"
+          f"{_bw.max():.1f} mrad | ≥2mrad {int((_bw >= 2).sum())} 块"
+          f"（回走大=伺服减速/反打，停顿嫌疑；对比 154843 好感基线）")
 if args.entry_match and entries:
     _e = np.asarray(entries, float)              # 仅块 2+ 追加（首块无入口）
     print(f"入口匹配: 块 {len(_e)} | j min/p50/max "
