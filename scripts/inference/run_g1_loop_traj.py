@@ -235,6 +235,18 @@ ap.add_argument("--seam-alpha", type=float, default=0.0,
                      "一次放出成新凸点）。削块首 EMA 衰减尾峰值，稳态零税")
 ap.add_argument("--seam-beats", type=int, default=4,
                 help="接缝窗拍数=α 爬坡长（默认 4）；--seam-alpha 0 时无效")
+ap.add_argument("--seam-boost-alpha", type=float, default=0.0,
+                help="接缝 α 助推起点（0=关，默认）：与 --seam-alpha 反向的块首"
+                     "α 调度——换块 EMA 重播回 last_tgt 清零了速度状态，命令速"
+                     "度块首=α×模型速度、τ=1/α≈整块（水位0 短块永远在瞬态，"
+                     "160323 停顿案）；块首几拍用大 α（如 0.5）快速重建速度，"
+                     "此后线性落回主 α。稳态纹理(主 α)与缝口速度两头兼得；"
+                     "α=0.3 全程版对照=残差 p50 11.6→20.7 纹理粗 50%%（161429）"
+                     "勿再走。与 --seam-alpha 互斥，须 --filter-alpha>0 且小于"
+                     "本值")
+ap.add_argument("--seam-boost-beats", type=int, default=4,
+                help="接缝助推拍数=α 从 boost 落回主 α 的窗长（默认 4）；"
+                     "--seam-boost-alpha 0 时无效")
 ap.add_argument("--aggregate-fn", dest="aggregate_fn",
                 choices=("weighted_average", "latest_only", "average",
                          "conservative"),
@@ -678,6 +690,21 @@ if args.seam_overlap_alpha > 0:
     if args.ema_alpha > 0:
         print("⚠ --fusion-alpha 与 --filter-alpha 同开：EMA 再滤一遍混接行，"
               "收敛新计划更慢（同事栈臂维无 EMA）；A/B 判读时注意此差异")
+if args.seam_boost_alpha > 0:
+    if args.seam_alpha > 0:
+        raise SystemExit("--seam-boost-alpha 与 --seam-alpha 互斥：同为块首 α "
+                         "调度但方向相反（boost=大 α 起步落回主 α 补速度，"
+                         "seam-ramp=小 α 起步爬回主 α 削脉冲），叠加无定义")
+    if args.ema_alpha <= 0:
+        raise SystemExit("--seam-boost-alpha 须配 --filter-alpha>0：助推作用在"
+                         "EMA 调度上，无滤波则无对象")
+    if args.seam_boost_alpha <= args.ema_alpha:
+        raise SystemExit(f"--seam-boost-alpha {args.seam_boost_alpha:g} 须大于 "
+                         f"--filter-alpha {args.ema_alpha:g}（助推=块首比稳态更"
+                         "快地采纳新计划；≤主 α 无意义）")
+    if args.seam_overlap_alpha > 0:
+        raise SystemExit("--seam-boost-alpha 与重叠混接互斥（同管块首 EMA "
+                         "调度，latest_only+merge 线才需要助推）")
 if args.fps > 40:
     raise SystemExit(f"--fps {args.fps} > 40 拒绝：tick {1000 / args.fps:.1f}ms 低于"
                      "取图+SDK 硬开销 ~25ms，必然连续丢拍")
@@ -776,6 +803,8 @@ print(f"[loop-traj] tick {TICK * 1000:.1f} ms（{args.fps} Hz）| 轨迹流 "
          + ")" if args.entry_match else "")
       + (f" | 接缝α{args.seam_alpha}→{args.ema_alpha}/{args.seam_beats}拍"
          if args.seam_alpha > 0 and args.ema_alpha > 0 else "")
+      + (f" | 接缝助推α{args.seam_boost_alpha}→{args.ema_alpha}/{args.seam_boost_beats}拍"
+         if args.seam_boost_alpha > 0 and args.ema_alpha > 0 else "")
       + (f" | 重叠混接 旧{1 - args.seam_overlap_alpha:g}/新{args.seam_overlap_alpha:g}"
          if args.seam_overlap_alpha > 0 else "")
       + (" | 偏移平移" if args.ref_offset else "")
@@ -1769,9 +1798,20 @@ def build_rows(cur, prev0=None, offset=None, seam=False):
         _ramp = seam and args.seam_alpha > 0 and _EMA_STATE is not None
         a_seam = float(args.seam_alpha)
         n_sb = max(1, int(args.seam_beats))
+        # 接缝 α 助推（--seam-boost-alpha，2026-10-26 块间停顿案 160323）：
+        # 与 seam-ramp 反向。换块 EMA 重播回 last_tgt（防瞬移修正）清零了
+        # 速度状态 → 命令速度块首=α×模型速度、τ=1/α≈整块，水位0 短块(11拍)
+        # 永在瞬态=目视停顿；块首 n 拍用大 α 快速重建速度再线性落回主 α，
+        # 稳态纹理零税。α 全程 0.3 对照=纹理粗 50%（161429 残差 p50
+        # 11.6→20.7），勿再走。与 _ramp 互斥（守卫把关，此处 boost 优先）。
+        _boost = args.seam_boost_alpha > 0 and _EMA_STATE is not None
+        a_boost = float(args.seam_boost_alpha)
+        n_bb = max(1, int(args.seam_boost_beats))
         acc = None
         for kk in range(len(rows)):
-            if _ramp:
+            if _boost:
+                a_k = a_boost + (a - a_boost) * min(kk, n_bb) / n_bb
+            elif _ramp:
                 a_k = a_seam + (a - a_seam) * min(kk, n_sb) / n_sb
             else:
                 a_k = a
