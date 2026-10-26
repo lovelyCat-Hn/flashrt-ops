@@ -683,7 +683,11 @@ if args.entry_match:
         raise SystemExit("--entry-match 须配 --filter-alpha>0：方向/导程判据作用在"
                          "滤波后的行序列上，裸行序列的模型抖动会打死方向门"
                          "（回放台 v1 教训）")
-if args.seam_overlap_alpha > 0:
+if 0 < args.seam_overlap_alpha < 1:
+    # 真混接（0<α<1）才需要独占缝口机制；latest_only（α=1.0=新块全量，
+    # 旧流权重 0）惯性项恒等、运行时 _ovp 另有 merge<=1 旁路——d21f155
+    # 同类修正：勿把「混接关」当「混接开」拒掉（3057676 放行 ref-offset
+    # 后在此首次踩中）。
     _ovp_bad = [n for n, _on in (
         ("--entry-match", args.entry_match),
         ("--seam-alpha", args.seam_alpha > 0),
@@ -692,7 +696,7 @@ if args.seam_overlap_alpha > 0:
     if _ovp_bad:
         raise SystemExit(f"--aggregate-fn/--fusion-alpha 与 {_ovp_bad} 互斥：重叠混接以"
                          "「旧流惯性项」取代全部缝口机制（同事栈语义），叠加会"
-                         "双重滤波")
+                         "双重滤波（latest_only=α1.0 不受此限）")
     if not args.skip_install:
         raise SystemExit("--fusion-alpha 须配 --skip-frames：混接对齐键="
                          "「取图→落地流逝拍数」，即跳帧安装的偏移；无对齐则新旧"
