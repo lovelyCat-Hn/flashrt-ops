@@ -91,6 +91,9 @@ ap.add_argument("--mode", choices=["stream", "direct", "stepwait"], default="str
                      "stepwait=走完再发（每步收敛计时）")
 ap.add_argument("--frames-per-row", type=int, default=8)
 ap.add_argument("--interp", choices=["linear", "cubic", "quintic"], default="cubic")
+ap.add_argument("--merge", type=int, default=1,
+                help="合步：每 N 行取 1 个宏步目标（块时间 N× 压缩消耗、宏步长 ×N）；"
+                     "EMA/链钳/连续参考仍按行级语义，宏步间照常 frames-per-row 插值密发")
 ap.add_argument("--delta-max", type=float, default=0.05,
                 help="链式限幅 rad/行（与主脚本同义）")
 ap.add_argument("--ema-alpha", type=float, default=0.0, help="行目标 EMA（0=关）")
@@ -439,7 +442,8 @@ else:
 
 def build_rows(cur, tgt_blk):
     """链式限幅 + 可选 EMA（主脚本 build_rows 同构：每行 ≤±delta-max）。
-    --continuous-ref：链锚/EMA 从上一块末行接续（跨块连续参考，不回臂位重锚）。"""
+    --continuous-ref：链锚/EMA 从上一块末行接续（跨块连续参考，不回臂位重锚）。
+    --merge N：滤波后每 N 行取 1 个宏步目标（时间压缩 N×，宏步间照常帧插值）。"""
     global _chain_state
     rows = np.empty_like(tgt_blk)
     prev = np.asarray(cur, dtype=np.float32)
@@ -457,6 +461,13 @@ def build_rows(cur, tgt_blk):
         for kk in range(0 if carry else 1, len(rows)):
             acc = a * rows[kk] + (1.0 - a) * acc
             rows[kk] = acc
+    if args.merge > 1:
+        # 合步：滤波后每 N 行取 1 个宏步目标（末行必保=块尾位置/链状态不动，
+        # 时间压缩 N×；宏步长=N 行钳位后位移之和，行级 ±delta-max 语义不变）
+        idx = list(range(0, len(rows), args.merge))
+        if idx[-1] != len(rows) - 1:
+            idx.append(len(rows) - 1)
+        rows = rows[idx]
     if args.continuous_ref:
         _chain_state = rows[-1].copy()
     return rows
@@ -493,6 +504,8 @@ def send_burst(frames_idx_list, frames_all):
 print(f"[replay-bench] 模式 {args.mode} | tick {TICK*1000:.1f} ms（{args.fps} Hz）"
       + (f" | {args.frames_per_row} 帧/行（≈{args.fps*per:.0f}Hz {args.interp}）"
          f" | 突发预算 {TICK*1000 - args.burst_reserve_ms:.1f} ms/行"
+         + (f" | 合步×{args.merge}（宏步={args.merge} 行，时间压缩 {args.merge}×）"
+            if args.merge > 1 else "")
          if args.mode == "stream" else
          (f" | 走完再发：阈 {args.step_done_mrad:g} mrad / 超时 "
           f"{args.step_timeout_s:g}s / 阈下秒过"
