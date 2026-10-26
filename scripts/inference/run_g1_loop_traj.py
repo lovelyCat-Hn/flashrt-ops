@@ -66,6 +66,10 @@ RTC：--execution-horizon N > 0 时启用推理侧前缀引导（同 native，Fl
   该拍组差本来就小 ~12-20 mrad），其余拍回 30Hz 逐拍流式密随——均匀合步的
   组间大步 85-105 mrad 太肥（20261016 真机实录：块界治好但误差搬进块内），
   且流式 Pursuit 会把首组滞后自然吃回。
+  --merge N（10-26 replay 台移植）：另一种合步=等时粗化——滤波后每 N 行取
+  1 个宏步、宏步段帧按拍均分，指令沿=fps×frames-per-row/N 且发令**均匀无洞**
+  （cmd-every 是组末单发+静默拍）；与 cmd-every 族互斥，二者取一。
+  --continuous-ref：换块链从 last_tgt 接续不重锚（replay 6f52423 移植）。
 参数命名对 lerobot 术语的对照：docs/lerobot-alignment.md。
 
 ⚠ 加 --exec 会连续真实驱动双臂！安全设计（与 native 同款）：
@@ -157,6 +161,19 @@ ap.add_argument("--cmd-every-ramp", type=str, default="",
                      "（干脆度/爪沿不动）；顺带修 entry-match 锚定被首组 tgi=k+N−1 "
                      "吃掉 N−1 行的精度损失（组宽 1 时下发=锚行 j 本身）。"
                      "与 --cmd-first-only 互斥")
+ap.add_argument("--merge", type=int, default=1,
+                help="合步（等时粗化，replay 台 3b40d0e 同构移植）：滤波后每 N 行"
+                     "取 1 个宏步目标（末行必保），每宏步占 N 拍、宏步段 "
+                     "frames-per-row 帧按拍均分 → 下发 ≈fps×frames-per-row/N Hz；"
+                     "同轨迹同速同墙钟只稀疏化目标，EMA/链钳/参考连续保持行级。"
+                     "与 --cmd-every/--cmd-first-only/--cmd-every-ramp/--entry-"
+                     "match/--blend/--ref-offset/--seam-overlap-alpha 互斥；拍线"
+                     " |Δcmd| 自动切帧流口径。默认 1=关")
+ap.add_argument("--continuous-ref", action="store_true",
+                help="换块参考链从 last_tgt 接续（链钳锚+EMA 不回臂位重锚；"
+                     "replay 台同款语义，10-26 回放 A/B=块首 |Δcmd| 124→12、"
+                     "残差 p50 −56%）。与 --entry-match/--ref-offset 互斥（同管"
+                     "换块链锚）；--blend/--skip-install 自带接续无需同开。默认关")
 ap.add_argument("--entry-match", action="store_true",
                 help="入口动态匹配换块（10-17 回放台 entry-match 移植，用户提案；"
                      "与 --skip-frames/--ref-offset/--blend 互斥——本模式取代时钟"
@@ -688,6 +705,21 @@ if args.cmd_every > 1 and args.blend:
     raise SystemExit("--cmd-every > 1 与 --blend 互斥：blend 把块首重铺细步"
                      "（消块首尖峰），合步把 N 拍并 1 条大步（消指令沿密度）"
                      "——块界两套相反策略，勿混用")
+if args.merge > 1:
+    if args.cmd_every > 1 or args.cmd_first_only or args.cmd_every_ramp:
+        raise SystemExit("--merge 与 --cmd-every/--cmd-first-only/--cmd-every-"
+                         "ramp 互斥（同为合步语义，叠加无定义）")
+    if (args.entry_match or args.blend or args.ref_offset
+            or args.seam_overlap_alpha > 0):
+        raise SystemExit("--merge 与换块重构族（--entry-match/--blend/"
+                         "--ref-offset/--seam-overlap-alpha）互斥：它们重建 "
+                         "rows/frames，不认识宏步分帧结构")
+    if args.merge > args.chunk_size:
+        raise SystemExit(f"--merge {args.merge} > chunk 行数 {args.chunk_size}")
+if args.continuous_ref and (args.entry_match or args.ref_offset):
+    raise SystemExit("--continuous-ref 与 --entry-match/--ref-offset 互斥"
+                     "（同管换块链锚：入口匹配锚臂位/偏移平移 vs 链从 last_tgt "
+                     "接续，二选一）")
 TICK = 1.0 / args.fps
 GAP_EPS = 1e-4        # 行导程低于该值免突发（伺服保持）
 
@@ -1764,11 +1796,33 @@ def build_block_stream(cur, prev0=None, offset=None, seam=False):
     rows = build_rows(cur, prev0, offset, seam=seam)
     _start = (np.asarray(cur, dtype=np.float32) if prev0 is None
               else np.asarray(prev0, dtype=np.float32))
+    per = args.frames_per_row
+    if args.merge > 1:
+        # 合步（等时粗化，replay 台 3b40d0e 同构）：滤波后每 N 行取 1 个宏步
+        #（末行必保=块尾/链状态不动），宏步段 P 帧按拍均分 N 组——同轨迹同速
+        # 同墙钟只稀疏化目标，下发 ≈fps×per/N Hz。样条跑在宏步序列上（声明
+        # input_hz 仍 30=replay 同款时间折法），行级 EMA/链钳已在 build_rows
+        # 完成。返回行=重复宏步行（k 逐拍推进与水位/星饿/RTC 语义不变）。
+        idx = list(range(0, len(rows), args.merge))
+        if idx[-1] != len(rows) - 1:
+            idx[-1] = len(rows) - 1
+        rows = np.repeat(rows[idx], args.merge, axis=0)
+        n_macro = len(rows) // args.merge
+        waypoints = np.vstack([_start[None, :], rows[::args.merge]])
+        frames_all = INTERP.interpolate(waypoints)
+        if ENV_LO is not None:
+            np.clip(frames_all, ENV_LO14[None, :], ENV_HI14[None, :],
+                    out=frames_all)
+        bursts = []
+        for _m in range(n_macro):
+            for _grp in np.array_split(np.arange(_m * per, (_m + 1) * per),
+                                       args.merge):
+                bursts.append([int(i) for i in _grp])   # 空组=静默拍（per<N 时）
+        return rows, frames_all, bursts
     waypoints = np.vstack([_start[None, :], rows])
     frames_all = INTERP.interpolate(waypoints)
     if ENV_LO is not None:
         np.clip(frames_all, ENV_LO14[None, :], ENV_HI14[None, :], out=frames_all)
-    per = args.frames_per_row
     bursts = [list(range(kk * per, (kk + 1) * per)) for kk in range(len(rows))]
     return rows, frames_all, bursts
 
@@ -1963,9 +2017,12 @@ if args.do_exec:
     input(f"\n⚠ 将连续驱动双臂 {args.rounds} 块 × 至多 {len(chunk)} 拍"
           f"（tick {TICK * 1000:.1f} ms，轨迹流 {args.frames_per_row} 帧/行"
           f"≈{args.fps * args.frames_per_row}Hz {args.interp}，"
-          + (f"指令沿 合步 1/{args.cmd_every}={args.fps / args.cmd_every:.1f}Hz"
-             f"（每 {args.cmd_every} 拍 1 条）" if args.cmd_every > 1 else
-             f"指令沿 {args.fps:g}Hz 逐拍 1 条")
+          + ((f"指令沿 合步 1/{args.cmd_every}={args.fps / args.cmd_every:.1f}Hz"
+              f"（每 {args.cmd_every} 拍 1 条）" if args.cmd_every > 1 else
+              (f"指令沿 合步×{args.merge}={args.fps * args.frames_per_row / args.merge:.0f}Hz"
+               f"（目标 {args.fps // args.merge}Hz 宏步、每宏步 {args.merge} 拍、"
+               f"拍线|Δcmd|=帧流口径）" if args.merge > 1 else
+               f"指令沿 {args.fps:g}Hz 逐拍 1 条")))
           + (f"，tfs {args.tfs_ms:g} ms" if args.tfs_ms > 0 else "")
           + f"，链式限幅 ±{args.delta_max} rad/行，"
           f"漂移护栏 ±{args.max_excursion} rad"
@@ -2234,7 +2291,8 @@ while not aborted:
         # last_tgt 接续：首帧恰=last_tgt（零缝步），参考全程前向不重锚——同
         # 同事方案「执行原始计划行、无重锚」的语义。entry-match 同需参考
         # 连续（首行=last_tgt+clip 修正，与入口判据同基准）。非二者口径不变。
-        _prev0 = last_tgt if ((args.skip_install or args.entry_match)
+        _prev0 = last_tgt if ((args.skip_install or args.entry_match
+                               or args.continuous_ref)
                               and last_tgt is not None) else None
         _roff = None
         if _prev0 is not None and args.ref_offset:
@@ -2352,7 +2410,18 @@ while not aborted:
                    (min(k + args.cmd_every - 1, len(rows_abs) - 1) if _is_merged else k))
             cur = read_joints(robot, ARM_NAMES)
             tgt = rows_abs[tgi]
-            cmd_delta = (tgt - last_tgt) if last_tgt is not None else np.zeros_like(tgt)
+            gap0 = float(np.max(np.abs(tgt - cur)))
+            # 拍线 |Δcmd| 口径（replay 台 cd4c1a3 同构）：merge 模式记真实下发
+            # 帧流——发送拍=本拍最后发送帧 vs 上次发送帧，免发拍持有上次
+            # （帧+0.0=真原地、免发=静默）；merge=1 行目标口径不变
+            #（接缝尖峰 seam_first 历史可比）。
+            if args.merge > 1:
+                _ref_new = (frames_all[bursts[tgi][-1]]
+                            if (gap0 >= GAP_EPS and bursts[tgi]) else last_tgt)
+            else:
+                _ref_new = tgt
+            cmd_delta = ((_ref_new - last_tgt) if last_tgt is not None
+                         else np.zeros_like(tgt))
             d_mrad = float(np.max(np.abs(cmd_delta))) * 1000
             if seam_first is None:
                 seam_first = d_mrad          # 接缝尖峰：换块首发 |Δcmd|
@@ -2361,7 +2430,6 @@ while not aborted:
             gp = (send_grip_joint(robot, chunk[tgi], args.tfs_ms / 1000.0)
                   if args.grip_path == "joint"
                   else send_grip(robot, chunk[tgi]))
-            gap0 = float(np.max(np.abs(tgt - cur)))
             if (args.entry_match and gap0 >= GAP_EPS
                     and _grp_n == args.cmd_every):
                 # g₀ 滚动窗：只记实发拍（免发拍污染中位），同回放台口径
@@ -2410,16 +2478,19 @@ while not aborted:
                 skip_sends += 1
                 n_fr = 0
                 st = "held（导程≈0 免发）"
-            last_tgt = tgt.copy()
+            last_tgt = _ref_new.copy() if _ref_new is not None else None
             k += 1
             ach = read_joints(robot, ARM_NAMES)
             err = float(np.max(np.abs(ach - tgt))) * 1000
             track_err.append(err)
             # 合步拍打实际下发沿频率（沿=fps/组宽，ramp 变宽逐拍如实）；
             # 流式拍维持 @参考流密度 旧口径（fps×frames_per_row）
-            fr_s = ((f"{n_fr}帧·沿{args.fps / _grp_n:.0f}Hz" if _is_merged
-                     else f"{n_fr}帧@{args.fps * args.frames_per_row:.0f}Hz")
-                    if n_fr else "· 免发 ·")
+            if n_fr:
+                fr_s = (f"{n_fr}帧·沿{args.fps / _grp_n:.0f}Hz" if _is_merged
+                        else f"{n_fr}帧@{args.fps * args.frames_per_row / args.merge:.0f}Hz")
+            else:
+                fr_s = ("· 无帧 ·" if (args.merge > 1 and not bursts[tgi])
+                        else "· 免发 ·")
             print(f"  拍{k - 1}: |Δcmd| {d_mrad:5.1f} mrad"
                   f" | 导程 {gap0 * 1000:5.1f} → {fr_s}"
                   f" | 残差 {err:4.1f} mrad"
