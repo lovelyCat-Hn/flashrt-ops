@@ -702,9 +702,10 @@ if args.seam_boost_alpha > 0:
         raise SystemExit(f"--seam-boost-alpha {args.seam_boost_alpha:g} 须大于 "
                          f"--filter-alpha {args.ema_alpha:g}（助推=块首比稳态更"
                          "快地采纳新计划；≤主 α 无意义）")
-    if args.seam_overlap_alpha > 0:
-        raise SystemExit("--seam-boost-alpha 与重叠混接互斥（同管块首 EMA "
-                         "调度，latest_only+merge 线才需要助推）")
+    if 0 < args.seam_overlap_alpha < 1:
+        raise SystemExit("--seam-boost-alpha 与重叠混接（weighted_average/average）"
+                         "互斥：同管块首 EMA 调度；latest_only（α=1.0=混接关）"
+                         "不受限")
 if args.fps > 40:
     raise SystemExit(f"--fps {args.fps} > 40 拒绝：tick {1000 / args.fps:.1f}ms 低于"
                      "取图+SDK 硬开销 ~25ms，必然连续丢拍")
