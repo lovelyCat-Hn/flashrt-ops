@@ -509,7 +509,8 @@ print(f"[replay-bench] 模式 {args.mode} | tick {TICK*1000:.1f} ms（{args.fps}
       + (f" | {args.frames_per_row} 帧/行（≈{args.fps*per/args.merge:.0f}Hz {args.interp}）"
          f" | 突发预算 {TICK*1000 - args.burst_reserve_ms:.1f} ms/行"
          + (f" | 合步×{args.merge}（目标 {args.fps//args.merge}Hz 宏步、每宏步 "
-            f"{args.merge} 拍、下发 ≈{args.fps*per/args.merge:.0f}Hz，块墙钟不变）"
+            f"{args.merge} 拍、下发 ≈{args.fps*per/args.merge:.0f}Hz，块墙钟不变；"
+            f"拍线|Δcmd|按下发帧流记）"
             if args.merge > 1 else "")
          if args.mode == "stream" else
          (f" | 走完再发：阈 {args.step_done_mrad:g} mrad / 超时 "
@@ -729,9 +730,6 @@ for bi, tgt_blk in enumerate(BLOCKS):
         _next_t += TICK
         cur = read_joints()                      # 拍首读实际（主脚本同序）
         tgt = rows[kk]
-        cmd_delta = ((tgt - last_tgt) if last_tgt is not None
-                     else np.zeros_like(tgt))
-        d_mrad = float(np.max(np.abs(cmd_delta))) * 1000
         gap0 = float(np.max(np.abs(tgt - cur)))
         drift = float(np.max(np.abs(tgt - start_pos)))
         if drift > args.max_excursion:
@@ -752,7 +750,20 @@ for bi, tgt_blk in enumerate(BLOCKS):
             _fr_s = (("· 无帧 ·" if not bursts[kk]
                       else f"{len(bursts[kk])}帧@{args.fps*per/args.merge:.0f}Hz")
                      if args.mode == "stream" else f"1令@{args.fps}Hz")
-        last_tgt = tgt.copy()
+        # 拍线 |Δcmd| 口径：merge 模式记真实下发帧流——发送拍=本拍最后发送帧
+        # vs 上次发送帧；静默/免发拍持有上次发送帧（Δ=0=真静默）。行目标经
+        # np.repeat 重复对齐拍，按行记账会把整宏步步长全记在首拍、其余拍恒 0，
+        # 静默与原地不可辨；帧流口径下 帧+0.0=真原地、无帧=静默。
+        # merge=1/direct 维持行目标口径（历史可比：块首拍0=α×钳位一行 校准不破）。
+        if args.mode == "stream" and args.merge > 1:
+            _ref_new = (frames_all[bursts[kk][-1]]
+                        if (gap0 >= GAP_EPS and bursts[kk]) else last_tgt)
+        else:
+            _ref_new = tgt
+        cmd_delta = ((_ref_new - last_tgt) if last_tgt is not None
+                     else np.zeros_like(tgt))
+        d_mrad = float(np.max(np.abs(cmd_delta))) * 1000
+        last_tgt = _ref_new.copy() if _ref_new is not None else None
         ach = read_joints()
         if _prev_ach is not None:
             act = float(np.max(np.abs(ach - _prev_ach))) * 1000   # 臂实际动量：0=伺服僵住（SUCCESS 但不动）
