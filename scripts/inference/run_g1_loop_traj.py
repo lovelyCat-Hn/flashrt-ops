@@ -710,10 +710,13 @@ if args.merge > 1:
         raise SystemExit("--merge 与 --cmd-every/--cmd-first-only/--cmd-every-"
                          "ramp 互斥（同为合步语义，叠加无定义）")
     if (args.entry_match or args.blend or args.ref_offset
-            or args.seam_overlap_alpha > 0):
+            or 0 < args.seam_overlap_alpha < 1):
         raise SystemExit("--merge 与换块重构族（--entry-match/--blend/"
-                         "--ref-offset/--seam-overlap-alpha）互斥：它们重建 "
-                         "rows/frames，不认识宏步分帧结构")
+                         "--ref-offset/重叠混接 weighted_average|average）互斥："
+                         "它们重建 rows/frames，不认识宏步分帧结构。"
+                         "关混接请 --aggregate-fn latest_only（α=1.0=新块全量，"
+                         "勿用 --fusion-alpha 0=全旧块卡死）；合并模式下 _ovp "
+                         "重建帧流已旁路")
     if args.merge > args.chunk_size:
         raise SystemExit(f"--merge {args.merge} > chunk 行数 {args.chunk_size}")
 if args.continuous_ref and (args.entry_match or args.ref_offset):
@@ -2113,8 +2116,13 @@ while not aborted:
         seam_flush()
         # 重叠混接门与偏移（须在跳帧安装消费 _obs_k 前捕获）：偏移=取图→落地
         # 流逝拍数=跳帧安装的 skip 数，同一把墙钟对齐键（同事栈 timestep 语义）
-        _ovp = (args.seam_overlap_alpha > 0 and n_swapped > 1
+        _ovp = (args.seam_overlap_alpha > 0 and args.merge <= 1
+                and n_swapped > 1
                 and last_tgt is not None and _old_rows_abs is not None)
+        # ⚠ merge 模式必须旁路：_ovp 块内按行网格 INTERP.interpolate 重建
+        # frames_all（n_macro×merge×per 帧），与宏步突发下标表不匹配（突发
+        # 只覆盖前 1/merge）——latest_only(α=1.0) 行混合虽是恒等，帧重建
+        # 仍是破坏性的，故 merge>1 直接关门。
         _ovp_off = max(0, prev_block_ticks - _obs_k) if _ovp else 0
         if _starve_t0 is not None:
             _d = t_tick - _starve_t0
