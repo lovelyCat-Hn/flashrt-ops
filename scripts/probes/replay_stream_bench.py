@@ -444,7 +444,7 @@ else:
 def build_rows(cur, tgt_blk):
     """链式限幅 + 可选 EMA（主脚本 build_rows 同构：每行 ≤±delta-max）。
     --continuous-ref：链锚/EMA 从上一块末行接续（跨块连续参考，不回臂位重锚）。
-    --merge N：滤波后每 N 行取 1 个宏步目标（时间压缩 N×，宏步间照常帧插值）。"""
+    --merge N：滤波后每 N 行取 1 个宏步目标（等时粗化，宏步占 N 拍）。"""
     global _chain_state
     rows = np.empty_like(tgt_blk)
     prev = np.asarray(cur, dtype=np.float32)
@@ -469,6 +469,7 @@ def build_rows(cur, tgt_blk):
         idx = list(range(0, len(rows), args.merge))
         if idx[-1] != len(rows) - 1:
             idx[-1] = len(rows) - 1   # 末行替换尾采样（宏步数=严格 ceil，墙钟精确）
+        rows = rows[idx]
     if args.continuous_ref:
         _chain_state = rows[-1].copy()
     return rows
