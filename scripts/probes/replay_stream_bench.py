@@ -482,6 +482,8 @@ def read_joints():
 
 def send_burst(frames_idx_list, frames_all):
     """帧突发：绝对截止配速（预算 tick−reserve 匀速铺满），主脚本同款。"""
+    if not frames_idx_list:
+        return None    # 空突发（per<merge 时帧按拍均分必有空拍）：本拍不发令只走节拍
     fdt = (TICK - args.burst_reserve_ms / 1000.0) / len(frames_idx_list)
     _t_f = time.perf_counter()
     for _bi, _fi in enumerate(frames_idx_list):
@@ -747,7 +749,8 @@ for bi, tgt_blk in enumerate(BLOCKS):
                     print(f"⛔ 下发非 SUCCESS（{_st}），停止")
                     _teardown()
                     os._exit(4)
-            _fr_s = (f"{len(bursts[kk])}帧@{args.fps*per/args.merge:.0f}Hz"
+            _fr_s = (("· 无帧 ·" if not bursts[kk]
+                      else f"{len(bursts[kk])}帧@{args.fps*per/args.merge:.0f}Hz")
                      if args.mode == "stream" else f"1令@{args.fps}Hz")
         last_tgt = tgt.copy()
         ach = read_joints()
