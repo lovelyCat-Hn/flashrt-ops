@@ -332,7 +332,9 @@ ap.add_argument("--ref-offset", action="store_true",
                      "刹车的来源）。把整条新计划平移 offset=last_tgt−plan[0]（逐维"
                      "钳 ±delta-max）再接参考链——块首零缝步零回走，臂速无块界刹车，"
                      "导程呼吸趋平。钳幅 ≤delta-max 不吃穿包络余量（±0.15）；超出"
-                     "部分仍按 ±delta-max 回走收敛。EMA 可叠加（块内滤抖）。默认关")
+                     "部分仍按 ±delta-max 回走收敛。EMA 可叠加（块内滤抖）。"
+                     "与 --merge/--continuous-ref 可叠加（offset 在宏步粗化"
+                     "上游生效）；仍需 --skip-frames。默认关")
 ap.add_argument("--blend", action="store_true",
                 help="换块前向搭接（10-12 回放台定案：无回摆模式最优，残差 75.5 "
                      "vs anchor 97/基线 69）：新块前 M 行不发原目标，改发旧链末"
@@ -753,23 +755,27 @@ if args.merge > 1:
     if args.cmd_every > 1 or args.cmd_first_only or args.cmd_every_ramp:
         raise SystemExit("--merge 与 --cmd-every/--cmd-first-only/--cmd-every-"
                          "ramp 互斥（同为合步语义，叠加无定义）")
-    if (args.entry_match or args.blend or args.ref_offset
+    if (args.entry_match or args.blend
             or 0 < args.seam_overlap_alpha < 1):
         raise SystemExit("--merge 与换块重构族（--entry-match/--blend/"
-                         "--ref-offset/重叠混接 weighted_average|average）互斥："
+                         "重叠混接 weighted_average|average）互斥："
                          "它们重建 rows/frames，不认识宏步分帧结构。"
                          "关混接请 --aggregate-fn latest_only（α=1.0=新块全量，"
                          "勿用 --fusion-alpha 0=全旧块卡死）；合并模式下 _ovp "
-                         "重建帧流已旁路")
+                         "重建帧流已旁路。--ref-offset 已放行：offset 在 "
+                         "build_rows 内、宏步粗化上游生效，结构兼容"
+                         "（5697eef 缝口回走遥测定案后解锁）")
     if args.merge > args.chunk_size:
         raise SystemExit(f"--merge {args.merge} > chunk 行数 {args.chunk_size}")
 else:
     if args.grip_rawrows:
         print("[config] --grip-rawrows 在 merge=1 下无差别（爪本来就走行率流）")
-if args.continuous_ref and (args.entry_match or args.ref_offset):
-    raise SystemExit("--continuous-ref 与 --entry-match/--ref-offset 互斥"
-                     "（同管换块链锚：入口匹配锚臂位/偏移平移 vs 链从 last_tgt "
-                     "接续，二选一）")
+if args.continuous_ref and args.entry_match:
+    raise SystemExit("--continuous-ref 与 --entry-match 互斥"
+                     "（同管换块链锚：入口匹配锚臂位 vs 链从 last_tgt "
+                     "接续，二选一）。--ref-offset 已放行：其锚同为 last_tgt"
+                     "（_prev0 由 skip-install/continuous-ref 提供），"
+                     "平移只加在链钳上游，二者叠加不冲突")
 TICK = 1.0 / args.fps
 GAP_EPS = 1e-4        # 行导程低于该值免突发（伺服保持）
 
