@@ -1,0 +1,10 @@
+prompt1='pick up the object'
+Put the black microfiber towel into the bin
+
+prompt1 重复 3 次:
+Put the black microfiber towel into the bin
+Put the black microfiber towel into the bin
+Put the black microfiber towel into the bin
+
+prompt2='wipe the table'
+Return to Home Position

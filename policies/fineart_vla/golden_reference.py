@@ -44,6 +44,8 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--noise-seed", type=int, default=123)
     ap.add_argument("--dir", default=DEFAULT_DIR)
+    ap.add_argument("--autocast-only", action="store_true",
+                    help="跳过 FP32 遍（复用已落盘 npz），只补 CPU autocast bf16 遍")
     args = ap.parse_args()
 
     import torch
@@ -61,9 +63,14 @@ def main() -> int:
     t0 = time.time()
     policy = FineARTVLAPolicy.from_pretrained(args.ckpt)
     policy.eval()
+    # google/paligemma-3b-pt-224 在 hf-mirror 被 403（google/* 选择性屏蔽）；
+    # 本地 sp 原件转换的 fast tokenizer 与 HF 版逐 token 等价（已对拍实证）。
+    tok_dir = os.path.expanduser("~/holy/models/paligemma_sp224")
     pre = DataProcessorPipeline.from_pretrained(
         args.ckpt, "policy_preprocessor.json",
-        overrides={"device_processor": {"device": "cpu"}})
+        overrides={"device_processor": {"device": "cpu"},
+                   "fineart_vla_text_tokenizer": {"tokenizer_name": tok_dir},
+                   "action_tokenizer_processor": {"paligemma_tokenizer_name": tok_dir}})
     post = DataProcessorPipeline.from_pretrained(args.ckpt, "policy_postprocessor.json")
     print(f"      {time.time() - t0:.1f}s")
 
@@ -79,32 +86,52 @@ def main() -> int:
     ref_ids_valid = ref_ids[:n_valid]
     print(f"      prompt tokens: {n_valid}/{len(ref_ids)}")
 
-    print("[3/4] predict_action_chunk FP32（固定 noise）")
-    t0 = time.time()
-    with torch.no_grad():
-        chunk32 = policy.predict_action_chunk(
-            processed, noise=torch.from_numpy(noise).unsqueeze(0))
-    acts32 = post({"action": chunk32})
-    acts32 = np.asarray(acts32["action"] if isinstance(acts32, dict) else acts32,
-                        dtype=np.float32).reshape(-1, chunk32.shape[-1])
-    print(f"      FP32 {time.time() - t0:.1f}s → {acts32.shape}")
-
-    print("[4/4] predict_action_chunk BF16（同 noise，对齐引擎精度口径）")
-    t0 = time.time()
-    policy_bf16 = policy.to(torch.bfloat16)
-    with torch.no_grad():
-        chunk16 = policy_bf16.predict_action_chunk(
-            processed, noise=torch.from_numpy(noise).unsqueeze(0).to(torch.bfloat16))
-    acts16 = post({"action": chunk16})
-    acts16 = np.asarray(acts16["action"] if isinstance(acts16, dict) else acts16,
-                        dtype=np.float32).reshape(-1, chunk16.shape[-1])
-    print(f"      BF16 {time.time() - t0:.1f}s → {acts16.shape}")
-
+    print("[3/4] predict_action_chunk FP32（固定 noise）", flush=True)
     out_dir = pathlib.Path(args.dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    np.savez(out_dir / "reference.npz", actions_fp32=acts32, actions_bf16=acts16,
-             prompt_ids=np.array(ref_ids_valid, dtype=np.int64),
-             raw_state=raw_state, noise=noise)
+    if args.autocast_only:
+        print("      --autocast-only：跳过 FP32 遍，复用已落盘 npz", flush=True)
+        prev = np.load(out_dir / "reference.npz")
+        acts32 = prev["actions_fp32"]
+        ref_ids_valid = prev["prompt_ids"]
+    else:
+        t0 = time.time()
+        with torch.no_grad():
+            chunk32 = policy.predict_action_chunk(
+                processed, noise=torch.from_numpy(noise).unsqueeze(0))
+        acts32 = post({"action": chunk32})
+        acts32 = np.asarray(acts32["action"] if isinstance(acts32, dict) else acts32,
+                            dtype=np.float32).reshape(-1, chunk32.shape[-1])
+        print(f"      FP32 {time.time() - t0:.1f}s → {acts32.shape}", flush=True)
+
+        # FP32 先落盘（BF16 遍万一失败不白算 20+ 分钟 CPU）
+        np.savez(out_dir / "reference.npz", actions_fp32=acts32,
+                 prompt_ids=np.array(ref_ids_valid, dtype=np.int64),
+                 raw_state=raw_state, noise=noise)
+        print(f"      FP32 已落盘 {out_dir}/reference.npz", flush=True)
+
+    # BF16 遍 = CPU autocast（权重留 fp32，matmul 动态转 bf16，fp32 累积
+    # 语义最贴近引擎 GPU bf16）。不用 policy.to(bf16)：sample_actions 里
+    # noise/time 强转 fp32（modeling_pi05.py euler 循环），与 bf16 权重
+    # 混 dtype 必炸（2026-10-27 两次实证）。
+    print("[4/4] predict_action_chunk CPU autocast BF16（同 noise）", flush=True)
+    try:
+        import torch._dynamo as _dynamo
+        _dynamo.config.disable = True  # inductor bf16 图缓存前科
+        t0 = time.time()
+        with torch.autocast("cpu", dtype=torch.bfloat16), torch.no_grad():
+            chunk16 = policy.predict_action_chunk(
+                processed, noise=torch.from_numpy(noise).unsqueeze(0))
+        acts16 = post({"action": chunk16.float()})
+        acts16 = np.asarray(acts16["action"] if isinstance(acts16, dict) else acts16,
+                            dtype=np.float32).reshape(-1, chunk16.shape[-1])
+        print(f"      autocast BF16 {time.time() - t0:.1f}s → {acts16.shape}", flush=True)
+        np.savez(out_dir / "reference.npz", actions_fp32=acts32, actions_bf16=acts16,
+                 prompt_ids=np.array(ref_ids_valid, dtype=np.int64),
+                 raw_state=raw_state, noise=noise)
+    except Exception as e:  # noqa: BLE001 —— BF16 遍失败不废 FP32 金标
+        print(f"      ⚠ BF16 遍失败（{type(e).__name__}: {str(e)[:120]}），仅落 FP32", flush=True)
+
     (out_dir / "reference_meta.json").write_text(json.dumps({
         "task": args.task, "seed": args.seed, "noise_seed": args.noise_seed,
         "ckpt": args.ckpt, "prompt_token_len": n_valid,

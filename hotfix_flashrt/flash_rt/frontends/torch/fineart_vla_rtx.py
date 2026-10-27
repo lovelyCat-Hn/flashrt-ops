@@ -47,10 +47,18 @@ logger = logging.getLogger(__name__)
 
 class FineARTVLATorchFrontendRtx(Pi05TorchFrontendRtx):
     """π0.5-compatible frontend + (planned) System 2 text decode."""
-
     # Key inside the raw lerobot safetensors (the ``model.`` wrap is
     # auto-stripped the same way convert_pi05_safetensors does).
     TEXT_LM_HEAD_KEY = "paligemma_with_expert.paligemma.lm_head.weight"
+    # Input embedding table — UNTIED from lm_head in FineART-VLA
+    # checkpoints (row cos ≈ 0.87–0.97: same init, drifted apart in
+    # fine-tuning). The inherited π0.5 path reuses ``lm_head.weight``
+    # as the embedding table, which is only correct for openpi's tied
+    # weights — caught by the 2026-10-27 parity golden (prefix-embed
+    # cos ≈0.9 → action cos 0.40). System 1's prompt embedding must
+    # look up this table; text-decode already does (see Stage 2b).
+    EMBED_TABLE_KEY = ("paligemma_with_expert.paligemma.model."
+                       "language_model.embed_tokens.weight")
 
     def __init__(self, checkpoint_dir, num_views=3, action_dim=14,
                  num_steps=None, **kwargs):
@@ -65,9 +73,41 @@ class FineARTVLATorchFrontendRtx(Pi05TorchFrontendRtx):
                          action_dim=action_dim,
                          **({"num_steps": num_steps}
                             if num_steps is not None else {}), **kwargs)
+
         self._checkpoint_dir = pathlib.Path(checkpoint_dir)
         self._text_lm_head = None
+        self._embed_table = None
         self._subtask_decoder = None
+
+    def _ensure_embed_table(self):
+        """Lazy-load the untied input embedding table → CUDA bf16.
+
+        FineART-VLA fine-tunes ``embed_tokens.weight`` separately from
+        ``paligemma.lm_head.weight``; System 1 prompt embedding must
+        look up the former (see EMBED_TABLE_KEY for the parity story).
+        """
+        if self._embed_table is None:
+            import torch
+            from safetensors import safe_open
+            from flash_rt.executors.torch_weights import (
+                _autodetect_strip_prefix,
+            )
+
+            path = self._checkpoint_dir / "model.safetensors"
+            with safe_open(str(path), framework="pt", device="cpu") as f:
+                keys = set(f.keys())
+                strip = _autodetect_strip_prefix(keys)
+                key = (strip + self.EMBED_TABLE_KEY) if strip \
+                    else self.EMBED_TABLE_KEY
+                if key not in keys:
+                    raise KeyError(
+                        f"{self.EMBED_TABLE_KEY} not found in {path} "
+                        "(is this a FineART-VLA checkpoint?)")
+                self._embed_table = f.get_tensor(key).to(
+                    "cuda", torch.bfloat16, non_blocking=True)
+            logger.info("FineART-VLA embed table loaded (untied): %s",
+                        tuple(self._embed_table.shape))
+        return self._embed_table
 
     def _ensure_text_lm_head(self):
         """Lazy-load paligemma.lm_head [257152, 2048] → CUDA bf16.
@@ -190,7 +230,7 @@ class FineARTVLATorchFrontendRtx(Pi05TorchFrontendRtx):
             return hit
         token_ids = torch.tensor(self._fineart_prompt_ids(prompt_text, state),
                                  dtype=torch.long, device="cuda")
-        weight = self.embedding_weight
+        weight = self._ensure_embed_table()  # untied — see EMBED_TABLE_KEY
         if weight.device.type != "cuda":
             weight = weight.to("cuda")
         embeds = (F.embedding(token_ids, weight)

@@ -29,8 +29,9 @@ def main() -> int:
     eng = np.load(d / "engine.npz")
     ref = np.load(d / "reference.npz")
     e = eng["actions"].astype(np.float64)
+    has_bf16 = "actions_bf16" in ref
     print(f"engine {e.shape} vs reference fp32 {ref['actions_fp32'].shape} "
-          f"bf16 {ref['actions_bf16'].shape}")
+          f"bf16 {ref['actions_bf16'].shape if has_bf16 else '无'}")
 
     ids_e = eng["prompt_ids"].tolist()
     ids_r = ref["prompt_ids"].tolist()
@@ -45,8 +46,11 @@ def main() -> int:
 
     report = {"tokens_equal": tokens_equal}
     rf32 = ref["actions_fp32"].reshape(e.shape).astype(np.float64)
-    r16 = ref["actions_bf16"].reshape(e.shape).astype(np.float64)
+    r16 = ref["actions_bf16"].reshape(e.shape).astype(np.float64) if has_bf16 else None
     for name, r in (("bf16", r16), ("fp32", rf32)):
+        if r is None:
+            print(f"[2] engine vs {name}: 参考侧本遍未产出（跳过）")
+            continue
         cos_all = _cos(e, r)
         per_dim = [float(_cos(e[:, i], r[:, i])) for i in range(e.shape[-1])]
         diff = float(np.abs(e - r).max())
@@ -58,10 +62,13 @@ def main() -> int:
               f"max|Δ|={diff:.4g}")
         print(f"    逐维 cos: {[round(c, 4) for c in per_dim]}")
 
-    ok = tokens_equal and report["cos_min_dim_bf16"] >= 0.999
+    judge_key = "cos_min_dim_bf16" if has_bf16 else "cos_min_dim_fp32"
+    ok = tokens_equal and report[judge_key] >= 0.999
     report["pass"] = bool(ok)
+    report["judge_key"] = judge_key
     (d / "compare.json").write_text(json.dumps(report, indent=2))
-    print(f"{'✅ 金标通过' if ok else '❌ 金标未过'}（判据=token 逐位一致 且 逐维 cos(bf16) ≥ 0.999）")
+    print(f"{'✅ 金标通过' if ok else '❌ 金标未过'}"
+          f"（判据=token 逐位一致 且 逐维 cos({judge_key.split('_')[-1]}) ≥ 0.999）")
     print(f"落盘 {d}/compare.json")
     return 0 if ok else 1
 
