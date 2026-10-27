@@ -10,6 +10,7 @@ G1 人形机器人 pi0.5/FlashRT 推理部署与运维仓库（Jetson Orin，L4T
 | [USAGE.md](USAGE.md) | 日常操作手册（闭环执行器/编排器/使用配方） |
 | [BENCHMARKS.md](BENCHMARKS.md) | 基准数据报表（零判读，只收数据表+条件+复现命令；旧档 BENCHMARKS_ARCHIVE.md） |
 | [COMMANDS.md](COMMANDS.md) | 常用命令速查 |
+| [S1_MAINTENANCE.md](S1_MAINTENANCE.md) | S1 机维护手册（本机档案/部署状态/待办；关节速查见 docs/s1-joint-api-quickref.md） |
 
 ## 目录速览
 
