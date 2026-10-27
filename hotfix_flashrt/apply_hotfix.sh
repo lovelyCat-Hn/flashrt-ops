@@ -22,7 +22,8 @@
 #             hardware/__init__.py（_PIPELINE_MAP + _SM87_ALLOWED 各 +1 行）、
 #             api.py（config 白名单 + fineart_vla）、
 #             frontends/torch/fineart_vla_rtx.py（pi05 子类 + 懒加载 text lm_head，
-#             generate_subtask=Stage 2b 已移植）、models/fineart_vla/__init__.py、
+#             generate_subtask=Stage 2b 已移植，fineart prompt 模板覆盖
+#             User: {task}, State: {bins};\n）、models/fineart_vla/__init__.py、
 #             models/fineart_vla/text_decode_rtx.py（纯 torch PaliGemma 解码器，
 #             lerobot select_message 贪心口径；冒烟 evidence/20261027_153444）。
 #             System 1 = pi05 前端原样继承；权重 = lerobot HF release 目录原样。
@@ -49,7 +50,7 @@ probe() {  # 0=补丁已在, 1=缺
         && grep -q "FVK_PI05_RTX_W8A16_DECODER" "$DST/flash_rt/frontends/torch/pi05_rtx.py" 2>/dev/null \
         && grep -q "use_w8a16_decoder" "$DST/flash_rt/models/pi05/pipeline_rtx.py" 2>/dev/null \
         && grep -q "FineARTVLATorchFrontendRtx" "$DST/flash_rt/hardware/__init__.py" 2>/dev/null \
-        && grep -q "_ensure_subtask_decoder" "$DST/flash_rt/frontends/torch/fineart_vla_rtx.py" 2>/dev/null \
+        && grep -q "_fineart_prompt_ids" "$DST/flash_rt/frontends/torch/fineart_vla_rtx.py" 2>/dev/null \
         && [ -f "$DST/flash_rt/frontends/torch/fineart_vla_rtx.py" ] 2>/dev/null \
         && [ -f "$DST/flash_rt/models/fineart_vla/text_decode_rtx.py" ] 2>/dev/null
 }

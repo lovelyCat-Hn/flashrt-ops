@@ -40,7 +40,7 @@ from __future__ import annotations
 import logging
 import pathlib
 
-from flash_rt.frontends.torch.pi05_rtx import Pi05TorchFrontendRtx
+from flash_rt.frontends.torch.pi05_rtx import Pi05TorchFrontendRtx, _PromptEmbedCache
 
 logger = logging.getLogger(__name__)
 
@@ -140,3 +140,63 @@ class FineARTVLATorchFrontendRtx(Pi05TorchFrontendRtx):
             self._subtask_decoder = SubtaskDecoder(
                 self._checkpoint_dir, device=str(head.device), lm_head=head)
         return self._subtask_decoder
+
+    # ── System 1 prompt format ─────────────────────────────────────
+    # The inherited π0.5 path tokenizes with the openpi template
+    # ``Task: {task}, State: {bins};\nAction: `` (pi05_prompt.
+    # format_pi05_prompt). This checkpoint was trained on the fineart
+    # role-delimited recipe instead (lerobot processor chain: task
+    # fallback in FineARTVLATextTokenizerStep → stream "low_level" →
+    # state injected, no "Assistant:" tail — that suffix belongs to the
+    # System 2 query path): ``User: {task}, State: {bins};\n``. State
+    # discretization math is identical on both sides (digitize on
+    # linspace(-1,1,257)[:-1] minus 1), so only the wrapper text
+    # differs — hence this override of _embed_prompt_cached.
+
+    def _fineart_prompt_ids(self, prompt_text: str, state=None) -> list:
+        """Fineart action-path prompt token ids: ``[bos] + Encode(text)``.
+
+        ``state`` = *normalized* 14-dim state (quantile-normalized to
+        [−1,1] by the caller — the engine has no separate state input,
+        pi05-style state lives only in the prompt).
+        """
+        import torch.nn.functional as F  # noqa: F401  (parity with inherited embed path)
+        from flash_rt.core.utils.pi05_prompt import discretize_pi05_state
+        from flash_rt.utils.paligemma_tokenizer import (
+            load_paligemma_sentencepiece,
+        )
+
+        sp = load_paligemma_sentencepiece()
+        cleaned = str(prompt_text).strip().replace("_", " ").replace("\n", " ")
+        if state is None:
+            text = cleaned
+        else:
+            bins = discretize_pi05_state(state)
+            text = f"User: {cleaned}, State: {' '.join(map(str, bins.tolist()))};\n"
+        return list(sp.Encode(text, add_bos=True))
+
+    def _embed_prompt_cached(self, prompt_text, max_len, state=None):
+        """Fineart override: fineart template + inherited embedding math."""
+        import numpy as np
+        import torch
+        import torch.nn.functional as F  # noqa: N812
+
+        cache = getattr(self, "_prompt_embed_cache", None)
+        if cache is None:
+            cache = self._prompt_embed_cache = _PromptEmbedCache()
+        key = _PromptEmbedCache.key(prompt_text, max_len, state)
+        hit = cache.get(key) if state is None else None
+        if hit is not None:
+            return hit
+        token_ids = torch.tensor(self._fineart_prompt_ids(prompt_text, state),
+                                 dtype=torch.long, device="cuda")
+        weight = self.embedding_weight
+        if weight.device.type != "cuda":
+            weight = weight.to("cuda")
+        embeds = (F.embedding(token_ids, weight)
+                  * float(weight.shape[-1] ** 0.5)).contiguous()
+        host = np.ascontiguousarray(embeds.view(torch.uint16).cpu().numpy())
+        hit = (embeds, int(token_ids.numel()), host)
+        if state is None:
+            cache.put(key, hit)
+        return hit

@@ -1,0 +1,11 @@
+{
+  "task": "pick up the object",
+  "seed": 7,
+  "noise_seed": 123,
+  "ckpt": "/home/galbot/holy/models/fineart_vla_midtrained",
+  "prompt_token_len": 55,
+  "actions_shape": [
+    50,
+    14
+  ]
+}
