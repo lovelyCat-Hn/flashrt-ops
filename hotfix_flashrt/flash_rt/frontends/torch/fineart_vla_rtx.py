@@ -23,9 +23,11 @@ autoregressive decode over the gemma_2b prefix KV cache against
 suppress ``<locXXXXX>`` ids for subtask generation); FlashRT-side
 AR-decode machinery precedent = ``frontends/torch/pi0fast.py``.
 
-Status (2026-10-27): registration skeleton. System 1 works end-to-end
-through ``load_model(config="fineart_vla", num_views=3)``;
-``generate_subtask`` is not ported yet (Stage 2b).
+Status (2026-10-27): System 1 works end-to-end through
+``load_model(config="fineart_vla", num_views=3)``; System 2 subtask
+decode lives in ``flash_rt.models.fineart_vla.text_decode_rtx``
+(pure-torch PaliGemma port — no transformers dependency), lazily
+built on the first ``generate_subtask`` call.
 
 Checkpoint = the lerobot HF release directory as-is (config.json +
 model.safetensors + pre/postprocessor + action_tokenizer); base is
@@ -65,6 +67,7 @@ class FineARTVLATorchFrontendRtx(Pi05TorchFrontendRtx):
                             if num_steps is not None else {}), **kwargs)
         self._checkpoint_dir = pathlib.Path(checkpoint_dir)
         self._text_lm_head = None
+        self._subtask_decoder = None
 
     def _ensure_text_lm_head(self):
         """Lazy-load paligemma.lm_head [257152, 2048] → CUDA bf16.
@@ -96,15 +99,44 @@ class FineARTVLATorchFrontendRtx(Pi05TorchFrontendRtx):
                         tuple(self._text_lm_head.shape))
         return self._text_lm_head
 
-    def generate_subtask(self, prompt_text: str,
-                         max_new_tokens: int = 128,
-                         temperature: float = 0.0) -> str:
-        """Stage 2b (not ported): greedy subtask decode, lerobot
-        ``select_message`` parity target."""
-        raise NotImplementedError(
-            "FineART-VLA System 2 text decode is not ported yet; "
-            "System 1 (action chunks) works via the inherited π0.5 path. "
-            "Port plan: prefix embed via the existing prompt path → "
-            "greedy AR loop on paligemma KV cache against "
-            "_ensure_text_lm_head(), <loc> id suppression per lerobot "
-            "select_message; decode-graph precedent = pi0fast.py.")
+    def generate_subtask(self, prompt_text: str, images=None, *,
+                         max_new_tokens: int = 128, temperature: float = 0.0,
+                         top_p: float = 1.0) -> str:
+        """System 2: greedy subtask decode, lerobot ``select_message``
+        parity target (greedy temperature=0, KV cache, ``<loc…>`` id
+        suppression, eos stop).
+
+        ``images``: optional observation dict — same keys the flow path
+        consumes (``image``, ``wrist_image``, ``wrist_image_right`` if
+        num_views>=3), np uint8 HWC at any resolution (resized to 224²
+        with padding internally). ``None`` → text-only prefix (all view
+        masks False). Decode cadence is caller-controlled: System 1
+        keeps running π0.5-style on fixed subtask text between calls.
+        """
+        decoder = self._ensure_subtask_decoder()
+        return decoder.generate(
+            prompt_text, self._order_views(images),
+            max_new_tokens=max_new_tokens, temperature=temperature,
+            top_p=top_p)
+
+    def _order_views(self, images):
+        """Same view order the π0.5 flow path uses (pi05_rtx img_list)."""
+        if images is None:
+            return [None] * self.num_views
+        if isinstance(images, dict):
+            keys = ["image", "wrist_image"]
+            if self.num_views >= 3:
+                keys.append("wrist_image_right")
+            return [images.get(k) for k in keys[: self.num_views]]
+        return list(images)[: self.num_views]
+
+    def _ensure_subtask_decoder(self):
+        """Lazy-build the ~8 GB SubtaskDecoder on first System 2 call —
+        System 1 users never pay for it (mirrors _ensure_text_lm_head)."""
+        if self._subtask_decoder is None:
+            from flash_rt.models.fineart_vla.text_decode_rtx import SubtaskDecoder
+
+            head = self._ensure_text_lm_head()
+            self._subtask_decoder = SubtaskDecoder(
+                self._checkpoint_dir, device=str(head.device), lm_head=head)
+        return self._subtask_decoder

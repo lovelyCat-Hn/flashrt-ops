@@ -1,8 +1,5 @@
-"""FineART-VLA model-side modules (System 2 decode lands here).
+"""FineART-VLA model additions on top of the inherited π0.5 pipeline.
 
-System 1 reuses ``flash_rt.models.pi05.pipeline_rtx`` unchanged —
-FineART-VLA's only inference-time structural delta is the language-head
-decode (see ``flash_rt/frontends/torch/fineart_vla_rtx.py``). The AR
-text decoder port (greedy + prefix KV cache, pi0fast-style machinery)
-will live in this package as ``decode_text_rtx.py`` (Stage 2b).
+``text_decode_rtx`` = System 2 subtask text decoder (pure-torch
+PaliGemma port; lazily built by the frontend on first generate_subtask).
 """

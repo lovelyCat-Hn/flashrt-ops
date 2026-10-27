@@ -1,0 +1,21 @@
+{
+  "ckpt": "/home/galbot/holy/models/fineart_vla_midtrained",
+  "prompt": "pick up the object",
+  "prompt2": "wipe the table",
+  "max_new_tokens": 64,
+  "text_first": "Put the black microfiber towel into the bin",
+  "text_repeats": [
+    "Put the black microfiber towel into the bin",
+    "Put the black microfiber towel into the bin",
+    "Put the black microfiber towel into the bin"
+  ],
+  "text_prompt2": "Return to Home Position",
+  "greedy_deterministic": true,
+  "text_nonempty": true,
+  "decode_latency_ms_p50": 865.3035163879395,
+  "decode_first_call_s": 26.26816153526306,
+  "subtask_decoder_vram_mib": 7376,
+  "system1_regression_pass": true,
+  "pass": true,
+  "total_s": 39.20993709564209
+}
