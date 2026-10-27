@@ -41,3 +41,7 @@ logs/
 # 外部克隆仓库（各自独立 git，勿入库）
 ActQuant/
 realtime-vla/
+
+# S1 数字孪生模型产物（s1_make_mjcf.py 生成，含本机绝对 mesh 路径，可再生成）
+scripts/s1/s1_body_control/s1_twin_ready.urdf
+scripts/s1/s1_body_control/s1_twin.xml
