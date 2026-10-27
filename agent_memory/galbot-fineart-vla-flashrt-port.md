@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 8689eb05-8c56-416a-9e8c-9e6525e95e8c
-  modified: 2026-10-27T05:49:21.398Z
+  modified: 2026-10-27T05:55:13.649Z
 ---
 
 **FineART-VLA 接入 FlashRT 可行性评估（2026-10-27，只读调研，未动机器/未写代码）**。用户意向：在 FlashRT 上加载第二个 policy（fineart_vla，Scale AI×HF 出品，源码在 `~/lerobot/src/lerobot/policies/fineart_vla/`，README 指向 docs/source/policy_fineart_vla_README.md）。
@@ -19,4 +19,6 @@ metadata:
 
 **移植工作量（估）**：① `models/fineart_vla/pipeline_rtx.py` = pi05 pipeline 克隆 + lm_head 解码段 + 文本条件拼接；② `frontends/torch/fineart_vla_rtx.py` + `_fineart_vla_rtx_spec.py`（权重 spec：在 pi05 基础上加 lm_head）；③ api.py/configs 注册 `fineart_vla`；④ 精度回归（eager 参考 vs 引擎 cos）+ INT8/W8A16 套件扩展 + graph 适配。pi05 的 tokenizer（.cache/flash_rt 已有）直接复用；FAST tokenizer 仅在启用 FAST 解码路径时需要。
 
-**待确认/风险**：① 权重是否公开可得（HF 发布，含 config/norm_stats）；② System 2 解码是否每 chunk 必跑（延迟成本——子任务文本变化慢可降频摊销）或可关；③ fineart 训练集是双臂（bimanual 40,543 ep/1,718h/533,913 子任务标注），与我们 G1/S1 双臂线契合，但 state/action 维要从 checkpoint config 实读；④ lerobot 仓是 py3.12+uv，本机引擎环境是 py3.11——FlashRT 原生实现不受影响，eager 参考跑需另配环境。建议路径：Stage0 拿 checkpoint 读 config 确认形状 → Stage1 eager 金标 → Stage2 _template bf16 移植+parity → Stage3 量化+Orin bench（入 BENCHMARKS.md）→ Stage4 接进闭环脚本（config 开关切 policy）。
+**Stage 0 卡点已解（2026-10-27 晚）**：权重已发布——**`lerobot/FineART-VLA-subtask-midtrained`**（Scale AI×HF 官方，未 gated，2026-10-23 更新，共 **9.35 GB**，model.safetensors 单文件）。README 关键参数：底座 **gemma_2b / 动作专家 gemma_300m**（= pi05 同款）；基座 = `lerobot/pi05_base` 原生 LeRobot 转换；**3 视角**（cam_high + 双腕，360×640→224²）；**state/action = 14 维、绝对角目标**（双臂口径，与 G1 双臂 14 维契合！）；**chunk 50 步 / flow 10 步推理**（= 我们 chunk 50 同款）；归一化 = **Quantiles**（stats 随仓，pre/postprocessor safetensors 齐全）；bf16 训练（权重含 FP32 张量）；knowledge_insulation=on；FAST `skip_tokens=128, max_action_tokens=384`（BPE tokenizer 随仓）。文件全：config.json/model.safetensors/pre+postprocessor/train_config.json/action_tokenizer。**网络事实：本机直连 huggingface.co 不通（Network unreachable），`hf-mirror.com` 可直连（API+raw 均验证过）；github 可直连**（lerobot 即直连克隆）。下载走 **`policies/fineart_vla/fetch_checkpoint.py`**（纯 stdlib+断点续传，2026-10-27 已启用，后台日志 ~/holy/logs/fetch_fineart.log；flash_pyrt311 无 huggingface_hub，引擎环境勿装包——numpy 红线）。另有作者实验 ckpt（pepijn223/rebot-fineart-pi052-*）与数据集 `lerobot/FineART`。paper: arxiv 2609.36416。
+
+**待确认/风险**：① ~~权重是否公开可得~~已解（见上）；② System 2 解码是否每 chunk 必跑（延迟成本——子任务文本变化慢可降频摊销）或可关；③ 14 维绝对角 = ALOHA 口径（2×7 关节+爪？）与 G1（臂 14 维+爪百分比）/S1（19 维）的关节语义映射要 Stage 0 读 config.json 细核；④ lerobot 仓是 py3.12+uv，本机引擎环境是 py3.11——FlashRT 原生实现不受影响，eager 参考跑需另配环境。建议路径：Stage0 拿 checkpoint 读 config 确认形状 → Stage1 eager 金标 → Stage2 _template bf16 移植+parity → Stage3 量化+Orin bench（入 BENCHMARKS.md）→ Stage4 接进闭环脚本（config 开关切 policy）。
