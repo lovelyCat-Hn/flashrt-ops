@@ -36,6 +36,10 @@ import time
 
 import numpy as np
 
+# fineart chunk_size=50（train_config.json）；引擎默认 10 是 LIBERO 口径，
+# 走 hotfix 2522a304 的 env 覆盖（模块导入时读，必须在 import flash_rt 前设）
+os.environ.setdefault("FLASH_RT_PI05_ACTION_CHUNK_SIZE", "50")
+
 DEFAULT_CKPT = os.path.expanduser("~/holy/models/fineart_vla_midtrained")
 EVIDENCE_ROOT = os.path.expanduser("~/holy/evidence")
 
@@ -56,12 +60,17 @@ def main() -> int:
     import flash_rt
     from flash_rt.api import load_model
 
+    # 图开关是 env 门控（PI05_NO_GRAPH=1 回退无图），非 load_model kwarg
+    if args.no_cuda_graph:
+        os.environ.setdefault("PI05_NO_GRAPH", "1")
+
     config = "pi05" if args.as_pi05 else "fineart_vla"
-    print(f"[1/4] load_model(config={config!r}, num_views=3) ← {args.ckpt}")
+    print(f"[1/4] load_model(config={config!r}, num_views=3, "
+          f"action_dim=14, chunk=50) ← {args.ckpt}")
     t0 = time.time()
     model = load_model(args.ckpt, framework="torch", config=config,
                        num_views=3, num_steps=args.num_steps,
-                       use_cuda_graph=not args.no_cuda_graph)
+                       action_dim=14)
     print(f"      加载成功，耗时 {time.time() - t0:.1f}s")
 
     print(f"[2/4] set_prompt({args.prompt!r}) + 合成 3 视角观测")
@@ -69,16 +78,31 @@ def main() -> int:
     rng = np.random.default_rng(0)
     img = rng.integers(0, 255, (224, 224, 3), dtype=np.uint8)
     obs = {"image": img, "wrist_image": img, "wrist_image_right": img}
+    # rtx pi05 系前端：calibrate 是图捕获仪式（stream 建立.on graph capture），
+    # 非 INT8 专属；infer() 无懒初始化，不先 calibrate 必崩 _graph_torch_stream。
+    print("      calibrate_with_real_data（图捕获仪式，非量化专属）")
+    model.pipeline.calibrate_with_real_data([obs])
 
     print(f"[3/4] warmup×{args.warmup} + 计测×{args.reps}")
+    import torch
     for _ in range(args.warmup):
         model.infer(obs)
     lats_ms, outs = [], []
+    reps_first_keys = None
     for _ in range(args.reps):
         t0 = time.time()
-        out = model.infer(obs)
+        out = model.infer(obs)  # VLAModel.infer 透传前端原始返回（dict）
         lats_ms.append((time.time() - t0) * 1000.0)
-        outs.append(np.asarray(out))
+        if isinstance(out, dict):
+            if reps_first_keys is None:
+                print(f"      infer 返回键：{sorted(out.keys())}")
+                reps_first_keys = sorted(out.keys())
+            out = out.get("actions", next(iter(out.values())))
+        if hasattr(out, "cpu"):  # torch 张量（bf16 不能直接 np.asarray）
+            arr = out.detach().to(torch.float32).cpu().numpy()
+        else:
+            arr = np.asarray(out, dtype=np.float32)
+        outs.append(arr)
 
     arr = outs[-1]
     nan = int(np.isnan(arr).sum())

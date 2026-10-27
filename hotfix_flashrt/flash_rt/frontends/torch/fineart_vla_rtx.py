@@ -50,10 +50,19 @@ class FineARTVLATorchFrontendRtx(Pi05TorchFrontendRtx):
     # auto-stripped the same way convert_pi05_safetensors does).
     TEXT_LM_HEAD_KEY = "paligemma_with_expert.paligemma.lm_head.weight"
 
-    def __init__(self, checkpoint_dir, num_views=3, **kwargs):
+    def __init__(self, checkpoint_dir, num_views=3, action_dim=14,
+                 num_steps=None, **kwargs):
         # FineART-VLA trains with 3 camera views (cam_high + both
         # wrists); π0.5's num_views=2 default must not leak in here.
-        super().__init__(checkpoint_dir, num_views=num_views, **kwargs)
+        # action_dim/num_steps MUST stay explicit in the signature:
+        # load_model forwards only parameters inspect.signature() can
+        # see — anything swallowed by **kwargs is silently dropped
+        # (found the hard way in the 2026-10-27 smoke, action_dim=14
+        # arrived as the LIBERO 7 default).
+        super().__init__(checkpoint_dir, num_views=num_views,
+                         action_dim=action_dim,
+                         **({"num_steps": num_steps}
+                            if num_steps is not None else {}), **kwargs)
         self._checkpoint_dir = pathlib.Path(checkpoint_dir)
         self._text_lm_head = None
 

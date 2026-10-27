@@ -1,0 +1,20 @@
+{
+  "config": "fineart_vla",
+  "ckpt": "/home/galbot/holy/models/fineart_vla_midtrained",
+  "flash_rt_version": "0.2.0",
+  "prompt": "pick up the object",
+  "num_steps": 10,
+  "use_cuda_graph": true,
+  "action_shape": [
+    10,
+    7
+  ],
+  "nan": 0,
+  "inf": 0,
+  "abs_mean": 0.7791973352432251,
+  "latency_ms_p50": 227.8881072998047,
+  "latency_ms_min": 226.60040855407715,
+  "latency_ms_max": 228.1203269958496,
+  "pass": true,
+  "total_s": 12.444108963012695
+}
