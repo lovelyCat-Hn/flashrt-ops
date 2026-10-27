@@ -32,7 +32,7 @@ chunk 耗尽才需等待。
 用法:
   LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
   ~/miniforge3/envs/flash_pyrt311/bin/python \
-      ~/holy/scripts/inference/run_g1_loop.py \
+      ~/holy/scripts/g1/inference/run_g1_loop.py \
       [--ckpt ~/holy/models/pi05_g1_deploy] [--exec] \
       [--rounds 10] [--steps-per-round 3] [--delta-max 0.05] \
       [--speed 0.15] [--max-excursion 0.25] [--prompt "..."]
@@ -119,7 +119,7 @@ args = ap.parse_args()
 
 # ── 全文日志落盘：q 退出走 os._exit 不刷缓冲（09-23 坑），故逐行强制 flush ──
 _log_path = args.log_file or str(
-    pathlib.Path(__file__).resolve().parents[3] / "logs" /
+    pathlib.Path(__file__).resolve().parents[4] / "logs" /
     time.strftime("loop_%Y%m%d_%H%M%S.log"))
 pathlib.Path(_log_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -297,7 +297,7 @@ import numpy as np  # noqa: E402
 import cv2  # noqa: E402
 import flash_rt.frontends.torch.pi05_rtx as _fe  # noqa: E402
 
-# 回退 eager 时才封图（PI05_NO_GRAPH=1）；默认开图（scripts/test/bench_pi05.py 同款）
+# 回退 eager 时才封图（PI05_NO_GRAPH=1）；默认开图（scripts/g1/test/bench_pi05.py 同款）
 if os.environ.get("PI05_NO_GRAPH", "0") == "1":
     _orig_init = _fe.Pi05TorchFrontendRtx.__init__
 

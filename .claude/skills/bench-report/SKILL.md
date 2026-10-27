@@ -22,7 +22,7 @@ description: 维护 ~/holy/BENCHMARKS.md（FlashRT/pi0.5 部署基准数据报�
      /tmp 与会话记录里，10-07 整机重启后靠从 transcript 逐字抢救才保住
      （现存 `evidence/20261006-07_quant_kv_ablation/`）。transcript 不是存储。
 2. 报告里每张表注明数据来源（evidence 路径或日志路径）；能让读者复现的命令进 §八复现索引。
-3. 脚本本身进 `scripts/probes/`（或 benchmarks/），不留在 /tmp。
+3. 脚本本身进 `scripts/g1/probes/`（或 benchmarks/），不留在 /tmp。
 4. 新数据进来先问一句：它属于当前定档/现行口径吗？是 → 本报告对应表；它推翻了
    表里某行 → 更新该行 + 旧值移 ARCHIVE（或表内标注"史档"）。
 

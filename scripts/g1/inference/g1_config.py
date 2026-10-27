@@ -159,17 +159,43 @@ _RENAMED_LEROBOT_KEYS = {
 }
 
 
+def _load_toml_resolved(p):
+    """读 toml 并递归解析 include 继承（机型文件覆盖 base 同名键，按节深合并）。
+
+    include 相对当前文件目录解析；基座文件缺失 = 硬报错（红线/语义默认静默
+    丢失不可接受，同旧键硬报错哲学）。机型文件未写 include = 无继承、原样读。
+    """
+    with open(p, "rb") as f:
+        data = tomllib.load(f)
+    include = data.pop("include", None)
+    if include:
+        base_p = (p.parent / include).resolve()
+        if not base_p.exists():
+            raise FileNotFoundError(
+                f"[config] {p} include 的基座文件不存在: {base_p}"
+                f"——继承链断了（cache_frames/tier 等红线会静默丢失），先补文件")
+        merged = _load_toml_resolved(base_p)
+        for key, val in data.items():
+            if isinstance(val, dict) and isinstance(merged.get(key), dict):
+                merged[key] = {**merged[key], **val}
+            else:
+                merged[key] = val
+        data = merged
+    return data
+
+
 def load(path=DEFAULT_PATH):
     """读 toml；文件缺失返回 {}（apply 逐键回落 BUILTIN）。
 
+    文件头 `include = "base.toml"` 触发继承（见 _load_toml_resolved）：
+    优先级 CLI > 机型文件 > base.toml > BUILTIN。
     [loop] 内旧键名（steps_per_round/steps_per_cmd）命中即 SystemExit 并提示
     新键名；未认键打印告警（tomllib 本身静默忽略未知键，见 config/README §7）。
     """
     p = pathlib.Path(path)
     if not p.exists():
         return {}, p
-    with open(p, "rb") as f:
-        data = tomllib.load(f)
+    data = _load_toml_resolved(p)
     loop = data.get("loop")
     if isinstance(loop, dict):
         for old, new in _RENAMED_LOOP_KEYS.items():

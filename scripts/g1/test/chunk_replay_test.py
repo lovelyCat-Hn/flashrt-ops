@@ -23,12 +23,12 @@
   3. q/Ctrl-C 随时退（SDK 阻塞 C++ 调用中也能退）；物理急停第一优先级
   4. 执行前回车确认
   更全的 A/B 台（stream 帧插值突发 / nav-suspend / EMA）见
-  scripts/probes/replay_stream_bench.py——本脚本是它的最小直发子集。
+  scripts/g1/probes/replay_stream_bench.py——本脚本是它的最小直发子集。
 
 用法:
-  ~/holy/run.sh ~/holy/scripts/test/chunk_replay_test.py \
+  ~/holy/run.sh ~/holy/scripts/g1/test/chunk_replay_test.py \
       --chunks-dir ~/holy/logs/chunks_traj_20261010_130403              # 干跑
-  ~/holy/run.sh ~/holy/scripts/test/chunk_replay_test.py \
+  ~/holy/run.sh ~/holy/scripts/g1/test/chunk_replay_test.py \
       --chunks-dir ~/holy/logs/chunks_traj_20261010_130403 \
       --rounds 2 --exec                                                 # 真机
   # --chunks-dir 缺省=logs/ 下最新的 chunks_traj_* 目录

@@ -36,7 +36,7 @@ RTC：--rtc-horizon N > 0 时启用推理侧前缀引导（FlashRT 引擎 guided
 用法:
   LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
   ~/miniforge3/envs/flash_pyrt311/bin/python \
-      ~/holy/scripts/inference/run_g1_loop_native.py \
+      ~/holy/scripts/g1/inference/run_g1_loop_native.py \
       [--ckpt ~/holy/models/pi05_g1_onlypick_deploy] [--exec] \
       [--rounds 60] [--fps 30] [--speed 2.0] [--rtc-horizon 10]
 """
@@ -469,7 +469,7 @@ if ENV_LO is not None:
     ENV_HI[8:15] += _m
 import flash_rt.frontends.torch.pi05_rtx as _fe  # noqa: E402
 
-# 回退 eager 时才封图（PI05_NO_GRAPH=1）；默认开图（scripts/test/bench_pi05.py 同款）
+# 回退 eager 时才封图（PI05_NO_GRAPH=1）；默认开图（scripts/g1/test/bench_pi05.py 同款）
 if os.environ.get("PI05_NO_GRAPH", "0") == "1":
     _orig_init = _fe.Pi05TorchFrontendRtx.__init__
 

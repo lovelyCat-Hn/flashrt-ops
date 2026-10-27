@@ -33,11 +33,11 @@ A/B 维度：
 --nav-suspend 导航栈搁置（同主脚本，默认关）。纯执行无推理。
 
 用法：
-  ~/holy/run.sh ~/holy/scripts/probes/replay_stream_bench.py \
+  ~/holy/run.sh ~/holy/scripts/g1/probes/replay_stream_bench.py \
       --chunks-dir logs/chunks_traj_XXXX --rounds 3 --mode stream
   # 数据集整集回放（需 pyarrow，flashrt 环境跑）：
   #   LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
-  #   ~/miniforge3/envs/flashrt/bin/python scripts/probes/replay_stream_bench.py \
+  #   ~/miniforge3/envs/flashrt/bin/python scripts/g1/probes/replay_stream_bench.py \
   #   --dataset ~/holy/datasets/pick_place_balence --episode 0 --exec
   # 干跑（零下发，打印计划即退）：去掉 --exec
 """

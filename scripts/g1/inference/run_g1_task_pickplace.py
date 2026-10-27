@@ -102,8 +102,8 @@ faulthandler.enable()   # 原生崩溃（SDK segfault 等）打印 Python 级位
 HERE = pathlib.Path(__file__).resolve().parent
 HOLY = HERE.parent.parent
 LOOP_PY = HERE / "run_g1_loop.py"
-WARMUP_PY = HERE.parent / "g1" / "g1_pose_warmup.py"
-MOVE_PY = HERE.parent / "g1" / "g1_base_move.py"   # move 段/预检子进程
+WARMUP_PY = HERE.parent / "g1" / "body" / "g1_pose_warmup.py"
+MOVE_PY = HERE.parent / "g1" / "body" / "g1_base_move.py"   # move 段/预检子进程
 
 # 与 config/g1.toml [run] 同源（10-12 pick 在役；place 三键存档）
 PICK_CKPT = HOLY / "models/pi05_g1_onlypick_deploy"

@@ -15,7 +15,7 @@ data/chunk-000/file-000.parquet，episode_index 列过滤。
 夹爪维 7/15 是绝对 %，单列对比）。
 
 用法:
-  ~/holy/run.sh ~/holy/scripts/eval/tf_matrix.py [--ep 0] [--frames 0,100,300]
+  ~/holy/run.sh ~/holy/scripts/g1/eval/tf_matrix.py [--ep 0] [--frames 0,100,300]
 """
 import argparse
 import functools

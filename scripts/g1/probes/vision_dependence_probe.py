@@ -22,7 +22,7 @@
 
 用法（SDK 会 start_controller，急停可及）：
   LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \\
-  ~/miniforge3/envs/flash_pyrt311/bin/python ~/holy/scripts/probes/vision_dependence_probe.py
+  ~/miniforge3/envs/flash_pyrt311/bin/python ~/holy/scripts/g1/probes/vision_dependence_probe.py
 只调 get_rgb_data / get_joint_positions，不发任何运动/夹爪指令。
 """
 import os

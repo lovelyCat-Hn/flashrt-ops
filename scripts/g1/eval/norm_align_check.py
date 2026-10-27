@@ -10,7 +10,7 @@ Part C  引擎语义分发实证：同一模型实例，翻转 norm_stats 重放
 Part D  端到端形状 (10, action_dim) + 输出相对数据集 q01/q99 的落域
 
 用法（先 unset LD_LIBRARY_PATH PYTHONPATH）:
-  ~/miniforge3/envs/flash_pyrt311/bin/python ~/holy/scripts/eval/norm_align_check.py \
+  ~/miniforge3/envs/flash_pyrt311/bin/python ~/holy/scripts/g1/eval/norm_align_check.py \
       [--ckpt <用于引擎实证的 ckpt>] [--dataset DIR] [--skip-model]
 接入真 G1 微调权重后：--ckpt <微调部署目录>（其 norm_stats 写哪种语义就验证哪种；
 两种语义的仿射式对照始终用数据集统计做基准）。

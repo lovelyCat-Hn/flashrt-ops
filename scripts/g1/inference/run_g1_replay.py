@@ -28,7 +28,7 @@ episode（与 tf_rollout.py 验证过的输入完全一致），机器人只负�
 
 前置：g1_pose_warmup.py 预热到 task0 起始位（episode_start_task0.json）。
 用法:
-  ~/holy/run.sh ~/holy/scripts/inference/run_g1_replay.py [--ep 0] [--exec]
+  ~/holy/run.sh ~/holy/scripts/g1/inference/run_g1_replay.py [--ep 0] [--exec]
 """
 import argparse
 import ast
@@ -101,7 +101,7 @@ os.environ.setdefault("FLASHRT_PI05_STATE_PROMPT_MODE", "fixed")
 import cv2  # noqa: E402
 import flash_rt.frontends.torch.pi05_rtx as _fe  # noqa: E402
 
-# 回退 eager 时才封图（PI05_NO_GRAPH=1）；默认开图（scripts/test/bench_pi05.py 同款）
+# 回退 eager 时才封图（PI05_NO_GRAPH=1）；默认开图（scripts/g1/test/bench_pi05.py 同款）
 if os.environ.get("PI05_NO_GRAPH", "0") == "1":
     _orig_init = _fe.Pi05TorchFrontendRtx.__init__
 

@@ -30,7 +30,7 @@
 
 用法:
   ~/miniforge3/envs/flash_pyrt311/bin/python \
-      ~/holy/scripts/eval/rtc_ablation.py [N] [--out 证据目录]
+      ~/holy/scripts/g1/eval/rtc_ablation.py [N] [--out 证据目录]
 输出:
   <out>/README.md（条件+文件清单）、summary.txt（stdout 全文）、
   sample_i_{A,B_off,B_on}.npy（未归一化动作块）

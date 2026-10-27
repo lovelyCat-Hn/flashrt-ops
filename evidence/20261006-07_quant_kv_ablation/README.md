@@ -1,6 +1,6 @@
 # 逐层 K/V cos 量化消融原始记录（2026-10-06 ~ 10-07）
 
-**探针**：`scripts/probes/rot_equivalence_probe.py`（零 FlashRT 改动）
+**探针**：`scripts/g1/probes/rot_equivalence_probe.py`（零 FlashRT 改动）
 **条件（各批相同，全部默认参数）**：
 - 数据集 only_place ep0（437 帧），frames=[0, 60, 120, 180, 240, 300]
 - ckpt = models/pi05_g1_place_deploy
@@ -26,11 +26,11 @@
 
 **复现**：
 ```
-~/holy/run.sh ~/holy/scripts/probes/rot_equivalence_probe.py --configs bf16,int8,rot8
-~/holy/run.sh ~/holy/scripts/probes/rot_equivalence_probe.py --configs calib        # 先产通道 scale
-~/holy/run.sh ~/holy/scripts/probes/rot_equivalence_probe.py --configs bf16,chan8,chan8all
-~/holy/run.sh ~/holy/scripts/probes/rot_equivalence_probe.py --configs bf16,dec8
-~/holy/run.sh ~/holy/scripts/probes/rot_equivalence_probe.py --configs bf16,w8a16   # 需 W8A16 kernel flash_rt_kernels.so
+~/holy/run.sh ~/holy/scripts/g1/probes/rot_equivalence_probe.py --configs bf16,int8,rot8
+~/holy/run.sh ~/holy/scripts/g1/probes/rot_equivalence_probe.py --configs calib        # 先产通道 scale
+~/holy/run.sh ~/holy/scripts/g1/probes/rot_equivalence_probe.py --configs bf16,chan8,chan8all
+~/holy/run.sh ~/holy/scripts/g1/probes/rot_equivalence_probe.py --configs bf16,dec8
+~/holy/run.sh ~/holy/scripts/g1/probes/rot_equivalence_probe.py --configs bf16,w8a16   # 需 W8A16 kernel flash_rt_kernels.so
 ```
 
-配套：模块耗时探针同日脚本已抢救回 `scripts/probes/module_timing_probe.py`。
+配套：模块耗时探针同日脚本已抢救回 `scripts/g1/probes/module_timing_probe.py`。

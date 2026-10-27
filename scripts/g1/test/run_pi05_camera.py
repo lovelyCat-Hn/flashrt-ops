@@ -10,7 +10,7 @@
 
 用法:
   LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
-  flashpy ~/holy/scripts/inference/run_pi05_camera.py \
+  flashpy ~/holy/scripts/g1/test/run_pi05_camera.py \
       [--prompt "..."] [--rounds 10] [--hold 10] [--views 3] \
       [--tier int8_full|bf16|int8_enc] [--ctrl-hz 50]
 """

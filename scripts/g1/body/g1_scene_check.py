@@ -14,7 +14,7 @@
 参考帧在 docs/scene_reference/（episode0 起点±，随库入库）。
 
 用法:
-  ~/holy/run.sh ~/holy/scripts/g1/g1_scene_check.py
+  ~/holy/run.sh ~/holy/scripts/g1/body/g1_scene_check.py
 """
 import os
 import pathlib
@@ -102,7 +102,7 @@ print(f"""
   ✅ 蓝盒占视野下半较大比例、白色空气开关清晰可见，盒沿在爪正前下方
   ❌ 盒子缩在视野边缘/很远、看到的多是空桌板和背景 → 挪机器人向前
      或把盒子往桌沿挪（训练起点爪几乎压在盒沿正上方）
-对齐后再跑探针看 chunk：~/holy/run.sh ~/holy/scripts/inference/run_g1_inference.py
+对齐后再跑探针看 chunk：~/holy/run.sh ~/holy/scripts/g1/inference/run_g1_inference.py
 合格信号：臂 14 维呈 -1.2~1.6 结构化数值（贴零占比 << 50%）、夹爪维 ≈0%""",
       flush=True)
 

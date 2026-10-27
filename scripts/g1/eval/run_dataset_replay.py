@@ -12,7 +12,7 @@ delta 化——持物时 state 被撑 33% 而指令仍是 0%，对 Δ 比会差�
 臂保持帧（真值Δ≈0）输出≈0 是正确行为，cos 对绝对 action 无意义。
 
 用法:
-  ~/holy/run.sh ~/holy/scripts/inference/run_dataset_replay.py \
+  ~/holy/run.sh ~/holy/scripts/g1/eval/run_dataset_replay.py \
       [--ckpt .../pretrained_model] [--npz ~/holy/datasets/replay_input.npz] \
       [--stride 30] [--max 20] [--horizon 50] [--seed 0] [--tier bf16] \
       [--check-graph] [--dump]
@@ -29,7 +29,8 @@ import os
 import pathlib
 import time
 
-import g1_config  # noqa: E402  同目录共享配置（CLI > config/g1.toml > 内置默认）
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "inference"))
+import g1_config  # noqa: E402  inference/ 共享配置（CLI > config/g1.toml > 内置默认）
 
 ap = argparse.ArgumentParser(description=__doc__,
                              formatter_class=argparse.RawDescriptionHelpFormatter)

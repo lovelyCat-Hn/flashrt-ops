@@ -23,7 +23,7 @@
   "当前+Δ"自校正消化。
 
 用法:
-  ~/holy/run.sh ~/holy/scripts/inference/run_dataset_execute.py \
+  ~/holy/run.sh ~/holy/scripts/g1/inference/run_dataset_execute.py \
       [--episode 0] [--start-frame 0] [--rounds 10] \
       [--steps-per-round 3] [--steps-per-cmd 3] [--delta-max 0.05] \
       [--speed 0.15] [--max-excursion 3.0] [--switch-dist 0.06] \

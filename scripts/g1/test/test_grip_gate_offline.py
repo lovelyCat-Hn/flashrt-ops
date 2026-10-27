@@ -32,7 +32,7 @@ import time as _time
 
 import numpy as np
 
-SRC = "/home/galbot/holy/scripts/inference/run_g1_loop_traj.py"
+SRC = "/home/galbot/holy/scripts/g1/inference/run_g1_loop_traj.py"
 tree = ast.parse(open(SRC).read())
 FNS = [n for n in tree.body if isinstance(n, ast.FunctionDef)
        and n.name in ("send_grip", "send_grip_joint")]

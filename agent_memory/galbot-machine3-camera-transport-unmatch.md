@@ -19,9 +19,9 @@ metadata:
 - 沙盒测试法（可复用）：V1.9.1 库在 /tmp/sdk191/{lib,py}，`LD_LIBRARY_PATH=/tmp/sdk191/lib:/data/galbot/lib PYTHONPATH=/tmp/sdk191/py` 跑探针，机器人文件零改动。注意 /tmp 重启即清。
 
 **2026-09-29 16:19 恢复（重启即愈再应验）+ 旁路判决**：
-- 采集栈整体重启（head/right/left capture 换新 PID，surround 这轮没起）后 SDK 1.8.1 **立即恢复 6/6 路**：head L/R + arm L/R color（640×480 JPEG，臂 ~23KB/头 ~106KB）+ arm depth（16UC1 scale=10000=0.1mm），图像内容正常，10s 连续拉 1906 帧全部新鲜时间戳。自检脚本 `~/holy/scripts/test/sdk_camera_smoke.py`。
+- 采集栈整体重启（head/right/left capture 换新 PID，surround 这轮没起）后 SDK 1.8.1 **立即恢复 6/6 路**：head L/R + arm L/R color（640×480 JPEG，臂 ~23KB/头 ~106KB）+ arm depth（16UC1 scale=10000=0.1mm），图像内容正常，10s 连续拉 1906 帧全部新鲜时间戳。自检脚本 `~/holy/scripts/g1/test/sdk_camera_smoke.py`。
 - **旁路实验判决（重要）**：失败窗口期内，用机器自带 embosa Python 绑定（V9.1.2 与 rc88 同版，`/userdata/update/manual_update/lib/python3.8.10`，系统 py3.8 可用；必须 `PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python`，系统 protobuf 4.25.9 拒旧式 _pb2）建与 fusion 同款 LARGE_DATA_TRANSPORT=6 reader 也 **0 帧**；`embosa_topic_tool list` 看不到任何相机话题、echo 无输出（对照 /odom/base_link echo 正常）。→ 失败时 capture 侧发布/发现对**所有外部进程**隐身，不是 SDK 单方面问题；**旁路救不了失败窗口，重启采集栈才是解**。
-- 用法沉淀：`QosConf.CreateIntraCoreQos(...)` 返回的就是完整 Qos（core_comm 默认 0=INTRA_CORE）→ `node.CreateSerializationReader(image_pb2.Image, topic, cb, qos)`；相机消息=galbot.sensor_proto.Image(header/height/width/encoding/data/depth_scale)；proto 包在 /data/galbot/lib/python3/site-packages/galbot。relocalization_server 内嵌 py3.8 同款绑定读 lidar 正常，旁路通路本身有效。厂家调试工具 `/data/galbot/bin/embosa_topic_tool`（list/type/info/qos/hz/echo）。旁路脚本 `~/holy/scripts/test/read_camera_bypass.py`（SDK 再坏时先跑它 + topic_tool 判断是"整体隐身"还是"仅 SDK 隐身"，仅后者旁路才有戏）。
+- 用法沉淀：`QosConf.CreateIntraCoreQos(...)` 返回的就是完整 Qos（core_comm 默认 0=INTRA_CORE）→ `node.CreateSerializationReader(image_pb2.Image, topic, cb, qos)`；相机消息=galbot.sensor_proto.Image(header/height/width/encoding/data/depth_scale)；proto 包在 /data/galbot/lib/python3/site-packages/galbot。relocalization_server 内嵌 py3.8 同款绑定读 lidar 正常，旁路通路本身有效。厂家调试工具 `/data/galbot/bin/embosa_topic_tool`（list/type/info/qos/hz/echo）。旁路脚本 `~/holy/scripts/g1/test/read_camera_bypass.py`（SDK 再坏时先跑它 + topic_tool 判断是"整体隐身"还是"仅 SDK 隐身"，仅后者旁路才有戏）。
 - 旧"transport_type=0 反汇编定案"降级为背景：rc88 确实拒绝非零 participant transport（`transport no support` 日志），但 fusion 同样回退 DEFAULT_UDP_SHM 仍配对相机 → 该日志行与配对成败无关，勿再当主因。
 
 **2026-10-07 16:45-16:56 又一轮（「重启即愈」第三次应验）+ 旁路载荷新知识**：

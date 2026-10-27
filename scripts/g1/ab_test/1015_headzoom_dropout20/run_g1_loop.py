@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """G1 双臂闭环 receding-horizon：推理→执行→再观测 连续循环（真机唯一闭环入口）。
 
-【B 侧脚本，2026-10-15】A/B 对比：A=scripts/inference/run_g1_loop.py（原样），
+【B 侧脚本，2026-10-15】A/B 对比：A=scripts/g1/inference/run_g1_loop.py（原样），
 本脚本唯一差异=头相机观测追加「训练同款裁剪放大」（head_training_crop，
 见 letterbox224 下方块）——sft_1012 数据（colleague clean_ready_224）的
 pick 任务训练视频头图经 image_preprocessor.py 的 head_training_crop 处理
@@ -66,7 +66,7 @@ place 轮 grip-state-cmd 自动关闭（持物签名会把释放锁死）；导�
 用法:
   LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
   ~/miniforge3/envs/flash_pyrt311/bin/python \
-      ~/holy/scripts/inference/run_g1_loop.py \
+      ~/holy/scripts/g1/inference/run_g1_loop.py \
       [--ckpt ~/holy/models/pi05_g1_onlypick_deploy] [--exec] \
       [--rounds 10] [--n-action-steps 3] [--delta-max 0.05] \
       [--speed 0.15] [--max-excursion 0.25] [--prompt "..."]
@@ -91,7 +91,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "inference"
 import g1_config  # noqa: E402  共享配置（CLI > config/g1.toml > 内置默认）。
 # A 侧靠「脚本同目录自动入径」找到 inference/g1_config.py，B 侧深两层须显式插；
 # g1_config 自身按 __file__ 定位 config/g1.toml，不随调用方目录变。
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "body"))
 import g1_warm_core  # noqa: E402  warm 复位共享核心（--post-gate 折叠段与 warmup 共用）
 
 ap = argparse.ArgumentParser(description=__doc__,
@@ -661,7 +661,7 @@ if ENV_LO is not None:
     ENV_HI[8:15] += _m
 import flash_rt.frontends.torch.pi05_rtx as _fe  # noqa: E402
 
-# 回退 eager 时才封图（PI05_NO_GRAPH=1）；默认开图（scripts/test/bench_pi05.py 同款）
+# 回退 eager 时才封图（PI05_NO_GRAPH=1）；默认开图（scripts/g1/test/bench_pi05.py 同款）
 if os.environ.get("PI05_NO_GRAPH", "0") == "1":
     _orig_init = _fe.Pi05TorchFrontendRtx.__init__
 

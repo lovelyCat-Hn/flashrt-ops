@@ -21,7 +21,7 @@
 | `--env-abort-n` | `--envelope-abort-n`（默认 5） | 同上 |
 | `--no-env-guard` | `--no-envelope-guard` | 同上 |
 | 脚本 `run_g1_loop_rtc.py` | `run_g1_loop.py` | 唯一正统闭环入口；原 A/B 差异收敛为 `--late-action` 两态 |
-| A 脚本 `run_g1_loop.py` | `scripts/inference/legacy/run_g1_loop_stale.py` | 存档（CLI 旗名保持旧名，mapping 值侧同步新 toml 键）；复现 A 行为优先用 `run_g1_loop.py --late-action stale` |
+| A 脚本 `run_g1_loop.py` | `scripts/g1/inference/legacy/run_g1_loop_stale.py` | 存档（CLI 旗名保持旧名，mapping 值侧同步新 toml 键）；复现 A 行为优先用 `run_g1_loop.py --late-action stale` |
 
 ## 二、不改名清单及理由
 
@@ -113,7 +113,7 @@ lerobot RTC 本体无此参数。
 
 ## 九、附记（2026-10-09）：native 固定节拍执行器 + 引导式 RTC 落地
 
-**`scripts/inference/run_g1_loop_native.py`**（v3 `run_g1_loop.py` 的 A/B 孪生，
+**`scripts/g1/inference/run_g1_loop_native.py`**（v3 `run_g1_loop.py` 的 A/B 孪生，
 调度出处 robot_client.py L477-489 固定节拍 + L410-413 水位换块，机制参照非逐行移植）：
 
 | native 参数 | lerobot 对应 | 语义差 |

@@ -2,7 +2,7 @@
 
 **chunk 源**：`logs/chunks_traj_20261017_154417/`（27 块，30Hz traj 线裸配方 `--dump-chunks`
 落盘的原始模型输出，无 RTC/无 EMA；chunk_028 被 q 截断弃用）
-**回放**：`scripts/test/chunk_replay_test.py`，G1 右臂真机 open-loop，每块消费 11/50 行，
+**回放**：`scripts/g1/test/chunk_replay_test.py`，G1 右臂真机 open-loop，每块消费 11/50 行，
 `set_joint_commands` tfs=0 直发 30Hz，链式限幅 ±0.05 rad/行。
 **entry-match**（用户提案）：换块时读臂实时位姿 → 顺运动方向（主导关节不倒行，
 frac=0.5）+ 首拍导程对齐稳态导程 g₀（近 4 次实发中位，夹紧带 [8,35] mrad）→
@@ -21,7 +21,7 @@ frac=0.5）+ 首拍导程对齐稳态导程 g₀（近 4 次实发中位，夹�
 ## 命令
 
 ```
-~/holy/run.sh ~/holy/scripts/test/chunk_replay_test.py \
+~/holy/run.sh ~/holy/scripts/g1/test/chunk_replay_test.py \
   --chunks-dir ~/holy/logs/chunks_traj_20261017_154417 \
   --rows-per-block 11 --entry-match [--ema-alpha 0.3] [--hold-ms 0] --rounds 27 --exec
 ```

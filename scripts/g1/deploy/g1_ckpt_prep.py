@@ -220,4 +220,4 @@ if fail:
 print(f"✓ 预检通过。真机运行:\n"
       f"  LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \\\n"
       f"  ~/miniforge3/envs/flash_pyrt311/bin/python \\\n"
-      f"  ~/holy/scripts/inference/run_g1_inference.py --ckpt {out}")
+      f"  ~/holy/scripts/g1/inference/run_g1_inference.py --ckpt {out}")

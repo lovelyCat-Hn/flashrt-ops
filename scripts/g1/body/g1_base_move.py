@@ -23,7 +23,7 @@ move_straight_to.py + galbot_navigation.hpp:215-248）：
 用法（一般经 run_g1_task_pickplace.py 派发，手动调试直接跑）：
   LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
   ~/miniforge3/envs/flash_pyrt311/bin/python \
-      ~/holy/scripts/g1/g1_base_move.py --shift-y 0.3
+      ~/holy/scripts/g1/body/g1_base_move.py --shift-y 0.3
   # 绝对坐标直达（map 系，2026-10-14 用户实测两工位 --where 定点）：
   #     ... g1_base_move.py --goto place    # 或 --goto pick（回程）
   #     ... g1_base_move.py --goal-x 0.035 --goal-y 1.436 --goal-yaw-deg 2.84

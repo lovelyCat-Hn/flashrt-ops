@@ -8,7 +8,7 @@ metadata:
   modified: 2026-09-17T08:50:31.723Z
 ---
 
-`~/holy/g1_joint_test_src/jetson_ik_move.py`：Jetson 上的交互式末端 IK 运动工具（2026-09 搭建并实测）。
+`~/holy/scripts/g1/g1_joint_test_src/jetson_ik_move.py`：Jetson 上的交互式末端 IK 运动工具（2026-09 搭建并实测）。
 
 - 命令：`pose` / `move|goto <链> dx dy dz` / `rot <链> r p y`（度，相对，单次限 30°）/ `solve`（只解不执行）/ `home` / `q`。全部阻塞式，单线程交互。安全：leg 单步限 0.05m、臂 0.15m；碰撞检查常开。
 - 执行路径分叉：**手臂**走 `set_end_effector_pose`（帧=链名+`params=Parameter()`，见 [[galbot-motion-frame-namespace-pitfall]]）；**leg** 规划器拒收，走"SDK IK 解 5 角 → `set_joint_positions` 按名直控（0.2 rad/s）"混合路径。

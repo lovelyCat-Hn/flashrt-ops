@@ -76,10 +76,10 @@
 
 ## 二、单次推理模块耗时（2026-10-07，真机）
 
-**条件**：`scripts/probes/module_timing_probe.py`（相位边界 `torch.cuda.synchronize`
+**条件**：`scripts/g1/probes/module_timing_probe.py`（相位边界 `torch.cuda.synchronize`
 打点，18 轮取 p50，NO_GRAPH=逐相位真实调用）；rot 等价探针口径含逐层 KV 采集
 instrumentation ≈+30 ms，两口径各自内部自洽，跨口径只比 delta。原始脚本为 /tmp
-遗失后从会话记录抢救版，见 `scripts/probes/module_timing_probe.py`。
+遗失后从会话记录抢救版，见 `scripts/g1/probes/module_timing_probe.py`。
 
 **表 2-1 模块拆解**（ms，p50）
 
@@ -265,7 +265,7 @@ service_lidar_capture）；`run_g1_inference.py` 冻结帧 n=20，bf16 tier，gr
 | 导航搁置 bf16 | 320.5（−54.8） | 332.3 |
 | 导航搁置 + W8A16 | 303.0 | 322.3 |
 
-**表 5-3 环境差值切分**（sdkfree 探针 `scripts/probes/sdkfree_infer_probe.py`，
+**表 5-3 环境差值切分**（sdkfree 探针 `scripts/g1/probes/sdkfree_infer_probe.py`，
 无 SDK 进程·磁盘 JPEG 喂帧·导航搁置，n=20）
 
 | 量 | 数值 |
@@ -370,14 +370,14 @@ cache_frames=1、合成观测（随机图×3+1px 平移扰动）、种子 202610
 
 | 数据 | 命令 |
 |---|---|
-| 表 1-1/6-1 三层遥测 | `~/holy/run.sh ~/holy/scripts/inference/run_g1_inference.py`（各 tier/开关组合） |
-| 表 2-1 模块拆解 | `~/holy/run.sh ~/holy/scripts/probes/module_timing_probe.py --configs bf16_h50,w8a16_h50,g_w8a16_h50,bf16_h10,w8a16_h10` |
+| 表 1-1/6-1 三层遥测 | `~/holy/run.sh ~/holy/scripts/g1/inference/run_g1_inference.py`（各 tier/开关组合） |
+| 表 2-1 模块拆解 | `~/holy/run.sh ~/holy/scripts/g1/probes/module_timing_probe.py --configs bf16_h50,w8a16_h50,g_w8a16_h50,bf16_h10,w8a16_h10` |
 | 表 2-2 GEMM 微基准 | `~/holy/FlashRT/benchmarks/w8a16_skinny_sm87/w8a16_bench`；bf16 侧 `GemmRunner().bf16_nn` 同 shape 计时 |
-| 表 3-2~3-6 量化消融 | `~/holy/run.sh ~/holy/scripts/probes/rot_equivalence_probe.py --configs <档>`（chan8 先 `--configs calib`） |
-| 表 3-7 位点消融 | `~/holy/run.sh ~/holy/scripts/probes/int8_site_ablation.py --configs bf16,enc8,no_l0-8,no_l9-17,no_attn,no_ffn` |
-| 表 5-x 导航搁置 | `kill -STOP <7 进程>` + 同遥测；sdkfree：`~/holy/run.sh ~/holy/scripts/probes/sdkfree_infer_probe.py` |
-| 表 7-x 闭环 | `~/holy/scripts/inference/run_g1_loop.py --nav-suspend [--exec] --n-action-steps 25 --steps-per-command 25 --pace 0.35 --pace-div 1.5`（⚠ `--exec` 驱臂） |
-| 表 8-x RTC 引导消融 | `~/miniforge3/envs/flash_pyrt311/bin/python ~/holy/scripts/eval/rtc_ablation.py 12 --out ~/holy/evidence/20261009_rtc_guided_ablation` |
+| 表 3-2~3-6 量化消融 | `~/holy/run.sh ~/holy/scripts/g1/probes/rot_equivalence_probe.py --configs <档>`（chan8 先 `--configs calib`） |
+| 表 3-7 位点消融 | `~/holy/run.sh ~/holy/scripts/g1/probes/int8_site_ablation.py --configs bf16,enc8,no_l0-8,no_l9-17,no_attn,no_ffn` |
+| 表 5-x 导航搁置 | `kill -STOP <7 进程>` + 同遥测；sdkfree：`~/holy/run.sh ~/holy/scripts/g1/probes/sdkfree_infer_probe.py` |
+| 表 7-x 闭环 | `~/holy/scripts/g1/inference/run_g1_loop.py --nav-suspend [--exec] --n-action-steps 25 --steps-per-command 25 --pace 0.35 --pace-div 1.5`（⚠ `--exec` 驱臂） |
+| 表 8-x RTC 引导消融 | `~/miniforge3/envs/flash_pyrt311/bin/python ~/holy/scripts/g1/eval/rtc_ablation.py 12 --out ~/holy/evidence/20261009_rtc_guided_ablation` |
 | 原始输出 | `evidence/20261006-07_quant_kv_ablation/`（quant）；`evidence/20261009_rtc_guided_ablation/`（RTC）；闭环日志 `logs/loop_*.log` |
 
 ## 十、夹爪物理速度标定（2026-10-13，grip_speed_bench.py）
@@ -409,7 +409,7 @@ wmin/wmax=0.0005/0.1200 m，行程 119.5 mm，理论行程时长=0.80 s
 ```
 LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
 ~/miniforge3/envs/flash_pyrt311/bin/python \
-    ~/holy/scripts/test/grip_speed_bench.py --side left --speed 0.15
+    ~/holy/scripts/g1/test/grip_speed_bench.py --side left --speed 0.15
 ```
 原始件：`evidence/grip_speed_bench/20261013-092817_left_spd0.15.csv`
 
@@ -450,7 +450,7 @@ gap 为 max 关节口径（|rows[j]−臂实时位| 最大关节差），含臂�
 
 复现：
 ```
-~/holy/run.sh ~/holy/scripts/test/chunk_replay_test.py \
+~/holy/run.sh ~/holy/scripts/g1/test/chunk_replay_test.py \
   --chunks-dir ~/holy/logs/chunks_traj_20261017_154417 \
   --rows-per-block 11 --entry-match --ema-alpha 0.3 --hold-ms 0 --rounds 27 --exec
 ```

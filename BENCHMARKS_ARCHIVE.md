@@ -102,7 +102,7 @@
 
 > 上文档位对比**只测了延迟、未测动作质量**——真机排障（G1 微调权重
 > pi05_g1_040000）出"伸臂不抓"，离线 teacher-forced 复测定案：
-> `scripts/eval/tf_matrix.py`，训练集 ep0 五帧、干净 prompt、对比数据集 delta。
+> `scripts/g1/eval/tf_matrix.py`，训练集 ep0 五帧、干净 prompt、对比数据集 delta。
 
 | 档位 | cos 单步 | cos 块均 | 夹爪输出（数据集 0%） | 延迟/次 |
 |---|---:|---:|---|---:|
@@ -120,7 +120,7 @@
 
 ## 附录：数据集影子回放真机全绿基线（2026-09-24，ep0 全程）
 
-> `scripts/inference/run_g1_replay.py`：观测流=数据集（三相机帧+23 维 state），
+> `scripts/g1/inference/run_g1_replay.py`：观测流=数据集（三相机帧+23 维 state），
 > 动作=bf16 模型推理经 delta→绝对换算驱动真机双臂+夹爪。首跑暴露
 > 时间锁回放抖动（滞后欠账 1 rad、满速追逐 80s），改**轨迹锁定**
 > （步末追平门，数据集自动慢放）+速度按增量分布定标 0.15 rad/s 后全绿。
@@ -394,7 +394,7 @@ Sl、CPU 回落正常、相机 6/6。
 
 ### 补充 ｜ 剩余 ~81ms 的归属切分（sdkfree 探针，2026-10-07）
 
-新探针 `scripts/probes/sdkfree_infer_probe.py`：无 SDK 进程、磁盘 JPEG 喂帧
+新探针 `scripts/g1/probes/sdkfree_infer_probe.py`：无 SDK 进程、磁盘 JPEG 喂帧
 （三视角映射与 run_g1_inference 同款）、导航搁置态冻结帧 n=20：
 **318.2ms ≈ SDK 在场 320.5（Δ2.3=噪声）→ 我们进程的订阅/线程成本 ≈ 0**。
 剩余环境差值（318.2 − 空载参考 236.8 ≈ 81ms）**全部在守护进程侧**：三路相机

@@ -30,7 +30,7 @@
 # 代码轨更新（scripts/文档以 git 为准；环境轨 tar 之外勿 pip/conda 装包）
 cd ~/holy && git pull
 # 一键验收
-bash ~/holy/scripts/verify_deploy.sh
+bash ~/holy/verify_deploy.sh
 # FlashRT 本地改动后（热修包以 ops 仓库为准的规矩，见 DEPLOY.md §2.1）
 # → 同步刷新 ~/holy/hotfix_flashrt/ 对应文件并 commit 推 git
 ```

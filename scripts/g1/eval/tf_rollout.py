@@ -12,7 +12,7 @@
   - 终端摘要：臂误差 / delta cos / 夹爪开合帧对齐
 
 用法:
-  ~/holy/run.sh ~/holy/scripts/eval/tf_rollout.py [--ep 0] [--stride 3]
+  ~/holy/run.sh ~/holy/scripts/g1/eval/tf_rollout.py [--ep 0] [--stride 3]
 """
 import argparse
 import ast

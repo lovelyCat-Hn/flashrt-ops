@@ -13,7 +13,7 @@
 | `~/holy/FlashRT/` | FlashRT 源码树（editable 安装指向这里；含已编译 fa2/kernels .so） |
 | `~/holy/models/pi05_lerobot_base/` | pi0.5 权重 14.5G + `assets/.../norm_stats.json`（openpi 官方 q01/q99 统计，勿删） |
 | `~/.cache/flash_rt/paligemma_tokenizer.model` | PaliGemma 分词器（4.26MB，勿删） |
-| `~/holy/scripts/` | 脚本（`inference/` 直接可跑入口 + `g1_config.py` 共享配置、`g1/` 整备与标定、`dataset/` 数据集工具、`eval/` 精度评估、`test/` 性能与诊断、`probes/` 一次性探针与封存件，根上 `verify_deploy.sh` 为装机验收入口） |
+| `~/holy/scripts/` | 脚本，顶层只分机型 `g1/` 与 `s1/`；`g1/` 下 `inference/` 真机闭环/执行入口（含 `g1_config.py` 共享配置）、`deploy/` 权重装配与加载验收链（`g1_ckpt_prep`/`load_pi05`）、`body/` 本体操作/标定/恢复（含 `g1_warm_core` 共享核心）、`g1_joint_test_src/` 关节测试工具集、`dataset/` 数据集工具、`eval/` 精度评估、`test/` 性能与诊断、`probes/` 一次性探针与封存件、`ab_test/` 冻结 A/B 副本；装机验收入口 `verify_deploy.sh` 在仓库根 |
 | `~/holy/cuda_warmup.py` | cuBLAS 暖场兜底（生产启动入口必加） |
 | `~/holy/{DEPLOY,USAGE,BENCHMARKS}.md` | 三份文档 |
 
@@ -34,12 +34,12 @@ alias flashpy=/home/galbot/miniforge3/envs/flash_pyrt311/bin/python
 
 ## 3. 常用任务
 
-### 3.1 推理冒烟（~30s，`scripts/inference/`）
+### 3.1 推理冒烟（~30s，`scripts/g1/inference/`）
 
 ```bash
 unset PYTHONPATH LD_LIBRARY_PATH LD_PRELOAD
-flashpy ~/holy/scripts/inference/load_pi05.py          # BF16 加载验证
-flashpy ~/holy/scripts/inference/load_pi05_int8.py     # INT8 档加载验证
+flashpy ~/holy/scripts/g1/deploy/load_pi05.py          # BF16 加载验证
+flashpy ~/holy/scripts/g1/deploy/load_pi05_int8.py     # INT8 档加载验证
 # 期望末行: OK — 权重加载链路（safetensors + norm_stats + 前端）全部就绪
 ```
 
@@ -49,16 +49,16 @@ flashpy ~/holy/scripts/inference/load_pi05_int8.py     # INT8 档加载验证
 
 ```bash
 LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
-flashpy ~/holy/scripts/inference/run_pi05_camera.py \
+flashpy ~/holy/scripts/g1/test/run_pi05_camera.py \
     [--prompt "..."] [--rounds 10] [--hold 10] [--views 3] [--tier int8_full] [--ctrl-hz 50]
 # 前提: 机器人已上电、相机服务在跑；echo 机实测: 取图解码 ~20ms，3视角全INT8 端到端 ~248ms/轮
 ```
 
-### 3.2 延迟基准（换机/换驱动后必跑，`scripts/test/`）
+### 3.2 延迟基准（换机/换驱动后必跑，`scripts/g1/test/`）
 
 ```bash
-flashpy ~/holy/scripts/test/bench_pi05.py int8_full 30     # 档位: bf16 | int8_enc | int8_full
-PI05_VIEWS=3 flashpy ~/holy/scripts/test/bench_pi05.py int8_full 30   # 三视角（真机配置）
+flashpy ~/holy/scripts/g1/test/bench_pi05.py int8_full 30     # 档位: bf16 | int8_enc | int8_full
+PI05_VIEWS=3 flashpy ~/holy/scripts/g1/test/bench_pi05.py int8_full 30   # 三视角（真机配置）
 ```
 
 INT8 档位语义（环境变量，脚本内已设）：
@@ -66,11 +66,11 @@ INT8 档位语义（环境变量，脚本内已设）：
 - `FVK_PI05_RTX_INT8_ENCODER_ONLY=1` 保守档（编码器 INT8 + 解码器 BF16）
 - `FVK_PI05_RTX_INT8_VISION=1` **禁用**（静态版把余弦打到 0.28，已永久关闭；动态版未验证）
 
-### 3.3 量化精度 A/B（`scripts/eval/`）
+### 3.3 量化精度 A/B（`scripts/g1/eval/`）
 
 ```bash
-flashpy ~/holy/scripts/eval/ab_compare_pi05.py 12      # 合成噪声图，12 样本
-flashpy ~/holy/scripts/eval/ab_real_camera.py 5        # 真机相机（只读抓图，不执行任何动作）
+flashpy ~/holy/scripts/g1/eval/ab_compare_pi05.py 12      # 合成噪声图，12 样本
+flashpy ~/holy/scripts/g1/eval/ab_real_camera.py 5        # 真机相机（只读抓图，不执行任何动作）
 # 前提: 相机服务在跑 + 机器人已上电（吃过"没上电"的亏）；拼图在 /tmp/cam_samples.png
 ```
 
@@ -79,7 +79,7 @@ flashpy ~/holy/scripts/eval/ab_real_camera.py 5        # 真机相机（只读�
 ### 3.4 graph 探测（换驱动后跑一次）
 
 ```bash
-bash ~/holy/scripts/verify_deploy.sh    # 第 ⑤ 项自动探；或 flashpy ~/holy/scripts/test/graph_repro.py
+bash ~/holy/verify_deploy.sh    # 第 ⑤ 项自动探；或 flashpy ~/holy/scripts/g1/test/graph_repro.py
 # 崩(段错误) = 驱动缺陷仍在，保持 PI05_NO_GRAPH=1；通过 = 可开 graph 拿更快延迟
 ```
 
@@ -92,14 +92,14 @@ bash ~/holy/scripts/verify_deploy.sh    # 第 ⑤ 项自动探；或 flashpy ~/h
 
 ```bash
 # ① 装配 + 预检（微调输出目录 → FlashRT 部署目录，软链不复制 14G）
-flashpy ~/holy/scripts/g1/g1_ckpt_prep.py \
+flashpy ~/holy/scripts/g1/deploy/g1_ckpt_prep.py \
     --src <微调输出目录> --out ~/holy/models/pi05_g1_ft \
     --stats <训练用的 stats.json> --mode mean_std   # 语义务必与训练配置一致！
 # ② 对齐校验（数学往返 + 引擎语义分发实证 + 落域）
-flashpy ~/holy/scripts/eval/norm_align_check.py --ckpt ~/holy/models/pi05_g1_ft
+flashpy ~/holy/scripts/g1/eval/norm_align_check.py --ckpt ~/holy/models/pi05_g1_ft
 # ③ 真机推理（只读不执行；manifest 自动配置，零参数）
 LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
-flashpy ~/holy/scripts/inference/run_g1_inference.py --ckpt ~/holy/models/pi05_g1_ft
+flashpy ~/holy/scripts/g1/inference/run_g1_inference.py --ckpt ~/holy/models/pi05_g1_ft
 ```
 
 要点（详见 BENCHMARKS.md G1 节与记忆）：
@@ -122,7 +122,7 @@ flashpy ~/holy/scripts/inference/run_g1_inference.py --ckpt ~/holy/models/pi05_g
 
 ```bash
 # 前提: 3.5 三步全绿 + warmup 已跑；急停在手边
-~/holy/run.sh ~/holy/scripts/inference/run_g1_loop.py --exec --rounds 60
+~/holy/run.sh ~/holy/scripts/g1/inference/run_g1_loop.py --exec --rounds 60
 
 # 工作点已写进 config/g1.toml [loop]（n_action_steps=25 / 合步 25 / pace 0.35 /
 # div 1.5 / near-div 2 / near_gap 0.06 / speed 1.0 / delta_max 0.3），无需 CLI 传参。
@@ -155,17 +155,17 @@ v3 的 A/B 孪生：删配速律家族（pace/div/合步/hold 全套），改为
 
 ```bash
 # 冒烟首跑（15fps + 0.5× 速度天花板，1-2 块看节奏再上 30fps）
-~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_native.py --exec --nav-suspend \
+~/holy/run.sh ~/holy/scripts/g1/inference/run_g1_loop_native.py --exec --nav-suspend \
     --rounds 2 --fps 15 --speed 0.5
 
 # Part D 真机三态 A/B（各 60 轮；native 侧用 10-09 定案工作点 6拍/2窗）
 # ① 基线 = v3 配速律（上方 3.6 原命令）
-~/holy/run.sh ~/holy/scripts/inference/run_g1_loop.py --exec --nav-suspend --rounds 60
+~/holy/run.sh ~/holy/scripts/g1/inference/run_g1_loop.py --exec --nav-suspend --rounds 60
 # ② native 裸跑（≈1.0× 原速；星饿 0 窗；tick 过冲 p95<10ms；接缝对照主指标）
-~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_native.py --exec --nav-suspend \
+~/holy/run.sh ~/holy/scripts/g1/inference/run_g1_loop_native.py --exec --nav-suspend \
     --rounds 60 --cmd-every 6 --arrive-div 2
 # ③ native+RTC 前缀引导（同 ② + 引导；预期接缝 < 块内均值）
-~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_native.py --exec --nav-suspend \
+~/holy/run.sh ~/holy/scripts/g1/inference/run_g1_loop_native.py --exec --nav-suspend \
     --rounds 60 --cmd-every 6 --arrive-div 2 --rtc-horizon 10
 ```
 
@@ -221,18 +221,18 @@ high-frequency control usage"）。**默认 N=1=纯 30Hz 直发（原生 lerobot
 来源），标准跑一条命令：
 
 ```bash
-~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_traj.py --exec
+~/holy/run.sh ~/holy/scripts/g1/inference/run_g1_loop_traj.py --exec
 ```
 
 逐项覆盖=CLI 显式传参；布尔档显式关=--no-X 反关旗标。常用覆写例：
 
 ```bash
 # 无 RTC A/B（前缀引导关；skip-frames/fusion 与 RTC 无关照常生效）
-~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_traj.py --exec --execution-horizon 0
+~/holy/run.sh ~/holy/scripts/g1/inference/run_g1_loop_traj.py --exec --execution-horizon 0
 # place 相（place 训练无裁剪；grip-state-cmd 按任务语义决定，place=回读语义须反关）
-~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_traj.py --exec --no-head-crop --no-grip-state-cmd
+~/holy/run.sh ~/holy/scripts/g1/inference/run_g1_loop_traj.py --exec --no-head-crop --no-grip-state-cmd
 # 醒着导航 A/B（编排器 --no-nav-suspend 同款语义）
-~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_traj.py --exec --no-nav-suspend
+~/holy/run.sh ~/holy/scripts/g1/inference/run_g1_loop_traj.py --exec --no-nav-suspend
 ```
 
 档内逐项语义（=同事 lerobot 栈忠实复刻；**旗标名已对齐同事栈词汇**——
@@ -319,9 +319,9 @@ letterbox-vs-crop 另一功能，挂同名会造虚假等价）：
 
 ```bash
 # 冒烟首跑（先 2 块看遥测：突发预算内=丢拍≈0；SDK 单帧调用超预算会持续丢拍→降 --frames-per-row）
-~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_traj.py --exec --nav-suspend --rounds 2
+~/holy/run.sh ~/holy/scripts/g1/inference/run_g1_loop_traj.py --exec --nav-suspend --rounds 2
 # 60 轮（与 3.7 的 native 6/2 工作点 A/B 对照）
-~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_traj.py --exec --nav-suspend --rounds 60
+~/holy/run.sh ~/holy/scripts/g1/inference/run_g1_loop_traj.py --exec --nav-suspend --rounds 60
 ```
 
 与 native 的关键语义差（判读前必读）：

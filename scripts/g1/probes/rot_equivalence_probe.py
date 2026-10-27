@@ -21,7 +21,7 @@ GEMM 的输入（qkv/gate/up 的 GEMM 输入=rms_norm 出来后未旋转的 x_no
 输入=attn 出/hidden，均在 GEMM 入口统一旋转，数学恒等 (xH)(HW)ᵀ=xWᵀ）。
 
 用法:
-  ~/holy/run.sh ~/holy/scripts/probes/rot_equivalence_probe.py \
+  ~/holy/run.sh ~/holy/scripts/g1/probes/rot_equivalence_probe.py \
       [--configs bf16,rot_bf16,int8,rot8] [--ep 0] [--frames 0,60,120,180,240,300]
 """
 import argparse
@@ -62,7 +62,7 @@ NPZ = pathlib.Path(args.npz)
 if not NPZ.exists():
     print(f"npz 缺失，自举 {DS.name} ep{args.ep} → {NPZ} ...", flush=True)
     subprocess.run(["/usr/bin/python3",
-                    "/home/galbot/holy/scripts/dataset/extract_dataset_frames.py",
+                    "/home/galbot/holy/scripts/g1/dataset/extract_dataset_frames.py",
                     "--dataset", str(DS), "--episodes", str(args.ep),
                     "--out", str(NPZ)], check=True)
 

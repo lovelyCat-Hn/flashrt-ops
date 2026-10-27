@@ -13,8 +13,8 @@
 行增量 ×fps = 隐含速度 rad/s。
 
 用法：
-  python3 scripts/eval/chunk_increments.py --chunks-dir logs/chunks_traj_XXXX
-  python3 scripts/eval/chunk_increments.py --chunks-dir ... --frames-per-row 8
+  python3 scripts/g1/eval/chunk_increments.py --chunks-dir logs/chunks_traj_XXXX
+  python3 scripts/g1/eval/chunk_increments.py --chunks-dir ... --frames-per-row 8
 """
 import argparse
 import glob

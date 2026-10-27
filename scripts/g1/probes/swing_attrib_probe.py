@@ -35,16 +35,16 @@ perf_counter 时轴），结束后自动跑归因分析（--analyze 可离线重
 
 用法:
   # 干跑（零下发，打印计划即退）
-  ~/holy/run.sh ~/holy/scripts/probes/swing_attrib_probe.py \
+  ~/holy/run.sh ~/holy/scripts/g1/probes/swing_attrib_probe.py \
       --source chunks --chunks-dir logs/chunks_traj_20261010_110619
   # 真机回放（①②④判读主实验；换块节奏 35 行 + hold 330ms 复现闭环）
-  ~/holy/run.sh ~/holy/scripts/probes/swing_attrib_probe.py \
+  ~/holy/run.sh ~/holy/scripts/g1/probes/swing_attrib_probe.py \
       --source chunks --chunks-dir logs/chunks_traj_XXXX --exec --rows-per-block 35
   # 伺服纯激励（③判读对照实验：指令数学干净）
-  ~/holy/run.sh ~/holy/scripts/probes/swing_attrib_probe.py \
+  ~/holy/run.sh ~/holy/scripts/g1/probes/swing_attrib_probe.py \
       --source synthetic --exec --wave-freq 1.0 --wave-amp 0.05 --joints 2,9
   # 离线重放分析（不碰 SDK，无需 run.sh）
-  python3 ~/holy/scripts/probes/swing_attrib_probe.py \
+  python3 ~/holy/scripts/g1/probes/swing_attrib_probe.py \
       --analyze logs/swing_XXXX/waveform.npz
 """
 import argparse

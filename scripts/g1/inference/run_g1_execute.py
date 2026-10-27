@@ -13,7 +13,7 @@
 用法:
   LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
   ~/miniforge3/envs/flash_pyrt311/bin/python \
-      ~/holy/scripts/inference/run_g1_execute.py \
+      ~/holy/scripts/g1/inference/run_g1_execute.py \
       [--ckpt ~/holy/models/pi05_lerobot_base] [--exec] [--steps 3] [--horizon 50] \
       [--delta-max 0.05] [--force-state-dim] [--prompt "..."] [--grip]
 
@@ -116,7 +116,7 @@ import cv2  # noqa: E402
 import torch  # noqa: E402
 import flash_rt.frontends.torch.pi05_rtx as _fe  # noqa: E402
 
-# 回退 eager 时才封图（PI05_NO_GRAPH=1）；默认开图（scripts/test/bench_pi05.py 同款）
+# 回退 eager 时才封图（PI05_NO_GRAPH=1）；默认开图（scripts/g1/test/bench_pi05.py 同款）
 if os.environ.get("PI05_NO_GRAPH", "0") == "1":
     _orig_init = _fe.Pi05TorchFrontendRtx.__init__
 

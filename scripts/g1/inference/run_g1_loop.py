@@ -54,7 +54,7 @@ place 轮 grip-state-cmd 自动关闭（持物签名会把释放锁死）；导�
 用法:
   LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
   ~/miniforge3/envs/flash_pyrt311/bin/python \
-      ~/holy/scripts/inference/run_g1_loop.py \
+      ~/holy/scripts/g1/inference/run_g1_loop.py \
       [--ckpt ~/holy/models/pi05_g1_onlypick_deploy] [--exec] \
       [--rounds 10] [--n-action-steps 3] [--delta-max 0.05] \
       [--speed 0.15] [--max-excursion 0.25] [--prompt "..."]
@@ -76,7 +76,7 @@ import threading
 import time
 import tty
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "g1"))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "g1" / "body"))
 import g1_warm_core  # noqa: E402  warm 复位共享核心（--post-gate 折叠段与 warmup 共用）
 
 ap = argparse.ArgumentParser(description=__doc__,
@@ -636,7 +636,7 @@ if ENV_LO is not None:
     ENV_HI[8:15] += _m
 import flash_rt.frontends.torch.pi05_rtx as _fe  # noqa: E402
 
-# 回退 eager 时才封图（PI05_NO_GRAPH=1）；默认开图（scripts/test/bench_pi05.py 同款）
+# 回退 eager 时才封图（PI05_NO_GRAPH=1）；默认开图（scripts/g1/test/bench_pi05.py 同款）
 if os.environ.get("PI05_NO_GRAPH", "0") == "1":
     _orig_init = _fe.Pi05TorchFrontendRtx.__init__
 

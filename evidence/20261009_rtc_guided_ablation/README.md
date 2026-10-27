@@ -40,7 +40,7 @@ FlashRT 引擎推理侧 guided RTC（lerobot policies/rtc 移植，FlashRT 本�
 
 ```bash
 ~/miniforge3/envs/flash_pyrt311/bin/python \
-    ~/holy/scripts/eval/rtc_ablation.py 12 \
+    ~/holy/scripts/g1/eval/rtc_ablation.py 12 \
     --out ~/holy/evidence/20261009_rtc_guided_ablation \
     2>&1 | tee ~/holy/evidence/20261009_rtc_guided_ablation/summary.txt
 ```

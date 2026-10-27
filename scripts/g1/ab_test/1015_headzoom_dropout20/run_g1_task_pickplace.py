@@ -2,7 +2,7 @@
 """pick→复位→横移→place 主编排器。
 
 【B 侧脚本，2026-10-15】A/B 对比（同目录 README.md）：本编排器与 A 侧
-scripts/inference/run_g1_task_pickplace.py 的差异只有四处——①LOOP_PY 解析到
+scripts/g1/inference/run_g1_task_pickplace.py 的差异只有四处——①LOOP_PY 解析到
 同目录的 B 版 run_g1_loop.py（头图训练裁剪放大，见其文件头）；②PICK_CKPT=
 pi05_g1_sft1012_dropout20_deploy（sft_1012 头裁剪版权重）；③HOLY 深一层；
 ④分任务图像处理（2026-10-15 同事确认：pick 训练=头裁剪、place 训练=原样
@@ -112,8 +112,8 @@ faulthandler.enable()   # 原生崩溃（SDK segfault 等）打印 Python 级位
 HERE = pathlib.Path(__file__).resolve().parent
 HOLY = HERE.parent.parent.parent   # B 侧深两层（tag/ab_test/scripts→holy）
 LOOP_PY = HERE / "run_g1_loop.py"  # 同目录 B 版 loop（头图裁剪放大）；A 侧同款写法在 inference/ 指其同目录 A 版
-WARMUP_PY = HERE.parent.parent / "g1" / "g1_pose_warmup.py"
-MOVE_PY = HERE.parent.parent / "g1" / "g1_base_move.py"   # move 段/预检子进程
+WARMUP_PY = HERE.parent.parent / "g1" / "body" / "g1_pose_warmup.py"
+MOVE_PY = HERE.parent.parent / "g1" / "body" / "g1_base_move.py"   # move 段/预检子进程
 
 # 与 config/g1.toml [run] 同源（10-12 pick 在役；place 三键存档）
 PICK_CKPT = HOLY / "models/pi05_g1_sft1012_dropout20_deploy"   # B 侧=sft_1012 头裁剪版权重

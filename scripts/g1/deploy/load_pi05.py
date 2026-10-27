@@ -2,7 +2,7 @@
 """pi0.5 权重加载验证：只加载不出动作，确认 checkpoint + norm_stats + 前端链路通。
 
 用法:
-  ~/miniforge3/envs/flash_pyrt311/bin/python ~/holy/scripts/inference/load_pi05.py [ckpt目录]
+  ~/miniforge3/envs/flash_pyrt311/bin/python ~/holy/scripts/g1/deploy/load_pi05.py [ckpt目录]
   缺省加载在役 ckpt（pi05_g1_onlypick_deploy）；也可显式传 base 等其他目录。
 （新 shell 先: unset PYTHONPATH LD_LIBRARY_PATH LD_PRELOAD）
 """

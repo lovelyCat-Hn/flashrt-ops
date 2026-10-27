@@ -41,7 +41,7 @@ NPZ = pathlib.Path(args.npz)
 if not NPZ.exists():
     print(f"npz 缺失，自举 {DS.name} ep{args.ep} → {NPZ} ...", flush=True)
     subprocess.run(["/usr/bin/python3",
-                    "/home/galbot/holy/scripts/dataset/extract_dataset_frames.py",
+                    "/home/galbot/holy/scripts/g1/dataset/extract_dataset_frames.py",
                     "--dataset", str(DS), "--episodes", str(args.ep),
                     "--out", str(NPZ)], check=True)
 
