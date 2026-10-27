@@ -1,6 +1,6 @@
 # flashrt-ops
 
-G1 人形机器人 pi0.5/FlashRT 推理部署与运维仓库（Jetson Orin，L4T R35.6.4）。
+G1/S1 人形机器人 pi0.5/FlashRT 推理部署与运维仓库（Jetson Orin，L4T R35.6.x）。S1 机型建档与维护见 [S1_MAINTENANCE.md](S1_MAINTENANCE.md)。
 
 ## 文档索引
 
