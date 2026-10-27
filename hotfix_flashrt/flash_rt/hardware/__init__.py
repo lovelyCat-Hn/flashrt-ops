@@ -1,0 +1,320 @@
+"""FlashRT hardware-dispatch layer.
+
+Detects the current GPU's compute capability and maps
+``(config, framework, arch)`` triples to concrete frontend classes in
+``flash_rt.frontends.*``.
+
+``flash_rt.api.load_model`` calls ``resolve_pipeline_class`` so user
+code doesn't need to know whether it's running on Jetson Thor (SM110),
+an RTX 5090 (SM120), or an RTX 4090 (SM89).
+
+Adding a new model
+-------------------
+External packages can register new models by mutating ``_PIPELINE_MAP``
+at import time::
+
+    from flash_rt.hardware import _PIPELINE_MAP
+    _PIPELINE_MAP[("mymodel", "torch", "rtx_sm120")] = (
+        "mymodel_plugin.frontend", "MyModelTorchFrontend"
+    )
+
+See ``docs/plugin_model_template.md`` for the full worked example.
+
+Adding a new hardware target
+-----------------------------
+Extend ``detect_arch`` to return a new arch string, then add entries
+to ``_PIPELINE_MAP`` for each (config, framework, new_arch) combination.
+"""
+
+from __future__ import annotations
+
+
+def detect_arch() -> str:
+    """Return a short string identifier for the current CUDA device.
+
+    Supported:
+        ``"npu"``       — Huawei Ascend via torch_npu (CANN 7/8, 910/A2+)
+        ``"thor"``      — Jetson AGX Thor, SM110 (cc 11.0)
+        ``"rtx_sm120"`` — RTX 5090 / DGX Spark GB10 Blackwell, SM120/SM121
+        ``"rtx_sm89"``  — RTX 4090 / Ada, SM89 (cc 8.9)
+        ``"rtx_sm87"``  — Jetson Orin via RTX consumer backend, SM87 (cc 8.7)
+        ``"amd_cdna4"`` — AMD Instinct MI350 series, ROCm (gfx950)
+
+    Raises RuntimeError if no supported accelerator is available or the
+    card has an unsupported SM level. Deliberately strict: silently
+    falling back to the wrong backend would hide latency/correctness
+    regressions.
+
+    **Order matters and is visible to callers.** The Ascend probe runs
+    before the CUDA one, because on a CANN box ``torch.cuda.is_available()``
+    is False while the part is perfectly usable, so a CUDA-first order would
+    reject a working machine. The consequence is that on a host carrying both
+    a usable Ascend device and a CUDA GPU, ``hardware="auto"`` selects the
+    NPU. Pass ``hardware="rtx_sm120"`` (or whichever applies) to pin the
+    other one; an explicit choice is never overridden.
+    """
+    try:
+        import torch
+    except ImportError as e:
+        raise RuntimeError(
+            "FlashRT requires PyTorch for GPU detection") from e
+    # Ascend NPU (torch_npu). Routed before CUDA because on a CANN box
+    # ``torch.cuda.is_available()`` is False while ``torch.npu`` exists.
+    # Importing torch_npu registers the ``torch.npu`` namespace; on a
+    # non-Ascend machine the import simply fails and we fall through.
+    try:
+        import torch_npu  # noqa: F401
+        npu_available = bool(torch.npu.is_available())
+    except Exception:
+        npu_available = False
+    if npu_available:
+        return "npu"
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "FlashRT requires a CUDA- or ROCm-capable GPU "
+            "(torch.cuda.is_available()==False)")
+    if getattr(torch.version, "hip", None):
+        # ROCm build: route by the gfx architecture name, not the CUDA
+        # cc tuple (which ROCm fills with unrelated values).
+        gcn = torch.cuda.get_device_properties(0).gcnArchName
+        if gcn.split(":")[0] == "gfx950":
+            return "amd_cdna4"
+        raise RuntimeError(
+            f"FlashRT: unsupported ROCm GPU arch {gcn!r}. "
+            "Supported: gfx950 (MI350 series / CDNA4).")
+    major, minor = torch.cuda.get_device_capability()
+    if (major, minor) == (11, 0):
+        return "thor"
+    if (major, minor) in ((12, 0), (12, 1)):
+        return "rtx_sm120"
+    if (major, minor) == (8, 7):
+        return "rtx_sm87"
+    if (major, minor) == (8, 9):
+        return "rtx_sm89"
+    raise RuntimeError(
+        f"FlashRT: unsupported GPU SM {major}.{minor}. "
+        f"Supported architectures: SM110 (Thor), SM120/SM121 (Blackwell), "
+        f"SM89 (RTX 4090), SM87 (Jetson Orin experimental)."
+    )
+
+
+# Dispatch table: (config, framework, arch) → (module_path, class_name).
+# Resolved lazily at load_model time so importing ``flash_rt`` does not
+# drag in every backend. External plugins may add entries to this dict
+# to register new models — see ``docs/plugin_model_template.md``.
+_PIPELINE_MAP: dict[tuple[str, str, str], tuple[str, str]] = {
+    # ── Pi0.5 ──
+    ("pi05", "torch", "thor"):
+        ("flash_rt.frontends.torch.pi05_thor", "Pi05TorchFrontendThor"),
+    ("pi05", "torch", "rtx_sm120"):
+        ("flash_rt.frontends.torch.pi05_rtx", "Pi05TorchFrontendRtx"),
+    ("pi05", "torch", "rtx_sm87"):
+        ("flash_rt.frontends.torch.pi05_rtx", "Pi05TorchFrontendRtx"),
+    ("pi05", "torch", "amd_cdna4"):
+        ("flash_rt.amd.frontends.torch.pi05", "Pi05TorchFrontendAmd"),
+    ("pi05", "torch", "npu"):
+        ("flash_rt.npu.frontends.torch.pi05", "Pi05TorchFrontendNpu"),
+    ("pi05", "torch", "rtx_sm89"):
+        ("flash_rt.frontends.torch.pi05_rtx", "Pi05TorchFrontendRtx"),
+    ("pi05", "jax", "thor"):
+        ("flash_rt.frontends.jax.pi05_thor", "Pi05JaxFrontendThor"),
+    ("pi05", "jax", "rtx_sm120"):
+        ("flash_rt.frontends.jax.pi05_rtx", "Pi05JaxFrontendRtx"),
+    ("pi05", "jax", "rtx_sm89"):
+        ("flash_rt.frontends.jax.pi05_rtx", "Pi05JaxFrontendRtx"),
+
+    # ── FineART-VLA (π0.5 + System 2 language head, Scale AI × HF) ──
+    # System 1 = inherited π0.5 path; subclass adds subtask text decode.
+    ("fineart_vla", "torch", "rtx_sm87"):
+        ("flash_rt.frontends.torch.fineart_vla_rtx",
+         "FineARTVLATorchFrontendRtx"),
+
+    # ── Pi0 ── (Thor native + RTX consumer via pipeline_rtx.py.)
+    ("pi0", "torch", "thor"):
+        ("flash_rt.frontends.torch.pi0_thor", "Pi0TorchFrontendThor"),
+    ("pi0", "torch", "rtx_sm120"):
+        ("flash_rt.frontends.torch.pi0_rtx", "Pi0TorchFrontendRtx"),
+    ("pi0", "torch", "rtx_sm89"):
+        ("flash_rt.frontends.torch.pi0_rtx", "Pi0TorchFrontendRtx"),
+    ("pi0", "jax", "thor"):
+        ("flash_rt.frontends.jax.pi0_thor", "Pi0JaxFrontendThor"),
+    ("pi0", "jax", "rtx_sm120"):
+        ("flash_rt.frontends.jax.pi0_rtx", "Pi0JaxFrontendRtx"),
+    ("pi0", "jax", "rtx_sm89"):
+        ("flash_rt.frontends.jax.pi0_rtx", "Pi0JaxFrontendRtx"),
+
+    # ── Hy-Embodied-0.5-VLA (HunYuan MoT dual-tower + flow matching) ──
+    ("hyvla", "torch", "thor"):
+        ("flash_rt.frontends.torch.hyvla_thor", "HyVLATorchFrontendThor"),
+    ("hyvla", "torch", "rtx_sm87"):
+        ("flash_rt.frontends.torch.hyvla_orin", "HyVLATorchFrontendOrin"),
+
+    # ── GROOT N1.6 ──
+    ("groot", "torch", "thor"):
+        ("flash_rt.frontends.torch.groot_thor", "GrootTorchFrontendThor"),
+    ("groot", "torch", "rtx_sm120"):
+        ("flash_rt.frontends.torch.groot_rtx", "GrootTorchFrontendRtx"),
+
+    # ── GROOT N1.7 ──
+    ("groot_n17", "torch", "thor"):
+        ("flash_rt.frontends.torch.groot_n17_thor_fp8",
+         "GrootN17TorchFrontendThorFP8"),
+    ("groot_n17", "torch", "rtx_sm120"):
+        ("flash_rt.frontends.torch.groot_n17_rtx",
+         "GrootN17TorchFrontendRtx"),
+    ("groot_n17", "torch", "rtx_sm89"):
+        ("flash_rt.frontends.torch.groot_n17_rtx_sm89",
+         "GrootN17TorchFrontendRtxSm89"),
+    ("groot_n17", "torch", "npu"):
+        ("flash_rt.npu.frontends.torch.groot_n17", "GrootN17TorchFrontendNpu"),
+    ("groot_n17", "torch", "amd_cdna4"):
+        ("flash_rt.amd.frontends.torch.groot_n17",
+         "GrootN17TorchFrontendAmd"),
+
+    # ── Motus (Wan2.2 + Qwen-VL + action/understanding experts) ──
+    # RTX 5090 path only for now. Motus uses a bundle-based E2E contract
+    # rather than the image-list VLA API used by Pi0/Pi0.5/GROOT.
+    ("motus", "torch", "rtx_sm120"):
+        ("flash_rt.frontends.torch.motus_rtx", "MotusTorchFrontendRtx"),
+
+    # ── Wan2.2 TI2V-5B official pipeline baseline ──
+    ("wan22_ti2v_5b", "torch", "rtx_sm120"):
+        ("flash_rt.frontends.torch.wan22_rtx", "Wan22TorchFrontendRtx"),
+
+    # ── LTX-2.5 22B distilled audio+video (RTX SM120 only) ──
+    ("ltx25", "torch", "rtx_sm120"):
+        ("flash_rt.frontends.torch.ltx25_rtx", "Ltx25TorchFrontendRtx"),
+
+    # ── Cosmos3-Nano text2video FP8 denoise (RTX SM120 only) ──
+    ("cosmos3_video", "torch", "rtx_sm120"):
+        ("flash_rt.frontends.torch.cosmos3_video_rtx", "Cosmos3VideoTorchFrontendRtx"),
+
+    # ── Qwen3-VL (multimodal Qwen3-VL-8B, NVFP4 + FP8 paths) ──
+    # VLM with chat-style API (generate(messages) -> str), not VLA
+    # predict(images). Requires the gated kernel build
+    # (-DFLASHRT_BUILD_QWEN3_VL=ON). Registered for resolver/direct frontend
+    # discovery only; load_model(config="qwen3_vl") raises a redirect because
+    # the frontend exposes a chat-style VLM surface rather than VLAModel.
+    # See docs/qwen3_vl_nvfp4.md and docs/qwen3_vl_fp8_sm89.md.
+    ("qwen3_vl", "torch", "rtx_sm120"):
+        ("flash_rt.frontends.torch.qwen3_vl_rtx", "Qwen3VlTorchFrontendRtx"),
+    ("qwen3_vl", "torch", "rtx_sm89"):
+        ("flash_rt.frontends.torch.qwen3_vl_fp8_sm89_multimodal",
+         "Qwen3VlFp8Sm89Frontend"),
+    # Jetson Thor (SM110): BF16 frontend. The vendored FA2 is not built on
+    # sm_110, so attention runs through the Thor SDPA backend; dims come from
+    # config.json. See docs/qwen3_vl_thor.md.
+    ("qwen3_vl", "torch", "thor"):
+        ("flash_rt.frontends.torch.qwen3_vl_thor",
+         "Qwen3VlTorchFrontendThor"),
+    # Jetson Orin (SM87, Ampere): no FP8/FP4 tensor cores, so neither the FP8
+    # nor the NVFP4 Qwen3-VL path applies. BF16 language stack over the FA2
+    # (sm_80 codegen) attention backend, with opt-in INT8/INT4 decode weight
+    # quantization. See docs/qwen3_vl_rtx_bf16.md.
+    ("qwen3_vl", "torch", "rtx_sm87"):
+        ("flash_rt.frontends.torch.qwen3_vl_rtx_bf16",
+         "Qwen3VlTorchFrontendRtxBF16"),
+
+    # ── Chameleon-7B ──
+    # Direct frontend (set_prompt/generate), not the VLA predict() surface.
+    # Orin SM87: INT8/INT4+QuaRot-Hadamard path; compute in
+    # flash_rt/models/chameleon/pipeline_rtx.py. Registered for resolver /
+    # direct-construction discovery only; load_model(config="chameleon")
+    # raises a redirect because this exposes set_prompt() + generate(),
+    # not the VLA predict() surface. See docs/chameleon7b_rtx_sm87.md.
+    ("chameleon", "torch", "rtx_sm87"):
+        ("flash_rt.frontends.torch.chameleon_rtx_sm87",
+         "ChameleonTorchFrontendRtxSm87"),
+    # Thor SM110: dynamic-FP8 backbone (optional NVFP4 FFN), attention via
+    # the dedicated Chameleon Thor backend (FA4 -> CUTLASS causal FMHA ->
+    # cuBLAS fallback). Compute in flash_rt/models/chameleon/pipeline_thor.py.
+    # See docs/chameleon_usage.md.
+    ("chameleon", "torch", "thor"):
+        ("flash_rt.frontends.torch.chameleon_thor",
+         "ChameleonTorchFrontendThor"),
+
+    # Cosmos3-Edge official Thor baseline.
+    ("cosmos3_edge", "torch", "thor"):
+        ("flash_rt.frontends.torch.cosmos3_edge_thor", "Cosmos3EdgeTorchFrontendThor"),
+
+    # ── Nex-N2-mini / Qwen3.6-35B-A3B (qwen3_5_moe) ──
+    # Text LLM, not a VLA: GDN linear-attn + full-attn-every-4th + 256-expert
+    # NVFP4 MoE. Registered here for discoverability / resolve_pipeline_class,
+    # but the frontend exposes an LLM surface (infer()->logits,
+    # generate_greedy) rather than the VLA predict(images) API, so these are
+    # used via direct frontend construction rather than load_model's VLAModel
+    # wrapper.
+    #
+    # Nex-N2 is RTX 5090 (SM120) and needs the full gated kernel build
+    # (-DFLASHRT_ENABLE_QWEN35MOE=ON).
+    ("nexn2", "torch", "rtx_sm120"):
+        ("flash_rt.frontends.torch.nexn2_rtx", "Nexn2TorchFrontendRtx"),
+    # Qwen3.6 runs the same frontend on RTX SM120 and on Jetson AGX Thor
+    # (SM110). The two differ only in which kernel tiers the build has:
+    # SM120 takes the whole switch, Thor takes the two tiers its toolchain can
+    # compile. See docs/qwen36_moe_usage.md for the exact command per target.
+    ("qwen36_moe", "torch", "rtx_sm120"):
+        ("flash_rt.frontends.torch.qwen36_moe",
+         "Qwen36MoeTextFrontend"),
+    ("qwen36_moe", "torch", "thor"):
+        ("flash_rt.frontends.torch.qwen36_moe",
+         "Qwen36MoeTextFrontend"),
+
+    # ── Pi0-FAST ── (SM120 runtime fork inside pipeline, no AttentionBackend protocol.)
+    ("pi0fast", "torch", "thor"):
+        ("flash_rt.frontends.torch.pi0fast", "Pi0FastTorchFrontend"),
+    ("pi0fast", "torch", "rtx_sm120"):
+        ("flash_rt.frontends.torch.pi0fast", "Pi0FastTorchFrontend"),
+    ("pi0fast", "jax", "thor"):
+        ("flash_rt.frontends.jax.pi0fast", "Pi0FastJaxFrontend"),
+    ("pi0fast", "jax", "rtx_sm120"):
+        ("flash_rt.frontends.jax.pi0fast", "Pi0FastJaxFrontend"),
+}
+
+
+# (config, framework, "rtx_sm87") keys supported on Jetson Orin. Ampere has no
+# FP8/FP4 tensor cores, so each model needs an arch-specific INT8/BF16
+# frontend; an explicit allowlist keeps an unrelated FP8 frontend from
+# resolving here and crashing later at the first kernel launch.
+_SM87_ALLOWED = {
+    ("pi05", "torch", "rtx_sm87"),
+    ("fineart_vla", "torch", "rtx_sm87"),
+    ("chameleon", "torch", "rtx_sm87"),
+    ("qwen3_vl", "torch", "rtx_sm87"),
+    ("hyvla", "torch", "rtx_sm87"),
+}
+
+
+def resolve_pipeline_class(config: str, framework: str, arch: str):
+    """Resolve (config, framework, arch) to a pipeline class object.
+
+    Lazily imports the backend module — touching ``flash_rt.hardware``
+    does not pull in torch/jax/rtx code until a load happens.
+    """
+    key = (config, framework, arch)
+    if arch == "rtx_sm87" and key not in _SM87_ALLOWED:
+        supported = sorted({c for (c, f, _) in _SM87_ALLOWED if f == framework})
+        raise RuntimeError(
+            "FlashRT: Jetson Orin SM87 supports the following configs with "
+            f"framework={framework!r}: {supported}. "
+            f"config={config!r} is not supported yet."
+        )
+    if key not in _PIPELINE_MAP:
+        supported = sorted(
+            (c, f, a) for (c, f, a) in _PIPELINE_MAP
+            if c == config and f == framework
+        )
+        if supported:
+            hint = (f"This model/framework combo is built for: "
+                    f"{[a for (_, _, a) in supported]}")
+        else:
+            hint = (f"No backend for config={config!r} "
+                    f"framework={framework!r} in any supported architecture.")
+        raise RuntimeError(
+            f"FlashRT: no pipeline for "
+            f"config={config!r} framework={framework!r} arch={arch!r}. "
+            f"{hint}"
+        )
+    module_path, cls_name = _PIPELINE_MAP[key]
+    module = __import__(module_path, fromlist=[cls_name])
+    return getattr(module, cls_name)

@@ -85,7 +85,7 @@ class VLAModel:
         except Exception:
             return a is b
 
-    def predict(self, images, prompt=None, state=None):
+    def predict(self, images, prompt=None, state=None, rtc_prefix=None):
         """Run inference.
 
         Args:
@@ -97,6 +97,9 @@ class VLAModel:
                    set_prompt() for frontends that encode state in prompt
                    tokens, and attached to the observation for frontends that
                    consume state during infer().
+            rtc_prefix: guided-RTC prefix — the previous chunk's unexecuted
+                   leftover in DATA space, (m, action_dim); requires a model
+                   loaded with rtc=True. None (default) runs unguided.
 
         Returns:
             np.ndarray: actions
@@ -161,8 +164,19 @@ class VLAModel:
             self._pipe.calibrate_with_real_data([obs])
             self._needs_real_data_calibration = False
 
-        result = self._pipe.infer(obs)
+        result = self._pipe.infer(obs, **self._rtc_infer_kwargs(rtc_prefix))
         return result['actions']
+
+    def _rtc_infer_kwargs(self, rtc_prefix):
+        """Forward rtc_prefix to frontends that declare it; refuse silently-ignored guidance."""
+        if rtc_prefix is None:
+            return {}
+        import inspect
+        if "rtc_prefix" not in inspect.signature(self._pipe.infer).parameters:
+            raise ValueError(
+                "rtc_prefix needs a model loaded with rtc=True "
+                "(load_model(..., rtc=True))")
+        return {"rtc_prefix": rtc_prefix}
 
     def warm_state_prompt_buckets(self, images, prompt, states):
         """Pre-build Pi0.5 state-prompt runtime buckets.
@@ -350,6 +364,9 @@ def load_model(checkpoint, framework="torch", num_views=2, autotune=3,
                backend="cpu",
                action_steps=None,
                action_dim=None,
+               rtc=None,
+               rtc_horizon=None,
+               rtc_max_weight=None,
                lib_path=None,
                n_ctx=0,
                n_threads=0,
@@ -579,12 +596,12 @@ def load_model(checkpoint, framework="torch", num_views=2, autotune=3,
     elif config not in ("pi05", "groot", "groot_n17", "pi0", "pi0fast",
                       "motus", "wan22_ti2v_5b", "cosmos3_video",
                       "cosmos3_edge", "nexn2", "qwen36_moe", "hyvla",
-                      "ltx25"):
+                      "ltx25", "fineart_vla"):
         raise ValueError(
             f"Unknown config: {config}. "
             f"Supported: pi05, groot, groot_n17, pi0, pi0fast, motus, "
             f"wan22_ti2v_5b, cosmos3_video, cosmos3_edge, nexn2, "
-            f"qwen36_moe, hyvla, ltx25")
+            f"qwen36_moe, hyvla, ltx25, fineart_vla")
     if framework not in ("torch", "jax", "jetson_pi"):
         raise ValueError(
             f"Unknown framework: {framework}. Supported: torch, jax, jetson_pi")
@@ -1046,6 +1063,11 @@ def load_model(checkpoint, framework="torch", num_views=2, autotune=3,
     # （pi05_rtx 切片 LIBERO_ACTION_DIM=7；2026-09-21 16 维预检新增）
     if action_dim is not None and "action_dim" in sig.parameters:
         kwargs["action_dim"] = action_dim
+    # Guided RTC（lerobot policies/rtc 引导模式）：声明了才转发，None 保持前端默认。
+    for _rtc_name, _rtc_value in (("rtc", rtc), ("rtc_horizon", rtc_horizon),
+                                  ("rtc_max_weight", rtc_max_weight)):
+        if _rtc_value is not None and _rtc_name in sig.parameters:
+            kwargs[_rtc_name] = _rtc_value
     if config == "pi0fast":
         kwargs.update(
             autotune=autotune,

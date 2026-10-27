@@ -18,6 +18,12 @@
 #             避开 A8W8 激活量化的夹爪通道偏置；默认关，行为不变。
 #             ⚠ 真正启用还需重编 .so：flashrt_kernel_patch/ 里的 git am 补丁
 #             + flash_pyrt311 环境 nvcc 11.8 重建，见 flashrt_kernel_patch/README.md）
+#   20261027  fineart_vla 注册件（S1 机新加，镜像同步进本目录）：
+#             hardware/__init__.py（_PIPELINE_MAP + _SM87_ALLOWED 各 +1 行）、
+#             api.py（config 白名单 + fineart_vla）、
+#             frontends/torch/fineart_vla_rtx.py（pi05 子类 + 懒加载 text lm_head，
+#             generate_subtask 待移植）、models/fineart_vla/__init__.py。
+#             System 1 = pi05 前端原样继承；权重 = lerobot HF release 目录原样。
 # 环境本体（torch wheel / .so / tokenizer / 权重）不受影响——只换这 6 个 py 文件
 # （W8A16 的 kernel 源码补丁是可选附加，不影响 6 文件热修的幂等性）。
 # 本目录的文件 = deploy 机 2026-09-28 验证过的版本（graph 修复经 bench+数值校验）
@@ -39,7 +45,9 @@ probe() {  # 0=补丁已在, 1=缺
         && grep -q "FVK_PI05_RTX_INT8_ENC_SKIP" "$DST/flash_rt/frontends/torch/pi05_rtx.py" 2>/dev/null \
         && grep -q "int8w" "$DST/flash_rt/models/pi05/pipeline_rtx.py" 2>/dev/null \
         && grep -q "FVK_PI05_RTX_W8A16_DECODER" "$DST/flash_rt/frontends/torch/pi05_rtx.py" 2>/dev/null \
-        && grep -q "use_w8a16_decoder" "$DST/flash_rt/models/pi05/pipeline_rtx.py" 2>/dev/null
+        && grep -q "use_w8a16_decoder" "$DST/flash_rt/models/pi05/pipeline_rtx.py" 2>/dev/null \
+        && grep -q "FineARTVLATorchFrontendRtx" "$DST/flash_rt/hardware/__init__.py" 2>/dev/null \
+        && [ -f "$DST/flash_rt/frontends/torch/fineart_vla_rtx.py" ] 2>/dev/null
 }
 
 if probe; then
@@ -48,12 +56,12 @@ if probe; then
 fi
 
 echo "→ 应用热修到 $DST ..."
-for f in flash_rt/api.py flash_rt/frontends/torch/pi05_rtx.py flash_rt/frontends/torch/pi05_rtx_fp16.py flash_rt/core/utils/actions.py flash_rt/core/cuda_graph.py flash_rt/models/pi05/pipeline_rtx.py; do
+for f in flash_rt/api.py flash_rt/frontends/torch/pi05_rtx.py flash_rt/frontends/torch/pi05_rtx_fp16.py flash_rt/core/utils/actions.py flash_rt/core/cuda_graph.py flash_rt/models/pi05/pipeline_rtx.py flash_rt/hardware/__init__.py flash_rt/frontends/torch/fineart_vla_rtx.py flash_rt/models/fineart_vla/__init__.py; do
     cp -v "$SRC/$f" "$DST/$f" || { echo "❌ 复制失败: $f"; exit 1; }
 done
 
 if probe; then
-    echo "✅ 热修应用完成（6 文件，纯 Python，无需重装/重编）"
+    echo "✅ 热修应用完成（9 文件 = 6 热修 + 3 fineart_vla 注册件，纯 Python，无需重装/重编）"
 else
     echo "❌ 应用后探针仍失败——文件版本不匹配？对照 DEPLOY.md 处置表 #10"
     exit 1
