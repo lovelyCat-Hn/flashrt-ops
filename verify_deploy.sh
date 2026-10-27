@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # FlashRT + pi0.5 一键验收（部署完跑这个；只读+GPU推理，不动任何系统配置）
-# 用法: bash ~/holy/scripts/verify_deploy.sh
+# 用法: bash ~/holy/verify_deploy.sh
 set -u
 PY=~/miniforge3/envs/flash_pyrt311/bin/python
 PASS=0; FAIL=0
@@ -90,7 +90,7 @@ EOF
 
 echo "=== ④ 加载冒烟（在役 ckpt：safetensors+norm_stats+前端链路） ==="
 if [ "$WOK" = yes ]; then
-    PI05_NO_GRAPH=1 FVK_PI05_RTX_FORCE_INT8=1 "$PY" ~/holy/scripts/inference/load_pi05.py 2>&1 | tail -3
+    PI05_NO_GRAPH=1 FVK_PI05_RTX_FORCE_INT8=1 "$PY" ~/holy/scripts/g1/deploy/load_pi05.py 2>&1 | tail -3
     [ ${PIPESTATUS[0]} -eq 0 ] && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
 else
     echo "  ⏭️ 跳过（权重未就位，见 ② 提示）"
