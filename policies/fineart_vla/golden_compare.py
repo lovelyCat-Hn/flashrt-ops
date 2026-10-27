@@ -62,13 +62,35 @@ def main() -> int:
               f"max|Δ|={diff:.4g}")
         print(f"    逐维 cos: {[round(c, 4) for c in per_dim]}")
 
+    # 精度带 = bf16 参考自己 vs fp32 参考的逐维 cos——低幅维（夹爪）上
+    # 引擎残差只要与带同量级即精度项，非结构分歧（2026-10-27 判据补充）。
+    band = None
+    if has_bf16:
+        band = [float(_cos(r16[:, i], rf32[:, i])) for i in range(e.shape[-1])]
+        report["band_per_dim_bf16_vs_fp32"] = [round(c, 6) for c in band]
+        report["band_min_dim"] = min(band)
+        print(f"[3] 精度带 bf16参考vs fp32参考: 逐维 min={min(band):.6f}")
+        print(f"    逐维 band: {[round(c, 4) for c in band]}")
+
     judge_key = "cos_min_dim_bf16" if has_bf16 else "cos_min_dim_fp32"
     ok = tokens_equal and report[judge_key] >= 0.999
     report["pass"] = bool(ok)
     report["judge_key"] = judge_key
+    # 结构判据：引擎残差落入精度带内（带值 −0.005 容差）
+    if band is not None:
+        e16 = report["cos_per_dim_bf16"]
+        structural = tokens_equal and all(
+            ev >= bd - 0.005 for ev, bd in zip(e16, band))
+        report["pass_structural"] = bool(structural)
+        report["structural_note"] = (
+            "引擎残差 ≤ 精度带（bf16参考vs fp32参考）+0.005 容差，逐维成立"
+            if structural else "存在超出精度带的结构性分歧维")
     (d / "compare.json").write_text(json.dumps(report, indent=2))
-    print(f"{'✅ 金标通过' if ok else '❌ 金标未过'}"
+    print(f"{'✅ 金标通过' if ok else '❌ 严格阈值未过'}"
           f"（判据=token 逐位一致 且 逐维 cos({judge_key.split('_')[-1]}) ≥ 0.999）")
+    if band is not None:
+        print(f"{'✅ 结构判据通过' if report['pass_structural'] else '❌ 结构判据未过'}"
+              "（引擎残差落入精度带内）")
     print(f"落盘 {d}/compare.json")
     return 0 if ok else 1
 

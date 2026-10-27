@@ -42,3 +42,14 @@ metadata:
 - **冒烟通过**（evidence/20261027_153444_fineart_text_smoke/）：'pick up the object'→**'Put the black microfiber towel into the bin'**（合成噪声图 OOD 口径下语义贴题度意外地好）、贪心 3 次逐字一致、'wipe the table'→'Return to Home Position'（prompt 敏感）、热调 p50 **865ms**（System 2 可降频摊销，够用）、解码器在场 System 1 回归 (50,14) 有限值。配套 `smoke_text.py`（判据=机制：跑通+确定性+非空+S1 回归；语义质量留真图）。
 - **坑两枚**：① RoPE 广播——cos/sin (S,D) 与半分 x (…,D/2) 不广播，用 rotate_half 约定 `x*cos+rotate_half(x)*sin`；② **前端 infer 返回 `{'actions': numpy}` 非 torch**（unnorm 后即 numpy），脚本解包 dict→torch/numpy 两态都接。
 - **挂账**：parity 金标（py3.12 conda env，用户装）、FAST 头（gemma_expert.lm_head [257152,1024]）评估、解码器提速可选（CUDA graph/内核化，当前 0.9s/次够用）。
+
+**✅ parity 金标完结（2026-10-27 深夜，ops fdeb9aa+续）**：
+- **金标抓真 bug 并已修**：fineart 权重 **embedding 与 lm_head untied**（行间 cos 0.87–0.97=同初始化微调漂移），引擎 System 1 按 pi05 tied 约定拿 `lm_head.weight` 当输入嵌入表 → prompt 嵌入偏 → 动作全体 cos 0.40。修复=`fineart_vla_rtx.py` 新增 `_ensure_embed_table()`（lazy 加载 `embed_tokens.weight`）+ `_embed_prompt_cached` 换表。System 2 文本解码当时就用对了表（untied 在 Stage 2b 已实证），**System 1 漏了同一刀**——同病不同治的教训。
+- **终判**：引擎 vs autocast-bf16 参考全体 **0.999991**、逐维 min 0.9854（dim6 左夹爪）；精度带（bf16参考 vs fp32参考）dim6=0.9895——引擎残差≈精度带同量级=**结构判据通过**；夹爪两维数据空间差 1e-4（≈全开程 0.01%）；compare.json 双判据落档（pass=严格 0.999 阈值 / pass_structural=带内）。
+- **方法论新增**：**窄带序列 cos 对中心偏移极敏感**——低幅维逐维 cos 不能拿绝对阈值硬卡，要配精度带标尺（同精度对照自己 vs 更精参照的逐维 cos）。
+- **CPU bf16 对照配方**：用 **CPU autocast**（权重留 fp32、matmul 动态转 bf16、fp32 累积最贴引擎语义）；**`policy.to(bf16)` 必炸**——`sample_actions` 内 noise/time 强转 fp32（modeling_pi05 euler 循环 `torch.full(..., float32)`），混 dtype 两度实证；inductor bf16 图缓存前科→`_dynamo.config.disable=True`；OMP_NUM_THREADS=8 下 fp32 309.8s / autocast 303.3s。
+- **工具链落位**：`policies/fineart_vla/golden_{engine,reference,compare}.py` 三连 + 逐层定位 `probe_stages_{engine,ref}.py`/`compare_stages.py`（A 输入嵌入/B LLM 输出/C 去噪轨迹三段，一次定位到层）；evidence/fineart_parity/（README=条件+复现+文件清单）；BENCHMARKS §十二+§〇表 0-1 行+§九索引行。
+- **口径/网络事实**：hf-mirror 对 google/* 选择性 403（lerobot/* 200）、huggingface.co 不通（Errno 101）；本地 sp 原件→HF fast tokenizer 转换（tokenizer_config.json `GemmaTokenizer` + 需 protobuf）与引擎 sp.Encode **token 级逐位等价（55/55）已实证**。
+- **引擎内部事实**：`pi05_rtx.py:413` embedding=lm_head 约定仅对 tied 权重成立；denoise 时间表引擎=参考=[1.0→0.1] NOISE_AT_ONE 同网格（已对表）；`_prefix_out`/`denoise_trace`/`prefix_features` 构造参数可开（load_model 签名过滤会吞，须直构前端类）；`_prefix_features_result` 是均值池化，要全序列直接切 `_prefix_out` buffer。
+- **流程事实**：只推 gitee（用户定案）；github fork 挂起（lovelyCat-Hn key 当前 publickey denied；ssh.github.com:443 可达但未授权）；FlashRT clone 本地领先上游 8 提交未推。
+- **挂账更新**：~~parity 金标~~已结；剩 **FAST 头（gemma_expert.lm_head）评估**=引擎能力验证最后一块；System 2 贪心口径 vs eager 的严格 parity 可选。

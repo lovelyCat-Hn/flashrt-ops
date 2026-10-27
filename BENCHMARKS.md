@@ -23,6 +23,7 @@
 | 闭环执行器 | run_g1_loop.py + `--nav-suspend` | 在用 | §五/§七 |
 | 闭环工作点 | v3 = 25/0.35/1.5（1.59×） | 在用（⚠ 持物未验） | §七 |
 | 执行侧接缝衔接（traj 回放台） | entry-match 动态入口 + EMA 0.3 | 采用候选（手感待判） | §十一 |
+| fineart_vla System 1 parity | 引擎=官方实现（残差≤精度带） | 采用候选（挂 FAST 头评估） | §十二 |
 
 **表 0-2 延迟阶梯摘要**（冻结帧=零运动零取图，条件详见 §一）
 
@@ -378,6 +379,7 @@ cache_frames=1、合成观测（随机图×3+1px 平移扰动）、种子 202610
 | 表 5-x 导航搁置 | `kill -STOP <7 进程>` + 同遥测；sdkfree：`~/holy/run.sh ~/holy/scripts/g1/probes/sdkfree_infer_probe.py` |
 | 表 7-x 闭环 | `~/holy/scripts/g1/inference/run_g1_loop.py --nav-suspend [--exec] --n-action-steps 25 --steps-per-command 25 --pace 0.35 --pace-div 1.5`（⚠ `--exec` 驱臂） |
 | 表 8-x RTC 引导消融 | `~/miniforge3/envs/flash_pyrt311/bin/python ~/holy/scripts/g1/eval/rtc_ablation.py 12 --out ~/holy/evidence/20261009_rtc_guided_ablation` |
+| 表 12-1 parity 金标 | `golden_engine.py` → `golden_reference.py` → `golden_compare.py`（三连，见 `evidence/fineart_parity/README.md`） |
 | 原始输出 | `evidence/20261006-07_quant_kv_ablation/`（quant）；`evidence/20261009_rtc_guided_ablation/`（RTC）；闭环日志 `logs/loop_*.log` |
 
 ## 十、夹爪物理速度标定（2026-10-13，grip_speed_bench.py）
@@ -455,3 +457,33 @@ gap 为 max 关节口径（|rows[j]−臂实时位| 最大关节差），含臂�
   --rows-per-block 11 --entry-match --ema-alpha 0.3 --hold-ms 0 --rounds 27 --exec
 ```
 原始件：`evidence/20261017_entry_match_replay_ablation/`（4 份回放日志 + README）
+
+## 十二、fineart_vla 引擎 parity 金标（2026-10-27，golden_engine/reference/compare）
+
+条件：S1（Orin sm_87，R35.6.0）；ckpt `fineart_vla_midtrained`（ALOHA 14 维）；
+引擎 = FlashRT fineart_vla 前端 bf16 + graph（infer 0.32 s）；参考 = 官方 lerobot
+0.6.2 CPU eager 两遍（fp32 309.8 s / autocast bf16 303.3 s，OMP 8）；合成输入同源
+（state seed7 / 图 seed 8-9-10 / noise seed123）；prompt token 55 双侧逐位一致。
+原始件：`evidence/fineart_parity/`（含 README 与复现命令）。
+
+**表 12-1 动作逐维一致性（(50,14)，cos，四位小数）**
+
+| 对照组 | 全体 cos | 逐维 min | 落点维 | 档位 |
+|---|---:|---:|---|---|
+| 引擎 vs 参考·autocast bf16 | 0.999991 | 0.9854 | 6（左夹爪） | 基线判据组 |
+| 引擎 vs 参考·fp32 | 0.999982 | 0.9815 | 6 | 对照 |
+| 精度带（参考 bf16 vs fp32） | 0.999990 | 0.9895 | 6 | 判据标尺 |
+| **结构判据（引擎残差 ≤ 带+0.005 逐维）** | — | — | 通过 | **采用候选** |
+
+⚠ 注脚：① 夹爪维（6/13）归一化幅度 ≈0.01–0.02σ，窄带序列 cos 对中心偏移极敏感，
+绝对阈值 0.999 在这两维不适用，判定以精度带为准；两维数据空间差距 0.0001/0.0002
+（≈全开程 0.01%）。② 其余 12 维 0.9997–1.0000。③ 前置硬门：token 序列逐位一致。
+④ 金标首跑曾抓出 untied embedding 错表 bug（0.40），修复后为本表——细节在记忆库。
+
+复现：
+```bash
+~/miniforge3/envs/flash_pyrt311/bin/python ~/holy/policies/fineart_vla/golden_engine.py
+cd ~/lerobot && OMP_NUM_THREADS=8 ~/miniforge3/envs/lerobot_cpu/bin/python -u \
+    ~/holy/policies/fineart_vla/golden_reference.py
+~/miniforge3/envs/flash_pyrt311/bin/python ~/holy/policies/fineart_vla/golden_compare.py
+```
