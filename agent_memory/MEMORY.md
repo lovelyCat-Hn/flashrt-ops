@@ -1,10 +1,11 @@
+- [FineART-VLA 接入 FlashRT](galbot-fineart-vla-flashrt-port.md) — 引擎能力验证线（非部署）：fineart 继承 pi05，delta=两个 lm_head；**Stage 2 全落地 10-27**：注册链通+System 1 冒烟✅(50,14)+System 2 纯 torch 文本解码✅（贪心确定/p50 865ms/7.4GB 懒建）；坑=子类 **kwargs 吞签名转发/infer 前必 calibrate/infer 返回 numpy；挂账=parity 金标+FAST 头
+- [S1 机 SDK/本体要点](galbot-s1-sdk-and-body-basics.md) — SDK 1.10.0 用 galbot_sdk.s1（含 3.11 绑定+.pyi 存根）；状态 19 维/torso 组/夹爪 0.007-0.11m；singorix 文档在 /data/galbot/share；yuqiz 有可跑源码；10-27 手臂掉落教训
+- [本机 = Galbot S1 系列机（第四台）装机状态](galbot-s1-machine-state.md) — 2026-10-27：机型 S1（前三台全是 G1）；R35.6.0 四前提全绿免编译；v4 包已传已验已解压（PASS=5 FAIL=1=权重未拷）；~/holy 即仓库根
 # Memory Index
 
 > **读法规约**：先读 [OVERVIEW.md](OVERVIEW.md)（全部记忆的分话题摘要 + 「何时读」指引），按需选读细节文件，**勿全量通读记忆目录**。修改任何细节文件后，同步刷新 OVERVIEW 对应摘要段。
 
-- [记忆概要 OVERVIEW](OVERVIEW.md) — 23 条记忆的分话题摘要与阅读时机；需要记忆时从这里入手
-- [本机 = S1 机（第四台）装机状态](galbot-s1-machine-state.md) — 机型 S1（前三台全 G1）；R35.6.0 四前提全绿免编译；v4 包已传已验已解压（PASS=5 FAIL=1=权重未拷）；~/holy 即仓库根（gitee remote）。▸ S1 装机/环境/进度问题。
-- [S1 机 SDK/本体要点](galbot-s1-sdk-and-body-basics.md) — SDK 1.10.0 用 galbot_sdk.s1（含 3.11 绑定+.pyi 存根）；状态 19 维/torso 组/夹爪 0.007-0.11m；singorix 文档在 /data/galbot/share；yuqiz 有可跑源码；10-27 手臂掉落教训。▸ 在 S1 上动关节/SDK/相机前必读。
+- [记忆概要 OVERVIEW](OVERVIEW.md) — 21 条记忆的分话题摘要与阅读时机；需要记忆时从这里入手
 - [Galbot SDK group 模式读取顺序错位](galbot-sdk-group-mode-ordering-pitfall.md) — 读关节必须按名字显式读取，group 模式与 names 配对会全错
 - [SDK 正主文档位置与 API 语义](galbot-sdk-doc-real-source.md) — 语义问题先查 project_chn/GalbotSDK 的 C++ 头文件（部署 .pyi 是残缺版）；set_joint_commands 家族官方语义+tfs=唯一配速输入；traj 十跑判读摘要
 - [G1 数字孪生架构](galbot-g1-digital-twin-setup.md) — Jetson 推流 + Windows MuJoCo 渲染；只 mj_forward 不 mj_step；新 clone XML 需修 inertia

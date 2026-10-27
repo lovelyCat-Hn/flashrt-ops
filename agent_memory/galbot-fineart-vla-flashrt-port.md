@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 8689eb05-8c56-416a-9e8c-9e6525e95e8c
-  modified: 2026-10-27T06:55:38.467Z
+  modified: 2026-10-27T07:38:20.488Z
 ---
 
 **FineART-VLA 接入 FlashRT 可行性评估（2026-10-27，只读调研，未动机器/未写代码）**。用户意向：在 FlashRT 上加载第二个 policy（fineart_vla，Scale AI×HF 出品，源码在 `~/lerobot/src/lerobot/policies/fineart_vla/`，README 指向 docs/source/policy_fineart_vla_README.md）。
@@ -34,3 +34,11 @@ metadata:
 **✅ 冒烟通过（2026-10-27 14:54，commit 2714bc5）**：fineart 权重经注册链跑通 System 1——**输出 (50,14)、NaN/Inf=0、幅度 ±1.7 rad 量级（norm stats unnormalize 后）、p50 235ms（合成图+graph on）、加载 8.4s**。证据 `evidence/20261027_145425_fineart_smoke/`。**两个新坑（都撞过修过）**：① **子类 `**kwargs` 会吞 load_model 的签名门控转发**——load_model 按 `inspect.signature(pipe_cls)` 决定传不传 action_dim 等参数，子类若不显式声明 `action_dim`/`num_steps` 会被静默丢弃回退默认（action_dim=14 实际变 LIBERO 7）；子类签名必须显式暴露想透传的参数。② **rtx pi05 系前端 `infer()` 前必须 `calibrate_with_real_data([obs])`**——calibrate 是图捕获仪式（建 `_graph_torch_stream`+抓图），非 INT8 专属；不走 `VLAModel.predict()`（会懒校准）而直调 infer 必崩 `_graph_torch_stream`。③ chunk 口径：引擎默认 CHUNK_SIZE=10（LIBERO），fineart=50 走 env `FLASH_RT_PI05_ACTION_CHUNK_SIZE=50`（模块导入时读，须在 import flash_rt 前设）；action_dim=14 走 load_model kwarg。**下一步挂账**：Stage 2b 文本解码移植（generate_subtask）→ parity 金标（py3.12 conda env）→ FAST 头评估。
 
 **⚠ 目标重定位（2026-10-27 晚，用户明确）**：本轮下载权重**只为测试推理引擎能不能正常推理**（引擎能力验证），不涉部署/本体适配——ALOHA 14 维语义、S1 关节映射、微调整条线全部先不碰。验证协议（三步解耦）：① **flow 路径 parity**：喂**固定子任务文本**跳过 System 2 解码，引擎 vs eager 的 action chunk 逐维 cos ≥0.999（位级断言只在同构造内有效，见 flashrt-cross-build-bit-compare-pitfall）；② System 2 解码 parity（贪心/采样口径与 eager 对齐）；③ e2e + 延迟三口径（空载/SDK 在场/循环）。eager 参考环境：lerobot py3.12+uv，**Orin CPU eager 可跑小规模金标**（gemma_2b bf16 单次前向分钟级，够 parity 用）；装 env 的命令按惯例列清单给用户跑（galbot-user-runs-install-commands）。下载完成后的第一动作 = 读 train_config.json + usage guide 确认 System 2 解码推理频率与可否外喂子任务（决定 ① 的实现方式）。
+
+**✅ Stage 2b 文本解码落地（2026-10-27 15:34，FlashRT a87541b1 / ops 8fcda99）**：
+- **实现**：`flash_rt/models/fineart_vla/text_decode_rtx.py` = 纯 torch PaliGemma 移植（**零 transformers 依赖**——引擎 env 装不了）：SigLIP 27L（fp32 权重 + bf16 autocast，镜像参考 to_bfloat16_for_selected_params）+ `multi_modal_projector.linear` + Gemma 18L（bf16 权重、norm fp32 ×(1+w)）+ 未绑定 lm_head（前端 `_ensure_text_lm_head()` 注入复用省 1GB）；权重按 lerobot 键名零重映射直读（`_autodetect_strip_prefix` 剥 `model.` wrap；projector 键带 `.linear` 子层）。
+- **口径** = lerobot `select_message` 贪心：prompt=`User: {task}\nAssistant:` → [bos]+sp.Encode 右补 0 到 128；prefix=768 图 token+128 语言全双向（embed_prefix att 全 0 → make_att_2d_masks cumsum 逻辑）；4D 加性 mask 用 **finfo.min 非 -inf**（全遮行 softmax 均匀不 NaN）；position=cumsum(pad)−1；KV cache=list+cat（18 层×128 步 cat 开销可忽略）；`<loc>` 抑制 [256000,257024)；FAST 泄漏切片实为空（留档）；eos 停；RoPE theta 10000。
+- **前端接线**：`generate_subtask(prompt, images=None)` 懒建 SubtaskDecoder——首调 26.3s 含权重加载，ΔVRAM **7376 MiB**，System 1 用户零成本；视角顺序 [image, wrist_image, wrist_image_right] 与 flow 路径一致（pi05_rtx img_list）。
+- **冒烟通过**（evidence/20261027_153444_fineart_text_smoke/）：'pick up the object'→**'Put the black microfiber towel into the bin'**（合成噪声图 OOD 口径下语义贴题度意外地好）、贪心 3 次逐字一致、'wipe the table'→'Return to Home Position'（prompt 敏感）、热调 p50 **865ms**（System 2 可降频摊销，够用）、解码器在场 System 1 回归 (50,14) 有限值。配套 `smoke_text.py`（判据=机制：跑通+确定性+非空+S1 回归；语义质量留真图）。
+- **坑两枚**：① RoPE 广播——cos/sin (S,D) 与半分 x (…,D/2) 不广播，用 rotate_half 约定 `x*cos+rotate_half(x)*sin`；② **前端 infer 返回 `{'actions': numpy}` 非 torch**（unnorm 后即 numpy），脚本解包 dict→torch/numpy 两态都接。
+- **挂账**：parity 金标（py3.12 conda env，用户装）、FAST 头（gemma_expert.lm_head [257152,1024]）评估、解码器提速可选（CUDA graph/内核化，当前 0.9s/次够用）。
