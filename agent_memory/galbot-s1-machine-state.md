@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 8689eb05-8c56-416a-9e8c-9e6525e95e8c
-  modified: 2026-10-27T05:38:36.168Z
+  modified: 2026-10-27T05:41:18.280Z
 ---
 
 **机型：本机是 Galbot S1 系列人形机器人**（2026-10-27 用户明示）；**前序三台——源机/部署机/第三台 machine3——全部是 Galbot G1**（见 [[galbot-flashrt-env-migration-pack]]、[[galbot-machine3-deployment-state]]）。记忆里的基准数据、工作点、资产（关节布局/动作映射/warmup 位姿/包络/数据集句式）都是 **G1 线的产物**，本仓库 README 标题也是"G1 人形机器人部署"——S1 上复用任何结论/资产前必须逐项核对，不能照搬。四台 hostname 全叫 galbot-echo，勿以 hostname 区分机器。
@@ -18,7 +18,7 @@ metadata:
 
 **代码轨已就位**：SSH 密钥（ed25519 → gitee，账号 holy@holydd）2026-10-27 新配；仓库 `git@gitee.com:tq-llm/flashrt-ops.git` clone 后已上移——**~/holy 即仓库根**（与 machine3 同坑同解；DEPLOY.md 双轨管理约定：环境轨 tar 解 `~/holy/{FlashRT,models,...}`，代码轨仓库根 ~/holy）。repo 级 git 身份未配置，首次 commit 前要设。**agent_memory 快照已整目录拷入 ~/.claude/projects/-home-galbot/memory/（2026-10-27），自动 Recall 已生效**。
 
-**仓库 S1 文档体系（2026-10-27 下午建，已 commit 推 gitee）**：`S1_MAINTENANCE.md`（根目录维护手册）+ `docs/s1-joint-api-quickref.md`（关节速查）+ agent_memory 两份 S1 记忆快照（machine-state / sdk-and-body-basics）+ MEMORY.md/OVERVIEW.md 索引刷新（机器识别段已改"四台机"、"本机（第三台）"专指 G1 machine3）；README 标题已扩为 **G1/S1**。**repo 级 git 身份已配：holydd <holy@holydd>（2026-10-27 用户拍板）**；提交 `67655e7`（S1 建档）+ `5ccc116`（README 扩标题）已推 origin/master。⚠ 快照缺件：`galbot-sdk-doc-real-source.md` 被 MEMORY.md 引用但本 clone 无此文件，待从 G1 机补推。
+**仓库 S1 文档体系（2026-10-27 下午建，已 commit 推 gitee）**：`S1_MAINTENANCE.md`（根目录维护手册）+ `docs/s1-joint-api-quickref.md`（关节速查）+ agent_memory 两份 S1 记忆快照（machine-state / sdk-and-body-basics）+ MEMORY.md/OVERVIEW.md 索引刷新（机器识别段已改"四台机"、"本机（第三台）"专指 G1 machine3）；README 标题已扩为 **G1/S1**。**S1 专用脚本约定放 `scripts/s1/`（2026-10-27 用户定，README 目录速览已记）**，G1 系脚本勿混放。**repo 级 git 身份已配：holydd <holy@holydd>（2026-10-27 用户拍板）**；建档提交 `67655e7`/`5ccc116`/`0eaa015` 已推 origin/master。⚠ 快照缺件：`galbot-sdk-doc-real-source.md` 被 MEMORY.md 引用但本 clone 无此文件，待从 G1 机补推。
 
 **部署进度（2026-10-27 下午）**：v4 包已从 win 机 scp 到位并核过 sha256（逐字一致，7,562,700,800 字节）→ 解压 ~ 完成 → apply_hotfix 报「已在」（no-op，v4 免修符合预期）→ verify_deploy.sh **PASS=5 FAIL=1**：①② 前提/位置全绿；③ 环境链核心全绿（torch 2.4.0a0+gitee1b680 sm_87 (8,7)、flash_rt 0.2.0、kernels ok、numpy 1.26.4、cv2 4.10.0、双本地补丁 ok），唯一 FAIL=③ norm_stats 加载——v4 不带权重所致的预期失败，非环境问题；④⑤ 因无权重自动跳过。tar 包（~/flashrt_bundle_v4_env.tar，7.1G）尚未删。
 

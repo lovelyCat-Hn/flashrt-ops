@@ -43,6 +43,7 @@ bash ~/holy/scripts/verify_deploy.sh
 
 - **关节对齐**：一切以 `docs/s1-joint-api-quickref.md` 为速查基准——19 维布局与限位（源 = 官方
   `/data/galbot/config/teleop/SingoriX/real/galbot_s1-v2.0/*.toml`）、torso 组、独立夹爪 API。
+- **脚本位置约定**：S1 专用脚本统一写 `scripts/s1/`（2026-10-27 起，见该目录 README），G1 系脚本勿混放。
 - ⚠ **安全红线（2026-10-27 手臂掉落事件）**：模式切换/接管键瞬间 WBCS 控制权异常 → 手臂失力矩坠落；
   切换前后手不离急停，勿让手臂大范围悬空久停（详见 `~/yuqiz/s1_collect/README.md`）。
 - **SDK 1.10.0 与 G1 1.8.1 的 API 差异**：`get_rgb_data` 已改版（勿搬 G1 记忆里的取图代码）；
