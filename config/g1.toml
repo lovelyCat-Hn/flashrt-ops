@@ -1,10 +1,17 @@
 # G1 部署运行配置（echo 机）—— run_g1_execute / run_g1_loop / run_g1_inference /
-# g1_pose_warmup 四脚本共享。优先级：命令行显式传参 > 本文件 > 脚本内置默认。
+# g1_pose_warmup 四脚本共享。优先级：CLI 显式 > 本文件 > base.toml（公共基座，
+# 经下方 include 继承，机型键覆盖 base 同名键） > 脚本内置默认（BUILTIN）。
 # 改完保存即生效（下次运行读取）；脚本启动会打印本文件实际覆盖了哪些项。
 # 注意：--exec（真实运动）不在本文件里，每次命令行显式给。
-# 与 scripts/inference/g1_config.py 的 BUILTIN 保持同源，两边一起改。
+# 与 scripts/g1/inference/g1_config.py 的 BUILTIN 保持同源，两边一起改。
 #
 # 单位约定：角度 rad｜时长 s｜速度 rad/s（夹爪 m/s）｜力 N｜百分比 %｜频率 Hz
+
+# ── 继承公共基座（机型无关红线/语义默认）─────────────────────────────
+# 以下键已上收 base.toml（值与上收前一致，行为不变）：[loop].cache_frames/
+# chunk_mode/traj_dt、[replay].chunk_mode/traj_dt、[gripper].enabled、
+# [inference].tier/ctrl_hz。需本机覆盖时在此写同名键（深合并机型优先）。
+include = "base.toml"
 
 [run]
 # 部署目录（g1_ckpt_prep 产物；norm_stats/manifest 从这里读）。
@@ -113,10 +120,7 @@ near_exit = 0       # 近态滞回退出阈值 rad（0=2×near_gap=0.12）：进
                     # 退态用本值。10-13 首跑实录：单阈值时接近段 25 步增量在
                     # 60 mrad 两侧逐轮翻转=窄↔宽速度方波往复摆动（轮 9-21 完美
                     # 交替 13 轮，loop_20261013_100407），滞回后整段稳定驻留近态
-cache_frames = 1    # K/V 时序复用周期：1=每帧全量（默认，恒定）。2 已判死（9/30
-                    # 闭环 A/B+结构判读）：state 进 prompt → 每轮 set_prompt 重置
-                    # 前缀计数，永远全量跑=纯空转；且绕过重置=模型拿陈旧本体状态
-                    # 规划，比陈旧视觉更糟。勿再试
+# cache_frames 红线（=1，判死依据全文）已上收 base.toml [loop]
 max_excursion = 3.0    # 偏离起始位护栏，rad，任一关节超限即停。
                        # 2026-09-23 按数据集重标：199 轨合法抓取全程包络
                        # max 2.785（中位 1.17），旧值 0.25 是语义测试期防漂移
@@ -124,8 +128,7 @@ max_excursion = 3.0    # 偏离起始位护栏，rad，任一关节超限即停�
 settle = false      # true=停走（旧行为）；false=追踪式（v4 半程配速）
 settle_frac = 0.5   # settle 模式换目标阈值，比例（追踪式已不用，保留兼容）
 switch_dist = 0.06  # 【追踪式 v4 起不再使用，保留兼容】旧提前重定向阈值，rad
-chunk_mode = "track"    # track / settle / traj（traj 走 PVT，已封存慎用）
-traj_dt = 0.1       # traj 模式轨迹点周期，s/点（0.033=采集原速 30fps）
+# chunk_mode/traj_dt 语义默认已上收 base.toml [loop]
 
 [replay]            # run_g1_replay（数据集影子回放）专用，与 loop 解耦
 speed = 0.15        # 关节速度上限，rad/s。按 ep0 增量分布定标（2026-09-24）：
@@ -136,11 +139,10 @@ pace = 0.95         # 节拍窗口，s：目标前视 6 帧、速度=导程÷(2�
                     # 推理重叠在内（2026-09-24 v4，治"一顿一顿"；外部方案
                     # 根因 A/B 的 SDK 等效实现；速度下限 0.02 rad/s 内置）
 catch_timeout = 8.0 # 到位确认超时，s（超时警告推进。轨迹锁定，数据集自动慢放）
-chunk_mode = "track"    # track / settle / traj（traj 走 PVT，已封存慎用）
-traj_dt = 0.1       # traj 模式轨迹点周期，s/点（0.033=采集原速 30fps）
+# chunk_mode/traj_dt 语义默认已上收 base.toml [replay]
 
 [gripper]           # execute/loop 的 --grip、warmup 的 --grip 共用
-enabled = true      # 日常默认开；显式关：命令行 --no-grip 或改 false
+# enabled 语义默认（true）已上收 base.toml；本机显式关时在此写 enabled = false
 speed = 0.15        # 夹爪线速度，m/s。0.05 判慢（2026-09-30）：数据集释放是
                     # 3 帧快开（0.1s），0.05 m/s 把 80mm 开行程拖成 1.6s=每爪
                     # 白扔 ~1.5s；0.15 开行程 0.53s。place 任务闭爪只在空爪
@@ -151,11 +153,8 @@ chg = 2.0           # 重发变化阈值，%（0~100% 语义；变化小于它�
 [inference]         # run_g1_inference（只读推理）
 rounds = 10         # 连续取图+推理轮数，轮
 hold = 10           # 冻结帧纯推理次数，次
-tier = "bf16"       # 量化档：bf16 / int8_enc / int8_full
-                    # 2026-09-23 实证（tf_matrix 三档 teacher-forced）：INT8 两档
-                    # 均毁动作质量（块均 cos 0.15/0.27 vs bf16 0.98，夹爪输出
-                    # 8~21% 垃圾值），动作质量必须 bf16，延迟代价 ~+90ms
-ctrl_hz = 30.0      # 控制频率，Hz（=数据集 fps；chunk 窗口=horizon÷30，50 步=1667 ms）
+# tier 红线（bf16 判死 INT8 的实证全文）与 ctrl_hz 语义默认（30 Hz）已上收
+# base.toml [inference]；本机临时试 INT8 时在此写同名键（红线，改前读 base 注释）
 
 # ══════════════════════════════════════════════════════════════════════
 # [lerobot] — run_g1_loop_traj.py 专用档（2026-10-21 用户定档=traj 标准版·

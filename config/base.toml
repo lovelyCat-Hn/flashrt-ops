@@ -1,0 +1,33 @@
+# ══ 公共基座配置（机型无关）═══════════════════════════════════════════
+# 被 g1.toml / s1.toml 经文件头 `include = "base.toml"` 继承（g1_config.load()
+# 递归解析、按节深合并：机型文件同名键覆盖 base）。机型文件只放本机覆盖与本机
+# 专属键，base 只放跨机型红线与语义默认。
+# 优先级：CLI 显式 > 机型文件 > base > 脚本内置默认（BUILTIN）。
+# ⚠ 红线类键（cache_frames/tier）若要改值，须同步 scripts/g1/inference/
+#   g1_config.py 的 BUILTIN（同源义务，见 config/README §5）。
+# 单位约定：角度 rad｜时长 s｜速度 rad/s（夹爪 m/s）｜力 N｜百分比 %｜频率 Hz
+
+[loop]
+# K/V 时序复用周期：1=每帧全量（默认，恒定）。2 已判死（9/30 闭环 A/B+结构判读）：
+# state 进 prompt → 每轮 set_prompt 重置前缀计数，永远全量跑=纯空转；且绕过重置
+# =模型拿陈旧本体状态规划，比陈旧视觉更糟。勿再试
+cache_frames = 1
+# chunk 消费模式语义默认：track（追踪式）/ settle（停走旧行为）/ traj（PVT，已封存慎用）
+chunk_mode = "track"
+# traj 模式轨迹点周期，s/点（0.033=采集原速 30fps）
+traj_dt = 0.1
+
+[replay]
+chunk_mode = "track"    # 同 [loop] 语义
+traj_dt = 0.1           # 同 [loop] 语义
+
+[gripper]
+enabled = true          # 日常默认开；显式关：命令行 --no-grip 或机型文件改 false
+
+[inference]
+# 量化档红线：bf16 / int8_enc / int8_full。2026-09-23 实证（tf_matrix 三档
+# teacher-forced）：INT8 两档均毁动作质量（块均 cos 0.15/0.27 vs bf16 0.98，
+# 夹爪输出 8~21% 垃圾值），动作质量必须 bf16，延迟代价 ~+90ms
+tier = "bf16"
+# 控制频率，Hz（=数据集 fps；chunk 窗口=horizon÷30，50 步=1667 ms）
+ctrl_hz = 30.0

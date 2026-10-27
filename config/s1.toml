@@ -1,0 +1,16 @@
+# ══ S1 部署运行配置（第四台机，机型 S1）═══════════════════════════════
+# 继承公共基座（base.toml），本文件只放 S1 覆盖与本机专属键。
+# ⚠ S1 执行脚本未建（scripts/s1/ 目前只有 README 占位）：本文件当前是继承骨架，
+#   建 S1 脚本时按 g1.toml 样式落键（加载器可复用 scripts/g1/inference/
+#   g1_config.py 的 load()——include 解析已内建）。
+# 机型差异备忘（2026-10-27 建档）：S1 状态 19 维 / torso 组 / 夹爪行程
+#   0.007-0.11 m；SDK 走 galbot_sdk.s1（SDK 1.10.0，含 3.11 绑定+.pyi 存根）
+#   ——与 G1 的 23 维 / 夹爪 0-100% 语义不同，[gripper]/[warmup] 等节键义
+#   届时以 S1 脚本为准，勿照抄 g1 值。
+
+include = "base.toml"
+
+# —— 建脚本后启用（示例骨架，照 g1.toml [run] 样式）——
+# [run]
+# ckpt = "/home/galbot/holy/models/<s1_deploy 目录>"
+# prompt = "（训练 tasks.parquet 原句）"

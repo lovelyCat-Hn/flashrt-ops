@@ -2,7 +2,7 @@
 
 > 只放"怎么跑"。原理、排障、实测数据见 `DEPLOY.md` / `USAGE.md` / `BENCHMARKS.md`。
 > 参数已集中到 **`config/g1.toml`**，日常命令都很短；临时调整用 CLI 覆盖
-> （优先级：**CLI 显式 > config 文件 > 内置默认**，脚本启动会打印 config 覆盖了哪些项）。
+> （优先级：**CLI 显式 > config 文件（g1.toml + base.toml 继承）> 内置默认**，脚本启动会打印 config 覆盖了哪些项）。
 
 所有命令统一用启动器 `~/holy/run.sh`（自带 SDK 库路径 + flash_pyrt311 环境，
 新开 shell 直接用，无需定义变量；参数原样透传）。
@@ -17,7 +17,7 @@
 ### ① 预热 → 数据集工作姿态（零位 → 臂+头 → 躯干/腿 → 夹爪闭合并行）
 
 ```bash
-~/holy/run.sh ~/holy/scripts/g1/g1_pose_warmup.py
+~/holy/run.sh ~/holy/scripts/g1/body/g1_pose_warmup.py
 ```
 
 - 2026-09-23 真机全绿：腿 5 关节 set_joint_positions 直接收（SUCCESS 逐关节到位）；
@@ -38,7 +38,7 @@
 ### ② 只读推理（不动机器人，验语义/延迟）
 
 ```bash
-~/holy/run.sh ~/holy/scripts/inference/run_g1_inference.py
+~/holy/run.sh ~/holy/scripts/g1/inference/run_g1_inference.py
 ```
 
 **看什么**：chunk (10,16) 打印；推理 p50 应 ~340-360 ms（**bf16 档**，2026-09-23
@@ -52,7 +52,7 @@ execute/loop 脚本已自动加回预测时刻臂位再执行，无需手工换�
 ### ③ 3 步 smoke（真实驱动，含夹爪）
 
 ```bash
-~/holy/run.sh ~/holy/scripts/inference/run_g1_execute.py --exec
+~/holy/run.sh ~/holy/scripts/g1/inference/run_g1_execute.py --exec
 ```
 
 - 每步限幅 ±0.05 rad + 0.15 rad/s 限速，说破天也只挪这些
@@ -64,7 +64,7 @@ execute/loop 脚本已自动加回预测时刻臂位再执行，无需手工换�
 ### ④ 闭环 receding-horizon（连续任务）
 
 ```bash
-~/holy/run.sh ~/holy/scripts/inference/run_g1_loop.py --exec
+~/holy/run.sh ~/holy/scripts/g1/inference/run_g1_loop.py --exec
 ```
 
 - 工作点（2026-10-07 定案 v3）已写进 config/g1.toml [loop]：n_action_steps=25 /
@@ -90,11 +90,11 @@ execute/loop 脚本已自动加回预测时刻臂位再执行，无需手工换�
 
 ```bash
 # 冒烟: 15fps + 0.5× 天花板，1-2 块
-~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_native.py --exec --nav-suspend \
+~/holy/run.sh ~/holy/scripts/g1/inference/run_g1_loop_native.py --exec --nav-suspend \
     --rounds 2 --fps 15 --speed 0.5
 # 60 轮裸跑（≈1.0× 数据集原速） / +RTC 引导（消换块接缝）
-~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_native.py --exec --nav-suspend --rounds 60
-~/holy/run.sh ~/holy/scripts/inference/run_g1_loop_native.py --exec --nav-suspend \
+~/holy/run.sh ~/holy/scripts/g1/inference/run_g1_loop_native.py --exec --nav-suspend --rounds 60
+~/holy/run.sh ~/holy/scripts/g1/inference/run_g1_loop_native.py --exec --nav-suspend \
     --rounds 60 --rtc-horizon 10
 ```
 
@@ -107,13 +107,13 @@ execute/loop 脚本已自动加回预测时刻臂位再执行，无需手工换�
 
 ```bash
 # 前置：预热到 task0 起始位（脚本启动会打印与 ep0 帧起始的偏差，>300 mrad 必须先预热）
-~/holy/run.sh ~/holy/scripts/g1/g1_pose_warmup.py
+~/holy/run.sh ~/holy/scripts/g1/body/g1_pose_warmup.py
 
 # 干跑（只读关节 + GPU 推理，打印前 2 控制步计划，不动机器人）
-~/holy/run.sh ~/holy/scripts/inference/run_g1_replay.py
+~/holy/run.sh ~/holy/scripts/g1/inference/run_g1_replay.py
 
 # 真实回放
-~/holy/run.sh ~/holy/scripts/inference/run_g1_replay.py --exec
+~/holy/run.sh ~/holy/scripts/g1/inference/run_g1_replay.py --exec
 ```
 
 - 2026-09-23 干跑验证：ep0 598 帧 / 198 控制步 / 任务句自动从 npz 解析；
@@ -145,10 +145,10 @@ execute/loop 脚本已自动加回预测时刻臂位再执行，无需手工换�
 
 ```bash
 # 只读探针（判断反馈活着没：width/velocity/effort/is_moving）
-~/holy/run.sh ~/holy/scripts/g1/gripper_calib.py --read-only
+~/holy/run.sh ~/holy/scripts/g1/body/gripper_calib.py --read-only
 
 # 全行程标定（先左后右，结束停在张开位）→ 抄下打印的 --grip-wmin/--grip-wmax
-~/holy/run.sh ~/holy/scripts/g1/gripper_calib.py
+~/holy/run.sh ~/holy/scripts/g1/body/gripper_calib.py
 ```
 
 拿到新标定后重跑 §3 的 prep 步带上 `--grip-wmin <值> --grip-wmax <值>`，
@@ -162,15 +162,15 @@ execute/loop 脚本已自动加回预测时刻臂位再执行，无需手工换�
 
 ```bash
 # ① stats 提取（微调输出目录 → norm_stats.json）
-~/holy/run.sh ~/holy/scripts/dataset/lerobot_stats_extract.py --ckpt <微调输出>/pretrained_model
+~/holy/run.sh ~/holy/scripts/g1/dataset/lerobot_stats_extract.py --ckpt <微调输出>/pretrained_model
 
 # ② 组装部署目录（软链 14G 权重 + config + manifest；norm_mode 必须显式）
-~/holy/run.sh ~/holy/scripts/g1/g1_ckpt_prep.py \
+~/holy/run.sh ~/holy/scripts/g1/deploy/g1_ckpt_prep.py \
     --src <微调输出>/pretrained_model --out ~/holy/models/<新目录> \
     --mode q01_q99 --grip-wmin 0.0005 --grip-wmax 0.1200
 
 # ③ 归一化对齐检查（全绿才用）
-~/holy/run.sh ~/holy/scripts/eval/norm_align_check.py \
+~/holy/run.sh ~/holy/scripts/g1/eval/norm_align_check.py \
     --dataset ~/holy/datasets/pick_place_balence --ckpt ~/holy/models/<新目录>
 ```
 
@@ -194,7 +194,7 @@ Left arm places A in the top-left corner. Right arm places A in the top-left cor
 **摆位对位工具**（十几秒/轮，不加载模型）：
 
 ```bash
-~/holy/run.sh ~/holy/scripts/g1/g1_scene_check.py
+~/holy/run.sh ~/holy/scripts/g1/body/g1_scene_check.py
 # 输出 /tmp/scene_check/compare_*.png（左=当前 / 右=训练并排）
 ```
 
@@ -210,13 +210,7 @@ Left arm places A in the top-left corner. Right arm places A in the top-left cor
 ## 5. 验收与探针（装机/排障）
 
 ```bash
-bash ~/holy/scripts/verify_deploy.sh            # 一键验收（只读+GPU 推理，9 项）
-
-# state prompt 模式 A/B（exact vs fixed 的 800ms 差距复现实验）
-~/holy/run.sh ~/holy/scripts/probes/g1_state_prompt_mode_test.py
-
-# 显存/分配探针
-~/holy/run.sh ~/holy/scripts/probes/g1_alloc_probe.py
+bash ~/holy/verify_deploy.sh            # 一键验收（只读+GPU 推理，9 项）
 ```
 
 ---
