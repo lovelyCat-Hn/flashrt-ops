@@ -18,6 +18,7 @@ G1/S1 人形机器人 pi0.5/FlashRT 推理部署与运维仓库（Jetson Orin，
 scripts/inference/   闭环推理入口（run_g1_loop / run_g1_loop_traj / run_g1_loop_native）
 scripts/g1/          整备标定 / 共享核心（g1_warm_core 等）
 scripts/s1/          S1 机型专用脚本（探针/标定/执行器，2026-10-27 起）
+policies/            policy 层（每 policy 一目录：engine.py 加载器+说明；pi05 在役/fineart_vla 规划）
 scripts/probes/      只读探针（视觉依赖度 / 双构造共存 等）
 scripts/test/        性能诊断与回放台
 scripts/ab_test/     A/B 对照脚本目录（每对比一子文件夹 + README）
