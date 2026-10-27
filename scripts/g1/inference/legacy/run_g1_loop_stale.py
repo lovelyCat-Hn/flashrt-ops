@@ -119,7 +119,7 @@ args = ap.parse_args()
 
 # ── 全文日志落盘：q 退出走 os._exit 不刷缓冲（09-23 坑），故逐行强制 flush ──
 _log_path = args.log_file or str(
-    pathlib.Path(__file__).resolve().parents[2] / "logs" /
+    pathlib.Path(__file__).resolve().parents[3] / "logs" /
     time.strftime("loop_%Y%m%d_%H%M%S.log"))
 pathlib.Path(_log_path).parent.mkdir(parents=True, exist_ok=True)
 

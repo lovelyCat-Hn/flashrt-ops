@@ -47,7 +47,7 @@ import threading
 import time
 import tty
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "inference"))  # noqa: E402  g1_config 在 inference/（同仓共享配置）
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[0] / "inference"))  # noqa: E402  g1_config 在 inference/（同仓共享配置）
 import g1_config   # noqa: E402  同目录共享配置（CLI > config/g1.toml > 内置默认）
 
 ap = argparse.ArgumentParser(description=__doc__,

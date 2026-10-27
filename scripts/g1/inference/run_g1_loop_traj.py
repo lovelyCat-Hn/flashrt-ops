@@ -528,7 +528,7 @@ ap.add_argument("--no-head-crop", action="store_true",
 args = ap.parse_args()
 # ── 全文日志落盘：q 退出走 os._exit 不刷缓冲（09-23 坑），故逐行强制 flush ──
 _log_path = args.log_file or str(
-    pathlib.Path(__file__).resolve().parents[2] / "logs" /
+    pathlib.Path(__file__).resolve().parents[3] / "logs" /
     time.strftime("loop_traj_%Y%m%d_%H%M%S.log"))
 pathlib.Path(_log_path).parent.mkdir(parents=True, exist_ok=True)
 # chunk 落盘目录（--dump-chunks）：与日志同时间戳，包络截断前的纯模型输出

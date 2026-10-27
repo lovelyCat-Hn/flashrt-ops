@@ -157,7 +157,7 @@ GAP_EPS = 1e-4        # 导程低于该值免发（伺服保持）
 
 # ── 全文日志落盘：q 退出走 os._exit 不刷缓冲（09-23 坑），故逐行强制 flush ──
 _log_path = args.log_file or str(
-    pathlib.Path(__file__).resolve().parents[2] / "logs" /
+    pathlib.Path(__file__).resolve().parents[3] / "logs" /
     time.strftime("loop_native_%Y%m%d_%H%M%S.log"))
 pathlib.Path(_log_path).parent.mkdir(parents=True, exist_ok=True)
 

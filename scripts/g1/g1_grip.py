@@ -25,7 +25,7 @@ import statistics
 import sys
 import time
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "inference"))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[0] / "inference"))
 import g1_config  # noqa: E402  同目录共享配置
 
 ap = argparse.ArgumentParser(description=__doc__,

@@ -56,7 +56,7 @@ EPS = 0.01                               # 合成 BASE 漂移 rad（重锚公式
 SENTINEL_GRIP = 0.8                      # 夹爪维异常线（惯例）
 
 OUT = pathlib.Path(args_cli.out) if args_cli.out else (
-    pathlib.Path(__file__).resolve().parents[2] / "evidence"
+    pathlib.Path(__file__).resolve().parents[3] / "evidence"
     / "20261009_rtc_guided_ablation")
 OUT.mkdir(parents=True, exist_ok=True)
 

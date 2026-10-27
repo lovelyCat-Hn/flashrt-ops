@@ -1,0 +1,59 @@
+{
+  "joint_names": [
+    "leg_joint1",
+    "leg_joint2",
+    "leg_joint3",
+    "leg_joint4",
+    "leg_joint5"
+  ],
+  "home_rad": [
+    0.50023353099823,
+    1.5001612901687622,
+    1.00007164478302,
+    -1.1984225238848012e-05,
+    2.3968450477696024e-05
+  ],
+  "results": [
+    {
+      "name": "leg_joint1",
+      "home_rad": 0.50023353099823,
+      "after_probe_rad": 0.698668360710144,
+      "delta_rad": 0.19843482971191406,
+      "probe_succeeded": true,
+      "physical_part": ""
+    },
+    {
+      "name": "leg_joint2",
+      "home_rad": 1.5001612901687622,
+      "after_probe_rad": 1.6992433071136475,
+      "delta_rad": 0.19908201694488525,
+      "probe_succeeded": true,
+      "physical_part": ""
+    },
+    {
+      "name": "leg_joint3",
+      "home_rad": 1.00007164478302,
+      "after_probe_rad": 1.2025331258773804,
+      "delta_rad": 0.20246148109436035,
+      "probe_succeeded": true,
+      "physical_part": ""
+    },
+    {
+      "name": "leg_joint4",
+      "home_rad": -1.1984225238848012e-05,
+      "after_probe_rad": -4.793690095539205e-05,
+      "delta_rad": -3.5952675716544036e-05,
+      "probe_succeeded": false,
+      "physical_part": ""
+    },
+    {
+      "name": "leg_joint5",
+      "home_rad": 2.3968450477696024e-05,
+      "after_probe_rad": 2.3968450477696024e-05,
+      "delta_rad": 0.0,
+      "probe_succeeded": false,
+      "physical_part": ""
+    }
+  ],
+  "note": "请把 'physical_part' 字段填好"
+}

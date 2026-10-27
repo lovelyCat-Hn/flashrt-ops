@@ -38,7 +38,7 @@ import tty
 
 import numpy as np
 
-_ROOT = pathlib.Path(__file__).resolve().parents[2]
+_ROOT = pathlib.Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_ROOT / "FlashRT"))
 
 from galbot_sdk.g1 import GalbotRobot, JointCommand  # noqa: E402

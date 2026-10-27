@@ -64,7 +64,7 @@ import tty
 
 import numpy as np
 
-_ROOT = pathlib.Path(__file__).resolve().parents[2]
+_ROOT = pathlib.Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_ROOT / "scripts" / "inference"))
 
 LEFT = [f"left_arm_joint{i}" for i in range(1, 8)]

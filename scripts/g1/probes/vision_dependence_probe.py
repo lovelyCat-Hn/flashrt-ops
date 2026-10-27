@@ -32,7 +32,7 @@ import time
 import numpy as np
 
 sys.path.insert(0, "/data/galbot/lib")
-sys.path.insert(0, os.path.expanduser("~/holy/scripts/inference"))
+sys.path.insert(0, os.path.expanduser("~/holy/scripts/g1/inference"))
 
 import cv2  # noqa: E402
 import flash_rt  # noqa: E402
