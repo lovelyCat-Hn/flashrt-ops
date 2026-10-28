@@ -66,6 +66,10 @@ AP.add_argument("--frames-per-row", type=int, default=1,
                      ">1 启用帧插值，帧距 = ctrl_hz 倒数/帧数）")
 AP.add_argument("--delta-max", type=float, default=0.05,
                 help="包络护栏：单步相对当前读数的最大关节增量（rad，臂）")
+AP.add_argument("--ema-alpha", type=float, default=0.0,
+                help="行目标 EMA 低通系数（0=关，默认关；G1 同名旋钮同语义，"
+                     "α=新样本权重。最小版：每块从当前读数重锚，G1 的接缝窗 "
+                     "α 调度/链钳/爪列 EMA 未带。真机抖动露出再 A/B）")
 AP.add_argument("--grip-velocity", type=float, default=0.05)
 AP.add_argument("--grip-effort", type=float, default=10)
 AP.add_argument("--subtask-every", type=int, default=0,
@@ -155,6 +159,7 @@ def main() -> int:
             n = max(0, min(args.n_action_steps, len(chunk)))
             sent, clamped, frames = 0, 0, 0
             prev = state_to_prev(state_raw)      # 行插值链起点 = 本轮读数
+            ema = dict(prev)                     # EMA 状态（每块从读数重锚，最小版）
             for k in range(n):
                 tg = adapter.to_s1(chunk[k], state_raw)
                 if tg is None:
@@ -162,6 +167,7 @@ def main() -> int:
                         print(f"  chunk{r} step0（dry-run）: "
                               f"{np.array2string(chunk[k], precision=3, suppress_small=True)}")
                 else:
+                    tg = ema_row(tg, ema, args.ema_alpha)
                     names, tgt, cl = plan_row(tg, state_raw)
                     clamped += cl
                     if executing:
@@ -244,6 +250,34 @@ def state_to_prev(state_raw: np.ndarray) -> dict[str, float]:
             TORSO_JOINTS[0]: float(state_raw[16]),
             HEAD_JOINTS[0]: float(state_raw[17]),
             HEAD_JOINTS[1]: float(state_raw[18])}
+
+
+def ema_row(tg: S1Targets, ema: dict[str, float], alpha: float) -> S1Targets:
+    """行目标 EMA 低通（G1 --ema-alpha 同语义：α=新样本权重，0=关）。
+    最小版：仅臂/torso/head，每块由调用方从读数重锚；安全钳位在其后
+    （plan_row），滤波值不会绕过限位/delta-max。爪不滤（无翻转证据）。"""
+    if alpha <= 0:
+        return tg
+    import dataclasses
+
+    def filt(arr, jnames):
+        out = np.asarray(arr, dtype=np.float64).copy()
+        for i, nm in enumerate(jnames):
+            v = alpha * float(out[i]) + (1.0 - alpha) * ema.get(nm, float(out[i]))
+            out[i] = v
+            ema[nm] = v
+        return out
+
+    f = dataclasses.replace(tg)
+    if tg.left_arm is not None:
+        f.left_arm = filt(tg.left_arm, LEFT_ARM_JOINTS)
+    if tg.right_arm is not None:
+        f.right_arm = filt(tg.right_arm, RIGHT_ARM_JOINTS)
+    if tg.torso is not None:
+        f.torso = float(filt([tg.torso], TORSO_JOINTS)[0])
+    if tg.head is not None:
+        f.head = filt(tg.head, HEAD_JOINTS)
+    return f
 
 
 def plan_row(tg: S1Targets, state_raw: np.ndarray):

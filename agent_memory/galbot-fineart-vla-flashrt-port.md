@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 8689eb05-8c56-416a-9e8c-9e6525e95e8c
-  modified: 2026-10-28T07:05:47.759Z
+  modified: 2026-10-28T07:12:01.124Z
 ---
 
 **FineART-VLA 接入 FlashRT 可行性评估（2026-10-27，只读调研，未动机器/未写代码）**。用户意向：在 FlashRT 上加载第二个 policy（fineart_vla，Scale AI×HF 出品，源码在 `~/lerobot/src/lerobot/policies/fineart_vla/`，README 指向 docs/source/policy_fineart_vla_README.md）。
@@ -67,4 +67,4 @@ metadata:
 
 **✅ ④ 通用 S1 推理执行器落地（2026-10-28，ops d03af19，用户定案架构）**：`scripts/s1/inference/run_s1_loop.py` = run_g1_loop_traj.py 的 S1 镜像 + **适配器解耦**——执行器只管 S1 SDK 交互/循环节拍/安全栏/遥测，policy 专属（引擎加载/观测预处理/动作语义/System 2）全住 `policies/<name>.py`（base=PolicyAdapter 接口+S1Targets+S1 限位/夹爪换算；fineart_vla=ALOHA 14 维+System 2 hook；pi05=G1 16/23 维留位）。**新增 policy = 加一个文件注册进 ADAPTERS，执行器零改动**。SDK 调用形=run_g1_loop_traj 家族（GalbotRobot/SensorType/get_rgb_data/get_rgb_data(JPEG)→BGR 软解→letterbox224）。**三重闸零运动默认**：①默认 dry-run 全链照跑不发指令；②`--exec` 需适配器 `needs_mapping=True`——fineart(ALOHA 14)/pi05(G1 16)→S1 19 维语义映射均未定义（随微调线落地），**结构性拒绝**；③交互确认+`start_controller("all")` 显式开启+包络护栏（限位表逐关节钳位+`--delta-max` 相对当前读数，臂 only）。**2 轮 dry-run 全链绿**：SDK init→17 关节显式读→引擎 11.2s→每轮 S2+S1 infer 232ms→固定 tick 消费 10 步→遥测 `evidence/s1_loop/run_<policy>_<ts>.json`。事实：首次 `generate_subtask` 含一次性预热 ~26s（其后 ~0.6–0.9s）；torso 运行时实名 `torso_lift_joint1`（见 [[galbot-s1-sdk-and-body-basics]]）；用法/扩展见 `scripts/s1/inference/README.md`。
 
-**⚠ 执行路线纠正（2026-10-28 用户指出，同日改毕）**：初版误走 `set_joint_positions` 单步——G1 traj 脚本的立意就是**流式适配 lerobot 动作块语义**，S1 镜像不该退回单点位（官方明示该接口不适合流式）。已改：逐行动作→`--frames-per-row`（**默认 1=不插值纯 30Hz 直发**，用户定案，与 G1 2f2f23a 默认 8→1 同精神；>1 才插值，G1 8 帧流留作可选杠杆）→`set_joint_commands_batch` 一次流式提交（官方 docstring 明示适用 "VLA inference batch output"；每点 `time_from_start_second`=累计时刻，官方示例 dt=0.008）；夹爪仍独立 API（G1 `--grip-state-cmd` 同位）；护栏改钳**行目标**（插值帧由已钳目标构造，不会被帧绕过）。流式构建器离线冒烟过（Trajectory 构造/帧距/插值端点/delta-max 实效/默认 1 帧直发口径）；⚠ **tfs×singorix WBC 真机语义未验证**——G1 血泪史（tfs0 每点全停滞后 2.1×、tfs33.3 stall 判死）上机前小步复验。
+**⚠ 执行路线纠正（2026-10-28 用户指出，同日改毕）**：初版误走 `set_joint_positions` 单步——G1 traj 脚本的立意就是**流式适配 lerobot 动作块语义**，S1 镜像不该退回单点位（官方明示该接口不适合流式）。已改：逐行动作→`--frames-per-row`（**默认 1=不插值纯 30Hz 直发**，用户定案，与 G1 2f2f23a 默认 8→1 同精神；>1 才插值，G1 8 帧流留作可选杠杆）→`set_joint_commands_batch` 一次流式提交（官方 docstring 明示适用 "VLA inference batch output"；每点 `time_from_start_second`=累计时刻，官方示例 dt=0.008）；夹爪仍独立 API（G1 `--grip-state-cmd` 同位）；护栏改钳**行目标**（插值帧由已钳目标构造，不会被帧绕过）。流式构建器离线冒烟过（Trajectory 构造/帧距/插值端点/delta-max 实效/默认 1 帧直发口径）；**`--ema-alpha` 已对齐（默认 0=关）**：行目标 EMA 最小版（G1 同名旋钮同语义 α=新样本权重；每块读数重锚；G1 接缝窗 α 调度/链钳/爪列 EMA 未带；滤波在安全钳位前不会绕限位；G1 在役配方 EMA off，抖动露出再 A/B）；⚠ **tfs×singorix WBC 真机语义未验证**——G1 血泪史（tfs0 每点全停滞后 2.1×、tfs33.3 stall 判死）上机前小步复验。
