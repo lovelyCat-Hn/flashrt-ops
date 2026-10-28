@@ -4,6 +4,16 @@
 循环节拍、安全栏与遥测；policy 专属的一切（引擎加载/观测预处理/动作语义/System 2）
 全部住 `policies/<name>.py`。**
 
+## 执行路线（流式，对齐 G1 traj 哲学）
+
+lerobot 动作块 → 逐行动作 → `--frames-per-row` 帧线性插值（默认 8 帧/G1 定案）
+→ `set_joint_commands_batch` 一次流式提交。batch 接口官方 docstring 明示适用
+"VLA inference batch output"；每点 `time_from_start_second` = 相对轨迹起点的累计
+时刻（官方示例口径，首点=dt）。`set_joint_positions` 不用于执行（官方明示不适合
+流式；G1 traj 的立意就是流式适配 lerobot 块语义，S1 同）。夹爪仍走独立 API
+（G1 `--grip-state-cmd` 同位）。⚠ tfs×singorix WBC 耦合语义未真机验证——
+G1 血泪史（tfs0 每点全停滞后 2.1×、tfs33.3 stall 判死）上机前小步复验。
+
 ## 结构
 
 ```
@@ -36,7 +46,9 @@ PYTHONPATH=/data/galbot/lib LD_LIBRARY_PATH=/data/galbot/lib \
 2. **`--exec` 需 `adapter.needs_mapping=True`**：fineart=ALOHA 14 维、pi05=G1 16 维，
    两者对 S1 19 维的语义映射均未定义（随微调线落地）→ `--exec` 一律结构性拒绝。
 3. **`--exec` 交互确认** + `start_controller("all")` 显式开启 + 包络护栏
-   （限位表逐关节钳位 + `--delta-max` 相对当前读数 + 非零返回值告警）。
+   （限位表逐关节钳位 + `--delta-max` 相对当前读数钳行目标，臂 only；
+   插值帧由已钳目标构造，护栏不会被帧绕过）。流式构建器离线冒烟已验
+   （Trajectory 构造/帧距/插值端点/delta-max 生效）。
 
 ⚠ 2026-10-27 手臂掉落教训：模式切换/接管瞬间手臂可能失力矩——`--exec` 前手不离急停。
 
@@ -45,7 +57,12 @@ PYTHONPATH=/data/galbot/lib LD_LIBRARY_PATH=/data/galbot/lib \
 - 关节/限位/夹爪口径：`~/holy/docs/s1-joint-api-quickref.md`；限位权威 =
   `/data/galbot/config/teleop/SingoriX/real/galbot_s1-v2.0/*.toml`。
 - **读关节必须显式 `joint_names=`**（group 模式与 names 配对全错，G1 实证）。
-- torso 运行时实名 `torso_lift_joint1`（config 文档写 `torso_joint1`，不符）。
+- torso 运行时实名 `torso_lift_joint1`（config 文档写 `torso_joint1`，不符）；
+  **升降柱，位置语义=高度米（0–1.0 m）非 rad**（官方 example kTorsoJt=0.60 "meter"）。
+- 流式接口事实（.pyi 实证）：`set_joint_commands` 高频单点（标准关节只吃
+  position；爪关节 position=宽度米、velocity/effort 生效）；
+  `set_joint_commands_batch(Trajectory)` 非阻塞多点，`Trajectory.joint_names`
+  优先于 groups，每点 `time_from_start_second` 累计时刻；官方示例 dt=0.008。
 - 首次 `generate_subtask` 含一次性预热（本机实测 ~26s），其后 ~0.6–0.9s/次。
 - 遥测落 `~/holy/evidence/s1_loop/run_<policy>_<ts>.json`（每轮 infer_ms/steps/
-  sent/clamped/S2 text + 运行配置）。
+  sent/frames/clamped/S2 text + 运行配置）。

@@ -7,6 +7,14 @@
   policies/base.py         PolicyAdapter 接口 + S1Targets（执行器唯一认识的动作表达）
 新增 policy = policies/ 加一个文件注册进 ADAPTERS，执行器零改动。
 
+执行路线（用户定案 2026-10-28：对齐 run_g1_loop_traj 的流式哲学，勿退回
+set_joint_positions——官方明示后者不适合流式）：
+  lerobot 动作块 → 逐行动作 → --frames-per-row 帧线性插值 → set_joint_commands_batch
+  一次流式提交（官方 batch 接口 docstring 明示适用 "VLA inference batch output"；
+  每点 time_from_start_second = 相对轨迹起点的累计时刻）。夹爪仍走独立 API
+  （对应 G1 --grip-state-cmd 位）。⚠ tfs/S1 WBC 耦合语义未真机验证——
+  G1 血泪史（tfs0 每点全停滞后 2.1×、tfs33.3 stall 判死）上机前先小步复验。
+
 安全设计（三重闸 + 零运动默认）：
   ① 默认 dry-run：全链照跑（取图/推理/映射/打印），不发任何指令
   ② --exec 需 adapter.needs_mapping=True（S1 语义映射存在）——现有两 policy
@@ -52,10 +60,11 @@ AP.add_argument("--rounds", type=int, default=3, help="换块轮数")
 AP.add_argument("--ctrl-hz", type=float, default=30.0)
 AP.add_argument("--n-action-steps", type=int, default=10,
                 help="每块消费步数（水位；默认 10=在役配方）")
+AP.add_argument("--frames-per-row", type=int, default=8,
+                help="每行动作插值的流式帧数（G1 traj 定案 8 帧流留任；"
+                     "帧距 = ctrl_hz 倒数/帧数，默认 30/8≈240Hz 流）")
 AP.add_argument("--delta-max", type=float, default=0.05,
                 help="包络护栏：单步相对当前读数的最大关节增量（rad，臂）")
-AP.add_argument("--joint-speed", type=float, default=0.2,
-                help="set_joint_positions speed_rad_s（SDK 默认 0.2，保守）")
 AP.add_argument("--grip-velocity", type=float, default=0.05)
 AP.add_argument("--grip-effort", type=float, default=10)
 AP.add_argument("--subtask-every", type=int, default=0,
@@ -143,22 +152,29 @@ def main() -> int:
             chunk = adapter.infer(obs, state_raw)
             infer_ms = (time.perf_counter() - t1) * 1000
             n = max(0, min(args.n_action_steps, len(chunk)))
-            sent, clamped = 0, 0
+            sent, clamped, frames = 0, 0, 0
+            prev = state_to_prev(state_raw)      # 行插值链起点 = 本轮读数
             for k in range(n):
                 tg = adapter.to_s1(chunk[k], state_raw)
                 if tg is None:
                     if k == 0:
                         print(f"  chunk{r} step0（dry-run）: "
                               f"{np.array2string(chunk[k], precision=3, suppress_small=True)}")
-                elif executing:
-                    clamped += issue_targets(robot, tg, state_raw)
-                    sent += 1
+                else:
+                    names, tgt, cl = plan_row(tg, state_raw)
+                    clamped += cl
+                    if executing:
+                        sent += 1
+                        frames += stream_row(robot, names, tgt, prev)
+                        send_grippers(robot, tg, state_raw)
+                    for nm, v in zip(names, tgt):
+                        prev[nm] = v
                 sleep_to(tr + period * (k + 1))
             rows.append({"round": r, "infer_ms": round(infer_ms, 1),
-                         "steps": n, "sent": sent, "clamped": clamped,
-                         "text": text})
+                         "steps": n, "sent": sent, "frames": frames,
+                         "clamped": clamped, "text": text})
             print(f"  round {r}: infer {infer_ms:.0f} ms | 消费 {n} 步 | "
-                  f"发送 {sent} | 钳位 {clamped}")
+                  f"流式 {frames} 帧 | 钳位 {clamped}")
     except KeyboardInterrupt:
         print("\n→ Ctrl-C 退出")
     finally:
@@ -220,8 +236,18 @@ def read_s1_state(robot, body_names):
     return state_raw, {"grip_m": grip_m}
 
 
-def issue_targets(robot, tg: S1Targets, state_raw: np.ndarray) -> int:
-    """包络护栏（限位+delta-max）→ 关节/夹爪指令。返回钳位数。"""
+def state_to_prev(state_raw: np.ndarray) -> dict[str, float]:
+    """19 维读数 → 关节名→当前值表（流式行插值链起点；臂/头=rad，torso=m）。"""
+    return {**{nm: float(v) for nm, v in zip(LEFT_ARM_JOINTS, state_raw[0:7])},
+            **{nm: float(v) for nm, v in zip(RIGHT_ARM_JOINTS, state_raw[8:15])},
+            TORSO_JOINTS[0]: float(state_raw[16]),
+            HEAD_JOINTS[0]: float(state_raw[17]),
+            HEAD_JOINTS[1]: float(state_raw[18])}
+
+
+def plan_row(tg: S1Targets, state_raw: np.ndarray):
+    """包络护栏（限位表钳位 + delta-max 相对当前读数，臂 only）。
+    → (names, targets, clamped)。爪不在此列（独立 API）。"""
     args = _args[0]
     names, tgt = [], []
     if tg.left_arm is not None:
@@ -240,7 +266,7 @@ def issue_targets(robot, tg: S1Targets, state_raw: np.ndarray) -> int:
     for nm, v in zip(names, tgt):
         lo, hi = S1_LIMITS[nm]
         v = min(max(v, lo), hi)
-        if nm in LEFT_ARM_JOINTS + RIGHT_ARM_JOINTS:   # delta-max 只限臂（v3 配方）
+        if nm in LEFT_ARM_JOINTS + RIGHT_ARM_JOINTS:   # delta-max 只限臂（G1 v3 配方）
             cur = float(state_raw[LEFT_ARM_JOINTS.index(nm)]
                         if nm in LEFT_ARM_JOINTS
                         else state_raw[8 + RIGHT_ARM_JOINTS.index(nm)])
@@ -249,10 +275,44 @@ def issue_targets(robot, tg: S1Targets, state_raw: np.ndarray) -> int:
                 v = cur + float(np.clip(dv, -args.delta_max, args.delta_max))
                 clamped += 1
         out.append(v)
-    st = robot.set_joint_positions(out, joint_names=names, is_blocking=False,
-                                   speed_rad_s=args.joint_speed)
+    return names, out, clamped
+
+
+def stream_row(robot, names, tgt, prev: dict[str, float]) -> int:
+    """上一目标→本行目标 线性插值 frames_per_row 帧，累计 tfs，
+    set_joint_commands_batch 一次流式提交（traj 镜像）。返回帧数。"""
+    args = _args[0]
+    fr = max(1, args.frames_per_row)
+    dt = (1.0 / args.ctrl_hz) / fr
+    from galbot_sdk.s1 import JointCommand, Trajectory, TrajectoryPoint
+
+    traj = Trajectory()
+    traj.joint_names = names
+    pts = []
+    for i in range(1, fr + 1):
+        a = i / fr
+        p = TrajectoryPoint()
+        p.time_from_start_second = dt * i          # 官方示例口径：累计时刻，首点=dt
+        vec = []
+        for nm, tv in zip(names, tgt):
+            c = JointCommand()
+            c.position = prev.get(nm, tv) + (tv - prev.get(nm, tv)) * a
+            c.velocity = 0.0
+            c.acceleration = 0.0
+            c.effort = 0.0
+            vec.append(c)
+        p.joint_command_vec = vec
+        pts.append(p)
+    traj.points = pts
+    st = robot.set_joint_commands_batch(traj)
     if st is not None and getattr(st, "value", 0) != 0:
-        print(f"⚠ set_joint_positions → {st}")
+        print(f"⚠ set_joint_commands_batch → {st}")
+    return fr
+
+
+def send_grippers(robot, tg: S1Targets, state_raw: np.ndarray) -> None:
+    """夹爪独立 API（不在 batch 轨迹里；G1 --grip-state-cmd 同位）。"""
+    args = _args[0]
     for side, w in (("left", tg.left_grip_m), ("right", tg.right_grip_m)):
         if w is None:
             continue
@@ -262,7 +322,6 @@ def issue_targets(robot, tg: S1Targets, state_raw: np.ndarray) -> int:
             robot.set_gripper_command(f"{side}_gripper", float(w),
                                       velocity_mps=args.grip_velocity,
                                       effort=args.grip_effort, is_blocking=False)
-    return clamped
 
 
 def sleep_to(deadline: float) -> None:
