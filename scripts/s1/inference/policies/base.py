@@ -16,7 +16,7 @@ import numpy as np
 # ── S1 关节名（quickref §2；运行时仍以 get_joint_names 实读为准） ──
 LEFT_ARM_JOINTS = [f"left_arm_joint{i}" for i in range(1, 8)]
 RIGHT_ARM_JOINTS = [f"right_arm_joint{i}" for i in range(1, 8)]
-TORSO_JOINTS = ["torso_lift_joint1"]   # ⚠ 运行时实名（get_joint_names 实测）；config 文档里写 torso_joint1 与 SDK 返回不符
+TORSO_JOINTS = ["torso_lift_joint1"]   # ⚠ 运行时实名（get_joint_names 实测），config 文档写 torso_joint1 不符；升降柱，位置语义=高度米非 rad
 HEAD_JOINTS = ["head_joint1", "head_joint2"]
 
 # ── S1 19 维状态布局（quickref §3，yuqiz 采集口径） ──
@@ -29,7 +29,7 @@ S1_STATE_LAYOUT = (
     + [("head", n) for n in HEAD_JOINTS]
 )
 
-# ── 限位表（rad / %；左右臂 j2/j4 不对称，逐条照抄勿镜像） ──
+# ── 限位表（rad / % / m；左右臂 j2/j4 不对称，逐条照抄勿镜像） ──
 S1_LIMITS: dict[str, tuple[float, float]] = {}
 for _i, _lim in enumerate([(-2.9409, 2.9409), (-1.9808, 1.7191), (-2.9234, 2.9234),
                            (-2.5918, 1.8937), (-2.9234, 2.9234), (-0.7592, 0.7592),
@@ -39,7 +39,7 @@ for _i, _lim in enumerate([(-2.9409, 2.9409), (-1.7191, 1.9808), (-2.9234, 2.923
                            (-1.8937, 2.5918), (-2.9234, 2.9234), (-0.7592, 0.7592),
                            (-1.5620, 1.5620)]):
     S1_LIMITS[RIGHT_ARM_JOINTS[_i]] = _lim
-S1_LIMITS["torso_lift_joint1"] = (0.0, 1.0)
+S1_LIMITS["torso_lift_joint1"] = (0.0, 1.0)   # 升降柱高度，单位=米（官方 example kTorsoJt=0.60 "torso target height, meter"）
 S1_LIMITS["head_joint1"] = (-0.7592, 0.7592)
 S1_LIMITS["head_joint2"] = (-0.5847, 0.5847)   # ⚠ 头部限位两处口径不一，以 TOML 为准待实测定案
 
@@ -64,14 +64,15 @@ def gripper_width_m_to_pct(width_m: float) -> float:
 class S1Targets:
     """一条动作步的 S1 全身目标——执行器唯一认识的动作表达。
 
-    关节 = 绝对角（rad，base 域）；夹爪 = 物理宽度（m）；torso/head 同理。
+    关节 = 绝对角（rad，base 域）；夹爪 = 物理宽度（m）；torso = 升降高度
+    （**米**，升降柱非旋转关节——S1 与 G1 躯干本质不同）；head 同关节（rad）。
     arms 为 None 的组不动（部分策略只覆盖部分组）。
     """
     left_arm: np.ndarray | None = None       # (7,)
     right_arm: np.ndarray | None = None      # (7,)
     left_grip_m: float | None = None
     right_grip_m: float | None = None
-    torso: float | None = None
+    torso: float | None = None               # 升降高度（m，0–1.0）
     head: np.ndarray | None = None           # (2,)
     meta: dict[str, Any] = field(default_factory=dict)
 

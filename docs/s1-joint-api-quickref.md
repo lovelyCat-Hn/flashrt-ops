@@ -11,7 +11,7 @@ G1 线结论见 `agent_memory/`（源机/部署机/machine3 全为 G1），本�
 | 项 | G1（记忆基线） | S1（本机） |
 |---|---|---|
 | SDK | 1.8.1，`galbot_sdk.g1` | **1.10.0**，`galbot_sdk.s1`（`MachineType.S1`），实现类 `GalbotRobotS1` |
-| 关节组 | 双臂 / leg / head | 双臂 / **torso** / head（leg 组不存在） |
+| 关节组 | 双臂 / leg / head | 双臂 / **torso（升降柱，高度米）** / head（leg 组不存在） |
 | 全身状态维 | 23 | **19**（双臂14 + 双夹爪2 + 躯干1 + 头2） |
 | 夹爪 | 塞在关节维里，行程 0–0.12 m | **独立 API、物理宽度（米）**：行程 0.007–0.11 m，反馈单侧 0–0.055 m |
 | 控制栈 | joint/PVT 那套 | **singorix WBC 全身控制器**（target 话题 `singorix/wbcs/target`） |
@@ -30,16 +30,19 @@ G1 线结论见 `agent_memory/`（源机/部署机/machine3 全为 G1），本�
 
 顺序 = `get_joint_positions(["left_arm", "right_arm", "torso", "head"])` 的拼接 + 夹爪插入：
 
-| 索引 | 名称 | 限位 (rad / %) |
+| 索引 | 名称 | 限位 (rad / % / m) |
 |---|---|---|
 | 0–6 | left_arm_joint1..7 | [-2.9409,2.9409] [-1.9808,**1.7191**] [-2.9234,2.9234] [-2.5918,1.8937] [-2.9234,2.9234] [-0.7592,0.7592] [-1.5620,1.5620] |
 | 7 | left_arm_gripper | [0, 100]（%） |
 | 8–14 | right_arm_joint1..7 | [-2.9409,2.9409] [**-1.7191**,1.9808] [-2.9234,2.9234] [**-1.8937**,2.5918] [-2.9234,2.9234] [-0.7592,0.7592] [-1.5620,1.5620] |
 | 15 | right_arm_gripper | [0, 100]（%） |
-| 16 | torso_joint1 | [0.0, 1.0] |
+| 16 | torso（运行时实名 `torso_lift_joint1`） | [0.0, 1.0]（**米**，升降高度） |
 | 17–18 | head_joint1..2 | [-0.7592,0.7592] [-0.5847,0.5847] |
 
 - ⚠ **左右臂 j2/j4 限位不对称**（镜像但绝对值不同），动作映射/包络护栏必须按左右各自建，不能镜像复制。
+- ⚠ **torso 是升降柱不是旋转关节**（S1 与 G1 躯干本质不同）：位置语义 = 升降高度（**米**，行程 0–1.0 m）。
+  证据：官方示例 `GalbotSDK/examples/s1/cpp/galbot_robot/src/request_target_example.cpp:268`
+  `kTorsoJt = 0.60; // torso target height, meter` + yuqiz 位姿 torso 0.65/0.75 实证。勿按 rad 处理。
 - 限位出处：`/data/galbot/config/teleop/SingoriX/real/galbot_s1-v2.0/*.toml`（head_pvt/arm_pvt/…_ctrl.toml）。
 - ⚠ 头部限位两处数字不一致：SDK 示例注释写 [-0.7854,0.7854]/[-0.6109,0.6109]，
   teleop TOML 为 [-0.7592,0.7592]/[-0.5847,0.5847]——**上机以 TOML/运行时读数为准，待实测定案**。

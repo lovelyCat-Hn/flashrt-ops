@@ -203,7 +203,7 @@ def grab_obs(robot) -> dict:
 
 
 def read_s1_state(robot, body_names):
-    """19 维原始状态（quickref §3 布局）+ 夹爪宽度米。显式名读，勿 group 模式。"""
+    """19 维原始状态（quickref §3 布局；臂/头=rad、夹爪=%、torso=升降高度 m）+ 夹爪宽度米。显式名读，勿 group 模式。"""
     vals = robot.get_joint_positions(joint_names=body_names)
     pos = dict(zip(body_names, [float(v) for v in vals]))
     grip_m = {}

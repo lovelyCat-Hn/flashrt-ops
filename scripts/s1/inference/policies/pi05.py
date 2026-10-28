@@ -28,7 +28,7 @@ class Pi05Adapter(PolicyAdapter):
                   "wrist_image": "LEFT_ARM_CAMERA",
                   "wrist_image_right": "RIGHT_ARM_CAMERA"}
     needs_mapping = False
-    notes = "G1 语义权重；S1 无 leg 组/夹爪接口不同——映射未定义，dry-run only。"
+    notes = "G1 语义权重；S1 无 leg 组（torso=升降柱 m）/夹爪接口不同——映射未定义，dry-run only。"
 
     def load(self, ckpt: str, task: str, calib_obs: dict | None = None) -> None:
         from flash_rt.api import load_model
