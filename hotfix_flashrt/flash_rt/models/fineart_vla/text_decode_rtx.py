@@ -197,9 +197,13 @@ class _SiglipLayer(nn.Module):
         h = self.layer_norm1(x)
         b, s, _ = h.shape
         hd = SIG_HIDDEN // SIG_HEADS
-        q = h.view(b, s, SIG_HEADS, hd).transpose(1, 2)
-        k = h.view(b, s, SIG_HEADS, hd).transpose(1, 2)
-        v = h.view(b, s, SIG_HEADS, hd).transpose(1, 2)
+        # q/k/v 必须过输入投影（HF SiglipAttention 同构）。2026-10-28 parity
+        # 抓漏：此处曾直接 view 裸 LN 输出（q_proj/k_proj/v_proj 成死模块，
+        # 权重加载全对但 forward 不用），视觉塔整层 cos≈0.74、子任务生成
+        # 系统性分叉。
+        q = self.q_proj(h).view(b, s, SIG_HEADS, hd).transpose(1, 2)
+        k = self.k_proj(h).view(b, s, SIG_HEADS, hd).transpose(1, 2)
+        v = self.v_proj(h).view(b, s, SIG_HEADS, hd).transpose(1, 2)
         attn = F.scaled_dot_product_attention(q, k, v, scale=self.scale)
         x = residual + self.out_proj(attn.transpose(1, 2).reshape(b, s, -1))
         return x + self.fc2(_gelu_tanh(self.fc1(self.layer_norm2(x))))
@@ -339,7 +343,12 @@ class SubtaskDecoder:
             t = torch.from_numpy(arr).to(self.device)
             if t.ndim == 3 and t.shape[-1] == 3:      # HWC → CHW
                 t = t.permute(2, 0, 1)
-            resized.append(self._resize_with_pad(t.unsqueeze(0)).squeeze(0))
+            # [0,1] → [−1,1]（官方 _preprocess_images:1441 "as expected by
+            # siglip"）。pad 区在 [0,1] 域补 0，缩放后 = −1，与官方
+            # resize_with_pad_torch 同构。2026-10-28 parity 抓漏：此步缺失
+            # 时视觉输入域差一倍平移+尺度，子任务生成系统性分叉。
+            t = self._resize_with_pad(t.unsqueeze(0)) * 2.0 - 1.0
+            resized.append(t.squeeze(0))
         n = len(resized)
         out = torch.stack([r if r is not None else torch.full((3, SIG_IMAGE, SIG_IMAGE), -1.0, device=self.device)
                            for r in resized])                              # (V,3,224,224) fp32 [−1,1]
