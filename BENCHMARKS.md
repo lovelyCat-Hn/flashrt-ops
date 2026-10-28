@@ -24,6 +24,7 @@
 | 闭环工作点 | v3 = 25/0.35/1.5（1.59×） | 在用（⚠ 持物未验） | §七 |
 | 执行侧接缝衔接（traj 回放台） | entry-match 动态入口 + EMA 0.3 | 采用候选（手感待判） | §十一 |
 | fineart_vla System 1 parity | 引擎=官方实现（残差≤精度带） | 采用候选（挂 FAST 头评估） | §十二 |
+| fineart_vla System 2 parity | fp32 结构判据 PASS（文本全等+窄带）；生产 bf16 低裕度 token 可翻转 | 能力验证通过 | §十三 |
 
 **表 0-2 延迟阶梯摘要**（冻结帧=零运动零取图，条件详见 §一）
 
@@ -380,6 +381,7 @@ cache_frames=1、合成观测（随机图×3+1px 平移扰动）、种子 202610
 | 表 7-x 闭环 | `~/holy/scripts/g1/inference/run_g1_loop.py --nav-suspend [--exec] --n-action-steps 25 --steps-per-command 25 --pace 0.35 --pace-div 1.5`（⚠ `--exec` 驱臂） |
 | 表 8-x RTC 引导消融 | `~/miniforge3/envs/flash_pyrt311/bin/python ~/holy/scripts/g1/eval/rtc_ablation.py 12 --out ~/holy/evidence/20261009_rtc_guided_ablation` |
 | 表 12-1 parity 金标 | `golden_engine.py` → `golden_reference.py` → `golden_compare.py`（三连，见 `evidence/fineart_parity/README.md`） |
+| 表 13-1/13-2 System 2 parity | `golden_subtask_engine.py` → `golden_subtask_ref.py` → `golden_subtask_compare.py` + `probe_subtask_engine_cpu_fp32.py`（见 `evidence/fineart_subtask_parity/README.md`） |
 | 原始输出 | `evidence/20261006-07_quant_kv_ablation/`（quant）；`evidence/20261009_rtc_guided_ablation/`（RTC）；闭环日志 `logs/loop_*.log` |
 
 ## 十、夹爪物理速度标定（2026-10-13，grip_speed_bench.py）
