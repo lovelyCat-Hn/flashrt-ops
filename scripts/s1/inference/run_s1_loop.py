@@ -9,12 +9,14 @@
 
 执行路线（用户定案 2026-10-28：对齐 run_g1_loop_traj 的流式哲学，勿退回
 set_joint_positions——官方明示后者不适合流式）：
-  lerobot 动作块 → 逐行动作 → --frames-per-row 帧插值（默认 1=不插值纯 30Hz 直发，
-  用户定案；>1 才启用插值）→ set_joint_commands_batch 一次流式提交
-  （官方 batch 接口 docstring 明示适用 "VLA inference batch output"；
-  每点 time_from_start_second = 相对轨迹起点的累计时刻）。夹爪仍走独立 API
-  （对应 G1 --grip-state-cmd 位）。⚠ tfs/S1 WBC 耦合语义未真机验证——
-  G1 血泪史（tfs0 每点全停滞后 2.1×、tfs33.3 stall 判死）上机前先小步复验。
+  lerobot 动作块 → 逐行动作 → 逐帧 set_joint_commands 直发（默认 fr=1 =
+  tfs0 立即执行，行节拍=脚本绝对截止墙钟 tick，G1 traj 同款；fr>1=A/B
+  插值微流，行内小 batch 累计 tfs）。水位（execute_actions_per_chunk）：
+  0=整块行流完（50 行≈1.67s）立即重推理；N=消费 N 行即重推理。
+  ⚠ G1 的异步预取（换块即预取/星饿 hold）未带——同步循环下重推理 232ms
+  ≪ 块长 1.67s，吞吐损失 ~12% 挂账；夹爪仍走独立 API（G1 --grip-state-cmd
+  位）。⚠ tfs×singorix WBC 真机语义未验证——G1 血泪史（tfs0 每点全停
+  滞后 2.1×、tfs33.3 stall 判死）上机前先小步复验。
 
 安全设计（三重闸 + 零运动默认）：
   ① 默认 dry-run：全链照跑（取图/推理/映射/打印），不发任何指令
@@ -63,9 +65,9 @@ AP.add_argument("--ctrl-hz", type=float, default=30.0,
                 help="行节拍 Hz（S1 扩展键；G1 定盘 30Hz 口径）")
 AP.add_argument("--execute-actions-per-chunk", "--n-action-steps",
                 dest="execute_actions_per_chunk", type=int, default=0,
-                help="水位（同事/lerobot 同名键，G1 toml 同款）：0=整块单批直发→"
-                     "立即重规划（新鲜度第一杠杆，G1 现行档同款）；N=每块消费 N 步"
-                     "逐行固定节拍〔旧名 --n-action-steps〕")
+                help="水位（同事/lerobot 同名键，G1 toml 同款）：0=整块行流完"
+                     "（50 行≈1.67s）立即重推理（新鲜度第一杠杆）；N=消费 N 行"
+                     "即重推理。两种都逐帧墙钟节拍直发〔旧名 --n-action-steps〕")
 AP.add_argument("--frames-per-row", type=int, default=1,
                 help="每行动作的流式帧数（默认 1=不插值纯 30Hz 直发，用户定案；"
                      ">1 启用帧插值，帧距 = ctrl_hz 倒数/帧数）")
@@ -188,14 +190,15 @@ def main() -> int:
             t1 = time.perf_counter()
             chunk = adapter.infer(obs, state_raw)
             infer_ms = (time.perf_counter() - t1) * 1000
-            # 水位语义（同事/lerobot 同名键同款）：0=整块单批直发→立即重规划；N=逐行固定节拍
+            # 水位语义（同事/lerobot 同名键同款；发令=G1 traj 同款逐帧墙钟流）：
+            # 0=整块行流完立即重推理；N=消费 N 行即重推理。两种都按绝对截止
+            # tick 逐行直发（tfs=0，节拍权在脚本），不整块打包给控制器。
             full_chunk = args.execute_actions_per_chunk <= 0
             n = (len(chunk) if full_chunk
                  else max(0, min(args.execute_actions_per_chunk, len(chunk))))
             sent, clamped, frames = 0, 0, 0
             prev = state_to_prev(state_raw)      # 行插值链起点 = 本轮读数
             ema = dict(prev)                     # EMA 状态（每块从读数重锚，最小版）
-            plans = []                           # 水位 0：整块计划缓存，循环后单批提交
             for k in range(n):
                 tg = adapter.to_s1(chunk[k], state_raw)
                 if tg is None:
@@ -208,17 +211,11 @@ def main() -> int:
                     clamped += cl
                     if executing:
                         sent += 1
+                        frames += stream_row(robot, names, tgt, prev)
                         send_grippers(robot, tg, state_raw)
-                        if full_chunk:
-                            plans.append((names, tgt))
-                        else:
-                            frames += stream_row(robot, names, tgt, prev)
-                            for nm, v in zip(names, tgt):
-                                prev[nm] = v
-                if not full_chunk:               # 水位 0：批量已在轨，无逐行节拍
-                    sleep_to(tr + period * (k + 1))
-            if executing and full_chunk:
-                frames = stream_chunk(robot, plans, dict(prev))
+                    for nm, v in zip(names, tgt):
+                        prev[nm] = v
+                sleep_to(tr + period * (k + 1))  # 绝对截止节拍（G1 同款；欠账不追发）
             rows.append({"round": r, "infer_ms": round(infer_ms, 1),
                          "steps": n, "sent": sent, "frames": frames,
                          "clamped": clamped, "text": text})
@@ -359,24 +356,44 @@ def plan_row(tg: S1Targets, state_raw: np.ndarray):
 
 
 def stream_row(robot, names, tgt, prev: dict[str, float]) -> int:
-    """上一目标→本行目标 线性插值 frames_per_row 帧，累计 tfs，
-    set_joint_commands_batch 一次流式提交（traj 镜像）。返回帧数。"""
+    """一行→帧流下发（G1 traj 同款）：fr=1（默认）=单帧 set_joint_commands
+    tfs=0（立即执行；行节拍靠脚本墙钟 sleep_to，不在 tfs 里）；fr>1=A/B
+    插值微流，行内帧小 batch 累计 tfs（帧距=行周期/帧数）。返回帧数。"""
     args = _args[0]
     fr = max(1, args.frames_per_row)
-    dt = (1.0 / args.ctrl_hz) / fr
-    from galbot_sdk.s1 import JointCommand, Trajectory, TrajectoryPoint
+    from galbot_sdk.s1 import JointCommand
 
+    def _cmds(vals):
+        out = []
+        for tv in vals:
+            c = JointCommand()
+            c.position = tv
+            c.velocity = 0.0
+            c.acceleration = 0.0
+            c.effort = 0.0
+            out.append(c)
+        return out
+
+    if fr == 1:
+        st = robot.set_joint_commands(_cmds(tgt), joint_names=names,
+                                      time_from_start_s=0.0)
+        if st is not None and getattr(st, "value", 0) != 0:
+            print(f"⚠ set_joint_commands → {st}")
+        return 1
+    from galbot_sdk.s1 import Trajectory, TrajectoryPoint
+    dt = (1.0 / args.ctrl_hz) / fr
     traj = Trajectory()
     traj.joint_names = names
     pts = []
     for i in range(1, fr + 1):
         a = i / fr
         p = TrajectoryPoint()
-        p.time_from_start_second = dt * i          # 官方示例口径：累计时刻，首点=dt
+        p.time_from_start_second = round(dt * i, 6)   # 行内累计时刻（33ms 窗）
         vec = []
         for nm, tv in zip(names, tgt):
             c = JointCommand()
-            c.position = prev.get(nm, tv) + (tv - prev.get(nm, tv)) * a
+            base = prev.get(nm, tv)
+            c.position = base + (tv - base) * a
             c.velocity = 0.0
             c.acceleration = 0.0
             c.effort = 0.0
@@ -388,50 +405,6 @@ def stream_row(robot, names, tgt, prev: dict[str, float]) -> int:
     if st is not None and getattr(st, "value", 0) != 0:
         print(f"⚠ set_joint_commands_batch → {st}")
     return fr
-
-
-def stream_chunk(robot, plans: list, prev: dict[str, float]) -> int:
-    """水位 0：整块一次 batch——每行 frames_per_row 点、累计 tfs，行间从上一
-    目标链式插值；行缺失关节保持 prev。返回点数。⚠ 新 batch 对 WBC 在执行
-    旧流的取代行为属真机首验项（G1 黑盒无契约前科）。"""
-    args = _args[0]
-    fr = max(1, args.frames_per_row)
-    dt = (1.0 / args.ctrl_hz) / fr
-    from galbot_sdk.s1 import JointCommand, Trajectory, TrajectoryPoint
-
-    names = []
-    for row_names, _ in plans:
-        for nm in row_names:
-            if nm not in names:
-                names.append(nm)
-    traj = Trajectory()
-    traj.joint_names = names
-    pts, t = [], 0.0
-    for row_names, tgt in plans:
-        cur = dict(zip(row_names, tgt))
-        for i in range(1, fr + 1):
-            a = i / fr
-            t += dt
-            p = TrajectoryPoint()
-            p.time_from_start_second = round(t, 6)
-            vec = []
-            for nm in names:
-                tv = cur.get(nm, prev.get(nm, 0.0))
-                base = prev.get(nm, tv)
-                c = JointCommand()
-                c.position = base + (tv - base) * a
-                c.velocity = 0.0
-                c.acceleration = 0.0
-                c.effort = 0.0
-                vec.append(c)
-            p.joint_command_vec = vec
-            pts.append(p)
-        prev.update(cur)
-    traj.points = pts
-    st = robot.set_joint_commands_batch(traj)
-    if st is not None and getattr(st, "value", 0) != 0:
-        print(f"⚠ set_joint_commands_batch(chunk) → {st}")
-    return len(pts)
 
 
 def send_grippers(robot, tg: S1Targets, state_raw: np.ndarray) -> None:

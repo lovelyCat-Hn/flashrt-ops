@@ -1,0 +1,11 @@
+{
+  "policy": "fineart_vla",
+  "ckpt": "/home/galbot/holy/models/fineart_vla_midtrained",
+  "task": "pick up the object",
+  "executing": false,
+  "rounds": [],
+  "delta_max": 0.05,
+  "ctrl_hz": 30.0,
+  "n_action_steps": 10,
+  "live_frames": false
+}

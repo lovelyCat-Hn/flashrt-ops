@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 8689eb05-8c56-416a-9e8c-9e6525e95e8c
-  modified: 2026-10-28T07:24:31.581Z
+  modified: 2026-10-28T07:40:29.705Z
 ---
 
 **FineART-VLA 接入 FlashRT 可行性评估（2026-10-27，只读调研，未动机器/未写代码）**。用户意向：在 FlashRT 上加载第二个 policy（fineart_vla，Scale AI×HF 出品，源码在 `~/lerobot/src/lerobot/policies/fineart_vla/`，README 指向 docs/source/policy_fineart_vla_README.md）。
@@ -69,4 +69,4 @@ metadata:
 
 **⚠ 执行路线纠正（2026-10-28 用户指出，同日改毕）**：初版误走 `set_joint_positions` 单步——G1 traj 脚本的立意就是**流式适配 lerobot 动作块语义**，S1 镜像不该退回单点位（官方明示该接口不适合流式）。已改：逐行动作→`--frames-per-row`（**默认 1=不插值纯 30Hz 直发**，用户定案，与 G1 2f2f23a 默认 8→1 同精神；>1 才插值，G1 8 帧流留作可选杠杆）→`set_joint_commands_batch` 一次流式提交（官方 docstring 明示适用 "VLA inference batch output"；每点 `time_from_start_second`=累计时刻，官方示例 dt=0.008）；夹爪仍独立 API（G1 `--grip-state-cmd` 同位）；护栏改钳**行目标**（插值帧由已钳目标构造，不会被帧绕过）。流式构建器离线冒烟过（Trajectory 构造/帧距/插值端点/delta-max 实效/默认 1 帧直发口径）；**`--ema-alpha` 已对齐（默认 0=关）**：行目标 EMA 最小版（G1 同名旋钮同语义 α=新样本权重；每块读数重锚；G1 接缝窗 α 调度/链钳/爪列 EMA 未带；滤波在安全钳位前不会绕限位；G1 在役配方 EMA off，抖动露出再 A/B）；⚠ **tfs×singorix WBC 真机语义未验证**——G1 血泪史（tfs0 每点全停滞后 2.1×、tfs33.3 stall 判死）上机前小步复验。
 
-**配置/键名对齐（2026-10-28 用户再纠正：S1 路线与 traj 同源，键名不另起炉灶）**：键名直接继承 g1.toml [lerobot] 的 lerobot/同事对齐名（命名档案=docs/lerobot-alignment.md §十）：`execute_actions_per_chunk`〔旧名 --n-action-steps〕/`filter_alpha`〔旧名 --ema-alpha〕/`max_joint_delta_per_step`〔旧名 --delta-max〕/`prompt`〔旧名 --task〕，旧名 CLI 别名保留。**新增 `config/s1.toml` 档**（顶层键=dest 名，CLI 显式传参覆盖 toml，默认路径自动加载；坑=首版预扫描只认显式 --config、默认档没生效已修）。**水位默认改 0**（G1 toml 现行档同款，非 10-10 破局史档值）：整块单批 `stream_chunk` 一次提交（行累计 tfs/链式插值/行并集/缺关节保持 prev）→ 立即重规划；⚠ 新 batch 对 WBC 在执行旧流的**取代行为=真机首验项**。G1 逐键映射判读存 s1.toml 注释块+README 对照表（filter_alpha S1 先 0 看原始谱 vs G1 现役 0.3；grip_state_cmd N/A 但**爪回读滞后=真机首跑专项核查**〔G1 滞后 6.3-8s 忘带=R 爪死〕；skip_frames/aggregate_fn/nav_suspend/execution_horizon/head_crop 刻意不带）。
+**配置/键名对齐（2026-10-28 用户再纠正：S1 路线与 traj 同源，键名不另起炉灶）**：键名直接继承 g1.toml [lerobot] 的 lerobot/同事对齐名（命名档案=docs/lerobot-alignment.md §十）：`execute_actions_per_chunk`〔旧名 --n-action-steps〕/`filter_alpha`〔旧名 --ema-alpha〕/`max_joint_delta_per_step`〔旧名 --delta-max〕/`prompt`〔旧名 --task〕，旧名 CLI 别名保留。**新增 `config/s1.toml` 档**（顶层键=dest 名，CLI 显式传参覆盖 toml，默认路径自动加载；坑=首版预扫描只认显式 --config、默认档没生效已修）。**水位默认改 0**（G1 toml 现行档同款，非 10-10 破局史档值）：整块行流完（50 行≈1.67s）立即重推理。**执行路线第三次纠正（10-28 用户问『S1 整块单批与 G1 实现不同嘛』→读 run_g1_loop_traj 源码对质）**：整块单批 batch≠G1 实现——G1 traj 真相=**逐帧 `set_joint_commands` tfs=0 直发（节拍权在脚本墙钟：绝对截止 tick、欠账不追发、落后 1 拍重锚）+换块行粒度自然接管（skip_frames/aggregate_fn/blend）+异步预取（换块即预取）+星饿=hold 最后目标**；已废 stream_chunk 改回 G1 同款（fr=1 单帧直发；fr>1 行内小 batch 插值微流），整块 batch 的"WBC 取代行为黑盒"风险随之消解（每 tick 控制权回归脚本）。⚠ G1 异步预取未带=同步循环下重推理 232ms≪块长 1.67s、吞吐 ~−12% 挂账。**filter_alpha S1 初档 0.1**（用户定案；α=新样本权重，G1 现役 0.3，首跑看谱后可 A/B）。G1 逐键映射判读存 s1.toml 注释块+README 对照表（grip_state_cmd N/A 但**爪回读滞后=真机首跑专项核查**〔G1 滞后 6.3-8s 忘带=R 爪死〕；skip_frames/aggregate_fn/nav_suspend/execution_horizon/head_crop 刻意不带）。

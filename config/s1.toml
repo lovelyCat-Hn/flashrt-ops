@@ -8,15 +8,16 @@ prompt = "pick up the object"           # System 2 任务提示（G1 同名键�
 rounds = 200
 ctrl_hz = 30.0                          # 行节拍（S1 扩展键；G1 定盘 30Hz 口径）
 
-# 水位 0：整块单批直发→立即重规划（新鲜度第一杠杆；同事/G1 同名键同款）
+# 水位 0：整块行流完（50 行≈1.67s）立即重推理（新鲜度第一杠杆；同事/G1
+# 同名键同款）。发令=G1 traj 同款逐帧墙钟直发（tfs=0），不整块打包
 execute_actions_per_chunk = 0
-# 不插值纯 30Hz 直发（用户定案；G1 traj 同名旗）；>1 启用帧插值
+# 不插值纯 30Hz 直发（用户定案；G1 traj 同名旗）；>1 启用行内插值微流
 frames_per_row = 1
 # rad/步（同事 control 段同名键同值；对原始增量 0.00% 截断=封版）
 max_joint_delta_per_step = 0.05
-# 行目标 EMA（同事 action_filter.lowpass.alpha 同名）：G1 档=0.3 现役；
-# S1 首跑先 0 看原始抖动谱，A/B 后再切 0.3
-filter_alpha = 0.0
+# 行目标 EMA（同事 action_filter.lowpass.alpha 同名）：α=新样本权重；
+# S1 初档 0.1（用户定案 2026-10-28；G1 现役 0.3，首跑后可 A/B）
+filter_alpha = 0.1
 
 grip_velocity = 0.05
 grip_effort = 10

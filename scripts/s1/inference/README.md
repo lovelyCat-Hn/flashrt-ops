@@ -4,16 +4,20 @@
 循环节拍、安全栏与遥测；policy 专属的一切（引擎加载/观测预处理/动作语义/System 2）
 全部住 `policies/<name>.py`。**
 
-## 执行路线（流式，对齐 G1 traj 哲学）
+## 执行路线（流式，G1 traj 同款逐帧墙钟流）
 
-lerobot 动作块 → 逐行动作 → `--frames-per-row` 帧插值（**默认 1 = 不插值，
-纯 30Hz 直发**，用户定案；>1 启用插值，帧距 = ctrl_hz 倒数/帧数）
-→ `set_joint_commands_batch` 一次流式提交。batch 接口官方 docstring 明示适用
-"VLA inference batch output"；每点 `time_from_start_second` = 相对轨迹起点的累计
-时刻（官方示例口径，首点=dt）。`set_joint_positions` 不用于执行（官方明示不适合
-流式；G1 traj 的立意就是流式适配 lerobot 块语义，S1 同）。夹爪仍走独立 API
-（G1 `--grip-state-cmd` 同位）。⚠ tfs×singorix WBC 耦合语义未真机验证——
-G1 血泪史（tfs0 每点全停滞后 2.1×、tfs33.3 stall 判死）上机前小步复验。
+lerobot 动作块 → 逐行动作 → 逐帧 `set_joint_commands` 直发（**tfs=0 立即
+执行，行节拍=脚本绝对截止墙钟 tick，G1 同款：欠账不追发**；fr=1 默认=
+不插值纯 30Hz，用户定案；fr>1=A/B 插值微流，行内小 batch 累计 tfs，
+帧距 = ctrl_hz 倒数/帧数）。**节拍权在脚本，不整块打包给控制器**——
+否则新计划只能等批播完、或赌 WBC 对播放中收到新 batch 的黑盒取代行为。
+`set_joint_positions` 不用于执行（官方明示不适合流式；G1 traj 的立意就是
+流式适配 lerobot 块语义，S1 同）。水位 `execute_actions_per_chunk`：
+0=整块行流完（50 行≈1.67s）立即重推理；N=消费 N 行即重推理。
+⚠ G1 的异步预取（换块即预取/星饿 hold）未带——同步循环下重推理 232ms
+≪ 块长 1.67s，吞吐损失 ~12% 挂账。夹爪仍走独立 API（G1 `--grip-state-cmd`
+同位）。⚠ tfs×singorix WBC 耦合语义未真机验证——G1 血泪史（tfs0 每点
+全停滞后 2.1×、tfs33.3 stall 判死）上机前小步复验。
 
 ## 结构
 
@@ -39,7 +43,7 @@ policies/pi05.py         pi05 适配器（G1 16/23 维语义；接口留位）
 | 键 | 语义 | G1 [lerobot] 对照 |
 |---|---|---|
 | `prompt` | System 2 任务提示 | 同名 |
-| `execute_actions_per_chunk` | 水位：0=整块单批直发→立即重规划；N=逐行节拍 | 同名同款（现役 0） |
+| `execute_actions_per_chunk` | 水位：0=整块行流完立即重推理；N=消费 N 行即重推理（都逐帧墙钟直发） | 同名同款（现役 0） |
 | `frames_per_row` | 每行帧数：1=不插值直发（默认，用户定案） | G1 traj 同名旗（cmd_every=1 同语义恒成立） |
 | `max_joint_delta_per_step` | 包络 0.05 rad/步（臂） | 同名同值 |
 | `filter_alpha` | 行目标 EMA，0=关（G1 档 0.3 现役；S1 首跑先 0） | 同名（同事 action_filter.lowpass.alpha） |

@@ -154,7 +154,7 @@ lerobot/同事对齐名（用户定案：S1 路线与 traj 同源，键名体系
 | S1 键（toml/dest） | 旧名（CLI 别名保留） | 同事/G1 [lerobot] 出处 |
 |---|---|---|
 | `prompt` | `--task` | G1 toml 同名键 |
-| `execute_actions_per_chunk` | `--n-action-steps` | 同事同名键（G1 toml 同款；水位 0=整块单批直发→立即重规划） |
+| `execute_actions_per_chunk` | `--n-action-steps` | 同事同名键（G1 toml 同款；水位 0=整块行流完立即重推理，逐帧墙钟直发） |
 | `max_joint_delta_per_step` | `--delta-max` | 同事 control 段同名键同值（0.05 封版） |
 | `filter_alpha` | `--ema-alpha` | 同事 action_filter.lowpass.alpha 同名（S1 最小版：每块读数重锚，接缝窗调度/链钳/爪列未带） |
 | `frames_per_row` | —（旗名即 G1 traj 同名） | G1 traj 同名旗；默认 1=不插值直发（用户定案，同 cmd_every=1 精神） |
