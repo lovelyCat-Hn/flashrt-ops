@@ -1,0 +1,137 @@
+{
+ "config": {
+  "data": "/home/galbot/datasets/clean_ready_224_1028_traj_ep0_1_2.npz",
+  "synthetic": 0,
+  "seed": 8,
+  "rounds": 1,
+  "ctrl_hz": 30.0,
+  "execute_actions_per_chunk": 0,
+  "frames_per_row": 1,
+  "filter_alpha": 0.0,
+  "max_joint_delta_per_step": 0.05,
+  "swap_gap_ms": 0.0,
+  "executing": false
+ },
+ "chunks": [
+  {
+   "chunk": 0,
+   "rep": 0,
+   "rows": 50,
+   "clamped": 257,
+   "frames": 0,
+   "late_ms_p50": 0.0,
+   "late_ms_max": 0.0,
+   "seam_max_mrad": null
+  },
+  {
+   "chunk": 1,
+   "rep": 0,
+   "rows": 50,
+   "clamped": 0,
+   "frames": 0,
+   "late_ms_p50": 0.0,
+   "late_ms_max": 0.0,
+   "seam_max_mrad": 10.19817590713501
+  },
+  {
+   "chunk": 2,
+   "rep": 0,
+   "rows": 50,
+   "clamped": 0,
+   "frames": 0,
+   "late_ms_p50": 0.0,
+   "late_ms_max": 0.0,
+   "seam_max_mrad": 1.3306140899658203
+  },
+  {
+   "chunk": 3,
+   "rep": 0,
+   "rows": 50,
+   "clamped": 0,
+   "frames": 0,
+   "late_ms_p50": 0.0,
+   "late_ms_max": 0.0,
+   "seam_max_mrad": 20.250916481018066
+  },
+  {
+   "chunk": 4,
+   "rep": 0,
+   "rows": 50,
+   "clamped": 0,
+   "frames": 0,
+   "late_ms_p50": 0.0,
+   "late_ms_max": 0.0,
+   "seam_max_mrad": 15.497207641601562
+  },
+  {
+   "chunk": 5,
+   "rep": 0,
+   "rows": 50,
+   "clamped": 0,
+   "frames": 0,
+   "late_ms_p50": 0.0,
+   "late_ms_max": 0.0,
+   "seam_max_mrad": 6.672561168670654
+  },
+  {
+   "chunk": 6,
+   "rep": 0,
+   "rows": 50,
+   "clamped": 0,
+   "frames": 0,
+   "late_ms_p50": 0.0,
+   "late_ms_max": 0.0,
+   "seam_max_mrad": 1.4910101890563965
+  },
+  {
+   "chunk": 7,
+   "rep": 0,
+   "rows": 50,
+   "clamped": 0,
+   "frames": 0,
+   "late_ms_p50": 0.0,
+   "late_ms_max": 0.0,
+   "seam_max_mrad": 1.508474349975586
+  },
+  {
+   "chunk": 8,
+   "rep": 0,
+   "rows": 50,
+   "clamped": 1,
+   "frames": 0,
+   "late_ms_p50": 0.0,
+   "late_ms_max": 0.0,
+   "seam_max_mrad": 31.15856647491455
+  },
+  {
+   "chunk": 9,
+   "rep": 0,
+   "rows": 50,
+   "clamped": 0,
+   "frames": 0,
+   "late_ms_p50": 0.0,
+   "late_ms_max": 0.0,
+   "seam_max_mrad": 19.986987113952637
+  },
+  {
+   "chunk": 10,
+   "rep": 0,
+   "rows": 50,
+   "clamped": 0,
+   "frames": 0,
+   "late_ms_p50": 0.0,
+   "late_ms_max": 0.0,
+   "seam_max_mrad": 1.1987090110778809
+  },
+  {
+   "chunk": 11,
+   "rep": 0,
+   "rows": 50,
+   "clamped": 0,
+   "frames": 0,
+   "late_ms_p50": 0.0,
+   "late_ms_max": 0.0,
+   "seam_max_mrad": 10.87641716003418
+  }
+ ]
+}

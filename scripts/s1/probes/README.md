@@ -30,6 +30,27 @@ import numpy as np
 np.savez("traj.npz", chunks=chunks, joint_names=names, grip=grip)  # 后两个可选
 ```
 
+### lerobot 数据集直转：lerobot_to_traj.py
+
+S1 遥测数据集（如 `~/datasets/clean_ready_224_1028`，galbot_one_s1，action
+16 维右臂在前、爪=0–100%、fps=30）→ traj npz。**在 lerobot_cpu 环境跑**
+（pyarrow 所在；flash_pyrt311 无）：
+
+```bash
+~/miniforge3/envs/lerobot_cpu/bin/python scripts/s1/probes/lerobot_to_traj.py \
+  --dataset ~/datasets/clean_ready_224_1028 --episodes 0,1,2
+```
+
+列映射按 info.json names 按名对号（不依赖列序）；episode 过滤按 data parquet
+的 `episode_index` 列（meta 的 dataset_from/to_index 是全库全局索引，勿当文件
+内偏移）；爪 %→m 走 base.py 同常量同公式；每集按 50 行切伪块、尾块 hold-last。
+⚠ 该数据集 meta/stats.json 臂值范围（±0.5）与 data 实测（±2.0 rad）矛盾
+（全库量纲一致，stats 疑清洗前旧口径）——norm 判读勿引这份。
+
+真数据首验读数（ep0-2，2026-10-28）：遥测增量几乎全 <0.05 rad/tick（钳位
+≈0，30Hz 回放忠实复现）；chunk0 钳位 257=从零位到工作位姿的就位段（链钳
+0.05/tick≈1.5 rad/s 渐进）；集界缝 15-31 mrad、集内伪块缝 1-7 mrad。
+
 ### A/B 维度（v1 精简；G1 台 stream/direct/stepwait/tfs 谱系按需再移植）
 
 | 键 | 默认 | 说明 |
