@@ -1,16 +1,38 @@
-# ══ S1 部署运行配置（第四台机，机型 S1）═══════════════════════════════
-# 继承公共基座（base.toml），本文件只放 S1 覆盖与本机专属键。
-# ⚠ S1 执行脚本未建（scripts/s1/ 目前只有 README 占位）：本文件当前是继承骨架，
-#   建 S1 脚本时按 g1.toml 样式落键（加载器可复用 scripts/g1/inference/
-#   g1_config.py 的 load()——include 解析已内建）。
-# 机型差异备忘（2026-10-27 建档）：S1 状态 19 维 / torso 组 / 夹爪行程
-#   0.007-0.11 m；SDK 走 galbot_sdk.s1（SDK 1.10.0，含 3.11 绑定+.pyi 存根）
-#   ——与 G1 的 23 维 / 夹爪 0-100% 语义不同，[gripper]/[warmup] 等节键义
-#   届时以 S1 脚本为准，勿照抄 g1 值。
+# S1 通用推理执行器档案（run_s1_loop.py）——键名与 G1 config/g1.toml [lerobot]
+# 同体系（lerobot/同事路线对齐名，命名档案=docs/lerobot-alignment.md）。
+# 顶层键 = CLI dest 名；CLI 显式传参覆盖 toml；文件不存在则全用内置默认。
 
-include = "base.toml"
+policy = "fineart_vla"
+ckpt = "/home/galbot/holy/models/fineart_vla_midtrained"
+prompt = "pick up the object"           # System 2 任务提示（G1 同名键）
+rounds = 200
+ctrl_hz = 30.0                          # 行节拍（S1 扩展键；G1 定盘 30Hz 口径）
 
-# —— 建脚本后启用（示例骨架，照 g1.toml [run] 样式）——
-# [run]
-# ckpt = "/home/galbot/holy/models/<s1_deploy 目录>"
-# prompt = "（训练 tasks.parquet 原句）"
+# 水位 0：整块单批直发→立即重规划（新鲜度第一杠杆；同事/G1 同名键同款）
+execute_actions_per_chunk = 0
+# 不插值纯 30Hz 直发（用户定案；G1 traj 同名旗）；>1 启用帧插值
+frames_per_row = 1
+# rad/步（同事 control 段同名键同值；对原始增量 0.00% 截断=封版）
+max_joint_delta_per_step = 0.05
+# 行目标 EMA（同事 action_filter.lowpass.alpha 同名）：G1 档=0.3 现役；
+# S1 首跑先 0 看原始抖动谱，A/B 后再切 0.3
+filter_alpha = 0.0
+
+grip_velocity = 0.05
+grip_effort = 10
+# fineart System 2 子任务生成降频摊销（每 N 块一次；S1 扩展键，G1 无此概念；0=关）
+subtask_every = 25
+live_frames = false
+
+# ── G1 [lerobot] 键的 S1 判读（无对应=刻意不带，非遗漏）──
+#   skip_frames / aggregate_fn : G1 换块跳帧安装/融合机构，S1 未带（水位 0 下
+#                                块边界融合行为待真机首验再定）
+#   cmd_every = 1              : S1 同语义恒为逐行直发（frames_per_row=1）；
+#                                frames_per_row>1 是 G1 traj 同款插值微流，另册
+#   grip_state_cmd = true      : S1 爪走独立 API、state 爪维喂实时回读；SDK 爪
+#                                回读滞后未测——真机首跑专项核查（G1 滞后 6.3-8s，
+#                                忘带=R 爪死 0）
+#   nav_suspend = true         : S1 执行器无导航栈互动，N/A
+#   execution_horizon = 10     : trained-RTC 专属；fineart rtc_config=None，N/A
+#   head_crop = true           : G1 sft_1012 训练口径；fineart=360×640→224
+#                                letterbox 全幅，N/A

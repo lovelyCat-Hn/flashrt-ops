@@ -1,0 +1,31 @@
+{
+  "policy": "fineart_vla",
+  "ckpt": "/home/galbot/holy/models/fineart_vla_midtrained",
+  "prompt": "pick up the object",
+  "executing": false,
+  "rounds": [
+    {
+      "round": 0,
+      "infer_ms": 229.9,
+      "steps": 50,
+      "sent": 0,
+      "frames": 0,
+      "clamped": 0,
+      "text": "Put the blue basket on the pink mat"
+    },
+    {
+      "round": 1,
+      "infer_ms": 230.8,
+      "steps": 50,
+      "sent": 0,
+      "frames": 0,
+      "clamped": 0,
+      "text": "Prepare the blue mat"
+    }
+  ],
+  "max_joint_delta_per_step": 0.05,
+  "ctrl_hz": 30.0,
+  "execute_actions_per_chunk": 0,
+  "filter_alpha": 0.0,
+  "live_frames": false
+}

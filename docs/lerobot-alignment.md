@@ -145,3 +145,21 @@ lerobot `sleep(max(0, dt−elapsed))` 同款语义。
 引擎侧契约：`rtc=False` 默认不分配引导缓冲不走引导分支（结构红线，单测断言
 bufs 键缺席）；`rtc=True` + `rtc_prefix=None` 与 off 差异仅剩构造间 GEMM
 autotune 噪声（同构造内位稳定）；质量/延迟数据见 `BENCHMARKS.md` §八。
+
+## 十、S1 通用执行器键名对齐（2026-10-28）
+
+`scripts/s1/inference/run_s1_loop.py` + `config/s1.toml` 直接继承本档案的
+lerobot/同事对齐名（用户定案：S1 路线与 traj 同源，键名体系不另起炉灶）：
+
+| S1 键（toml/dest） | 旧名（CLI 别名保留） | 同事/G1 [lerobot] 出处 |
+|---|---|---|
+| `prompt` | `--task` | G1 toml 同名键 |
+| `execute_actions_per_chunk` | `--n-action-steps` | 同事同名键（G1 toml 同款；水位 0=整块单批直发→立即重规划） |
+| `max_joint_delta_per_step` | `--delta-max` | 同事 control 段同名键同值（0.05 封版） |
+| `filter_alpha` | `--ema-alpha` | 同事 action_filter.lowpass.alpha 同名（S1 最小版：每块读数重锚，接缝窗调度/链钳/爪列未带） |
+| `frames_per_row` | —（旗名即 G1 traj 同名） | G1 traj 同名旗；默认 1=不插值直发（用户定案，同 cmd_every=1 精神） |
+| `ctrl_hz / subtask_every / grip_velocity / grip_effort` | — | S1 扩展键（G1 无此概念或口径不同） |
+
+G1 [lerobot] 中刻意不带键及判读（skip_frames/aggregate_fn/grip_state_cmd/
+nav_suspend/execution_horizon/head_crop）见 `config/s1.toml` 注释块。命名原则
+同 §〇：toml 键=对齐名，CLI 新名+旧名别名。

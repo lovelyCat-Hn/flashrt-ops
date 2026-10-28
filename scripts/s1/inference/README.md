@@ -30,15 +30,33 @@ policies/pi05.py         pi05 适配器（G1 16/23 维语义；接口留位）
 `load(ckpt, task, calib_obs)` / `infer(obs, state_raw)`；可选 `subtask()`（System 2）
 与 `to_s1(action_row, state_raw) → S1Targets`（动作语义映射）。
 
+## 配置档与键名（对齐 G1 [lerobot] 体系）
+
+默认读 `~/holy/config/s1.toml`（顶层键 = CLI dest 名，CLI 显式传参覆盖 toml；
+`--config` 换档）。**键名继承 G1 `config/g1.toml [lerobot]` 的 lerobot/同事
+对齐名**（命名档案 = `docs/lerobot-alignment.md`）：
+
+| 键 | 语义 | G1 [lerobot] 对照 |
+|---|---|---|
+| `prompt` | System 2 任务提示 | 同名 |
+| `execute_actions_per_chunk` | 水位：0=整块单批直发→立即重规划；N=逐行节拍 | 同名同款（现役 0） |
+| `frames_per_row` | 每行帧数：1=不插值直发（默认，用户定案） | G1 traj 同名旗（cmd_every=1 同语义恒成立） |
+| `max_joint_delta_per_step` | 包络 0.05 rad/步（臂） | 同名同值 |
+| `filter_alpha` | 行目标 EMA，0=关（G1 档 0.3 现役；S1 首跑先 0） | 同名（同事 action_filter.lowpass.alpha） |
+| `subtask_every` | System 2 降频摊销（S1 扩展键） | G1 无此概念 |
+| `skip_frames / aggregate_fn / grip_state_cmd / nav_suspend / execution_horizon / head_crop` | 刻意不带（判读见 s1.toml 注释） | N/A 或待真机证据 |
+
+旧名 CLI 别名保留：`--n-action-steps` / `--delta-max` / `--ema-alpha` / `--task`。
+
 ## 用法
 
 ```bash
 PYTHONPATH=/data/galbot/lib LD_LIBRARY_PATH=/data/galbot/lib \
   ~/miniforge3/envs/flash_pyrt311/bin/python run_s1_loop.py --list-policies
-# dry-run 全链（默认，零运动）
-... run_s1_loop.py --policy fineart_vla --task "pick up the object" --rounds 3
+# dry-run 全链（默认；配置走 ~/holy/config/s1.toml）
+... run_s1_loop.py --policy fineart_vla --prompt "pick up the object" --rounds 3
 # 真机相机取图
-... run_s1_loop.py --policy fineart_vla --live-frames --subtask-every 5 --rounds 10
+... run_s1_loop.py --policy fineart_vla --live-frames --subtask-every 5
 ```
 
 ## 安全设计（三重闸 + 零运动默认）
@@ -70,4 +88,4 @@ PYTHONPATH=/data/galbot/lib LD_LIBRARY_PATH=/data/galbot/lib \
   优先于 groups，每点 `time_from_start_second` 累计时刻；官方示例 dt=0.008。
 - 首次 `generate_subtask` 含一次性预热（本机实测 ~26s），其后 ~0.6–0.9s/次。
 - 遥测落 `~/holy/evidence/s1_loop/run_<policy>_<ts>.json`（每轮 infer_ms/steps/
-  sent/frames/clamped/S2 text + 运行配置）。
+  sent/frames/clamped/S2 text + 运行配置，配置键名=上表正规名）。

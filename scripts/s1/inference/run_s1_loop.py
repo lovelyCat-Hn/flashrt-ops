@@ -56,20 +56,29 @@ AP = argparse.ArgumentParser(description=__doc__,
                              formatter_class=argparse.RawDescriptionHelpFormatter)
 AP.add_argument("--policy", default="fineart_vla", choices=sorted(ADAPTERS))
 AP.add_argument("--ckpt", default=None, help="默认用适配器类属性 CKPT_DIR")
-AP.add_argument("--task", default="pick up the object")
+AP.add_argument("--task", "--prompt", dest="prompt", default="pick up the object",
+                help="任务提示（System 2 prompt；toml 键=prompt，G1 [lerobot] 同名）")
 AP.add_argument("--rounds", type=int, default=3, help="换块轮数")
-AP.add_argument("--ctrl-hz", type=float, default=30.0)
-AP.add_argument("--n-action-steps", type=int, default=10,
-                help="每块消费步数（水位；默认 10=在役配方）")
+AP.add_argument("--ctrl-hz", type=float, default=30.0,
+                help="行节拍 Hz（S1 扩展键；G1 定盘 30Hz 口径）")
+AP.add_argument("--execute-actions-per-chunk", "--n-action-steps",
+                dest="execute_actions_per_chunk", type=int, default=0,
+                help="水位（同事/lerobot 同名键，G1 toml 同款）：0=整块单批直发→"
+                     "立即重规划（新鲜度第一杠杆，G1 现行档同款）；N=每块消费 N 步"
+                     "逐行固定节拍〔旧名 --n-action-steps〕")
 AP.add_argument("--frames-per-row", type=int, default=1,
                 help="每行动作的流式帧数（默认 1=不插值纯 30Hz 直发，用户定案；"
                      ">1 启用帧插值，帧距 = ctrl_hz 倒数/帧数）")
-AP.add_argument("--delta-max", type=float, default=0.05,
-                help="包络护栏：单步相对当前读数的最大关节增量（rad，臂）")
-AP.add_argument("--ema-alpha", type=float, default=0.0,
-                help="行目标 EMA 低通系数（0=关，默认关；G1 同名旋钮同语义，"
-                     "α=新样本权重。最小版：每块从当前读数重锚，G1 的接缝窗 "
-                     "α 调度/链钳/爪列 EMA 未带。真机抖动露出再 A/B）")
+AP.add_argument("--max-joint-delta-per-step", "--delta-max",
+                dest="max_joint_delta_per_step", type=float, default=0.05,
+                help="包络护栏：单步相对当前读数的最大关节增量（rad，臂；"
+                     "同事 control 段同名键同值）〔旧名 --delta-max〕")
+AP.add_argument("--filter-alpha", "--ema-alpha",
+                dest="filter_alpha", type=float, default=0.0,
+                help="行目标 EMA 低通系数（同事 action_filter.lowpass.alpha 同名；"
+                     "0=关，默认关；α=新样本权重。最小版：每块从当前读数重锚，"
+                     "G1 的接缝窗 α 调度/链钳/爪列 EMA 未带。真机抖动露出再 A/B）"
+                     "〔旧名 --ema-alpha〕")
 AP.add_argument("--grip-velocity", type=float, default=0.05)
 AP.add_argument("--grip-effort", type=float, default=10)
 AP.add_argument("--subtask-every", type=int, default=0,
@@ -81,6 +90,29 @@ AP.add_argument("--exec", dest="do_exec", action="store_true",
 AP.add_argument("--synthetic-seed", type=int, default=8)
 AP.add_argument("--out", default=os.path.expanduser("~/holy/evidence/s1_loop"))
 AP.add_argument("--list-policies", action="store_true")
+AP.add_argument("--config", default=os.path.expanduser("~/holy/config/s1.toml"),
+                help="toml 档（顶层键=选项 dest 名；CLI 显式传参覆盖 toml；"
+                     "文件不存在则全用内置默认。G1 对照=config/g1.toml [lerobot]）")
+
+# toml 档预扫描：在 parse 前把顶层键填成 argparse 默认（CLI 显式传参仍覆盖）；
+# 未传 --config 时用默认档路径（文件不存在则静默跳过）
+_cfg_path = None
+for _i, _a in enumerate(sys.argv):
+    if _a == "--config" and _i + 1 < len(sys.argv):
+        _cfg_path = sys.argv[_i + 1]
+        break
+    if _a.startswith("--config="):
+        _cfg_path = _a.split("=", 1)[1]
+        break
+if _cfg_path is None:
+    _cfg_path = next((a.default for a in AP._actions if a.dest == "config"), None)
+if _cfg_path:
+    _cfg_path = os.path.expanduser(str(_cfg_path))
+    if os.path.exists(_cfg_path):
+        import tomllib
+        _cfg = tomllib.loads(pathlib.Path(_cfg_path).read_text())
+        _known = {a.dest for a in AP._actions}
+        AP.set_defaults(**{k: v for k, v in _cfg.items() if k in _known})
 args = AP.parse_args()
 
 _ADAPTER = [None]      # 当前已加载适配器（grab_obs 经此取 camera_map）
@@ -136,7 +168,7 @@ def main() -> int:
         raise SystemExit(f"policy {args.policy} 未定义 CKPT_DIR，须 --ckpt 传入")
     obs0 = grab_obs(robot) if args.live_frames else synthetic_obs(0)
     t0 = time.time()
-    adapter.load(ckpt, args.task, calib_obs=obs0)
+    adapter.load(ckpt, args.prompt, calib_obs=obs0)
     print(f"✓ 引擎加载 {args.policy} ← {ckpt}（{time.time() - t0:.1f}s）")
 
     # ── 循环：取观测 → 读状态 →（可选 S2）→ 推理 → 按 ctrl_hz 消费 n 步 ──
@@ -151,15 +183,19 @@ def main() -> int:
             text = None
             if args.subtask_every and r % args.subtask_every == 0:
                 t2 = time.perf_counter()
-                text = adapter.subtask(args.task, obs)
+                text = adapter.subtask(args.prompt, obs)
                 print(f"  [S2] {text!r}（{(time.perf_counter() - t2) * 1000:.0f} ms）")
             t1 = time.perf_counter()
             chunk = adapter.infer(obs, state_raw)
             infer_ms = (time.perf_counter() - t1) * 1000
-            n = max(0, min(args.n_action_steps, len(chunk)))
+            # 水位语义（同事/lerobot 同名键同款）：0=整块单批直发→立即重规划；N=逐行固定节拍
+            full_chunk = args.execute_actions_per_chunk <= 0
+            n = (len(chunk) if full_chunk
+                 else max(0, min(args.execute_actions_per_chunk, len(chunk))))
             sent, clamped, frames = 0, 0, 0
             prev = state_to_prev(state_raw)      # 行插值链起点 = 本轮读数
             ema = dict(prev)                     # EMA 状态（每块从读数重锚，最小版）
+            plans = []                           # 水位 0：整块计划缓存，循环后单批提交
             for k in range(n):
                 tg = adapter.to_s1(chunk[k], state_raw)
                 if tg is None:
@@ -167,16 +203,22 @@ def main() -> int:
                         print(f"  chunk{r} step0（dry-run）: "
                               f"{np.array2string(chunk[k], precision=3, suppress_small=True)}")
                 else:
-                    tg = ema_row(tg, ema, args.ema_alpha)
+                    tg = ema_row(tg, ema, args.filter_alpha)
                     names, tgt, cl = plan_row(tg, state_raw)
                     clamped += cl
                     if executing:
                         sent += 1
-                        frames += stream_row(robot, names, tgt, prev)
                         send_grippers(robot, tg, state_raw)
-                    for nm, v in zip(names, tgt):
-                        prev[nm] = v
-                sleep_to(tr + period * (k + 1))
+                        if full_chunk:
+                            plans.append((names, tgt))
+                        else:
+                            frames += stream_row(robot, names, tgt, prev)
+                            for nm, v in zip(names, tgt):
+                                prev[nm] = v
+                if not full_chunk:               # 水位 0：批量已在轨，无逐行节拍
+                    sleep_to(tr + period * (k + 1))
+            if executing and full_chunk:
+                frames = stream_chunk(robot, plans, dict(prev))
             rows.append({"round": r, "infer_ms": round(infer_ms, 1),
                          "steps": n, "sent": sent, "frames": frames,
                          "clamped": clamped, "text": text})
@@ -185,10 +227,12 @@ def main() -> int:
     except KeyboardInterrupt:
         print("\n→ Ctrl-C 退出")
     finally:
-        report = {"policy": args.policy, "ckpt": ckpt, "task": args.task,
+        report = {"policy": args.policy, "ckpt": ckpt, "prompt": args.prompt,
                   "executing": executing, "rounds": rows,
-                  "delta_max": args.delta_max, "ctrl_hz": args.ctrl_hz,
-                  "n_action_steps": args.n_action_steps,
+                  "max_joint_delta_per_step": args.max_joint_delta_per_step,
+                  "ctrl_hz": args.ctrl_hz,
+                  "execute_actions_per_chunk": args.execute_actions_per_chunk,
+                  "filter_alpha": args.filter_alpha,
                   "live_frames": args.live_frames}
         out = pathlib.Path(args.out)
         out.mkdir(parents=True, exist_ok=True)
@@ -306,8 +350,9 @@ def plan_row(tg: S1Targets, state_raw: np.ndarray):
                         if nm in LEFT_ARM_JOINTS
                         else state_raw[8 + RIGHT_ARM_JOINTS.index(nm)])
             dv = v - cur
-            if abs(dv) > args.delta_max:
-                v = cur + float(np.clip(dv, -args.delta_max, args.delta_max))
+            if abs(dv) > args.max_joint_delta_per_step:
+                v = cur + float(np.clip(dv, -args.max_joint_delta_per_step,
+                                        args.max_joint_delta_per_step))
                 clamped += 1
         out.append(v)
     return names, out, clamped
@@ -343,6 +388,50 @@ def stream_row(robot, names, tgt, prev: dict[str, float]) -> int:
     if st is not None and getattr(st, "value", 0) != 0:
         print(f"⚠ set_joint_commands_batch → {st}")
     return fr
+
+
+def stream_chunk(robot, plans: list, prev: dict[str, float]) -> int:
+    """水位 0：整块一次 batch——每行 frames_per_row 点、累计 tfs，行间从上一
+    目标链式插值；行缺失关节保持 prev。返回点数。⚠ 新 batch 对 WBC 在执行
+    旧流的取代行为属真机首验项（G1 黑盒无契约前科）。"""
+    args = _args[0]
+    fr = max(1, args.frames_per_row)
+    dt = (1.0 / args.ctrl_hz) / fr
+    from galbot_sdk.s1 import JointCommand, Trajectory, TrajectoryPoint
+
+    names = []
+    for row_names, _ in plans:
+        for nm in row_names:
+            if nm not in names:
+                names.append(nm)
+    traj = Trajectory()
+    traj.joint_names = names
+    pts, t = [], 0.0
+    for row_names, tgt in plans:
+        cur = dict(zip(row_names, tgt))
+        for i in range(1, fr + 1):
+            a = i / fr
+            t += dt
+            p = TrajectoryPoint()
+            p.time_from_start_second = round(t, 6)
+            vec = []
+            for nm in names:
+                tv = cur.get(nm, prev.get(nm, 0.0))
+                base = prev.get(nm, tv)
+                c = JointCommand()
+                c.position = base + (tv - base) * a
+                c.velocity = 0.0
+                c.acceleration = 0.0
+                c.effort = 0.0
+                vec.append(c)
+            p.joint_command_vec = vec
+            pts.append(p)
+        prev.update(cur)
+    traj.points = pts
+    st = robot.set_joint_commands_batch(traj)
+    if st is not None and getattr(st, "value", 0) != 0:
+        print(f"⚠ set_joint_commands_batch(chunk) → {st}")
+    return len(pts)
 
 
 def send_grippers(robot, tg: S1Targets, state_raw: np.ndarray) -> None:
