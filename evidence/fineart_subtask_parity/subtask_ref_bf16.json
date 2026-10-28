@@ -1,0 +1,9 @@
+{
+  "text": "Put the blue mat into the center of the table",
+  "task": "pick up the object",
+  "path": "policy_runner.query(next_subtask)",
+  "dtype": "bf16-autocast",
+  "prompt_rendered": "<bos>User: pick up the object\nAssistant:",
+  "prompt_token_len": 10,
+  "assistant_tail": true
+}

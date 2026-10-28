@@ -1,0 +1,34 @@
+{
+  "text_engine": "Put the blue basket on the pink mat",
+  "text_ref": "Put the blue mat into the center of the table",
+  "exact_match": false,
+  "match_normalized": false,
+  "token_lens": {
+    "engine": 8,
+    "ref": 10
+  },
+  "first_diverge_idx": 3,
+  "tokens_engine_head": [
+    "Put",
+    "▁the",
+    "▁blue",
+    "▁basket",
+    "▁on",
+    "▁the",
+    "▁pink",
+    "▁mat"
+  ],
+  "tokens_ref_head": [
+    "Put",
+    "▁the",
+    "▁blue",
+    "▁mat",
+    "▁into",
+    "▁the",
+    "▁center",
+    "▁of",
+    "▁the",
+    "▁table"
+  ],
+  "verdict": "FAIL"
+}

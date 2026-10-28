@@ -1,11 +1,11 @@
 ---
 name: galbot-fineart-vla-flashrt-port
-description: FineART-VLA（π0.5+语言头）接入 FlashRT 的可行性评估（2026-10-27）：可扩展、复用度高；源码在 ~/lerobot/policies/fineart_vla，引擎侧走 _template 移植
+description: FineART-VLA（π0.5+语言头）接入 FlashRT：引擎能力验证线；System 1 parity 0.999991✅+System 2 parity 结构判据✅（10-28 抓修两个视觉塔真 bug）；挂账=FAST 头+e2e 延迟
 metadata:
   node_type: memory
   type: project
   originSessionId: 8689eb05-8c56-416a-9e8c-9e6525e95e8c
-  modified: 2026-10-27T07:38:20.488Z
+  modified: 2026-10-28T04:48:18.094Z
 ---
 
 **FineART-VLA 接入 FlashRT 可行性评估（2026-10-27，只读调研，未动机器/未写代码）**。用户意向：在 FlashRT 上加载第二个 policy（fineart_vla，Scale AI×HF 出品，源码在 `~/lerobot/src/lerobot/policies/fineart_vla/`，README 指向 docs/source/policy_fineart_vla_README.md）。
@@ -52,4 +52,13 @@ metadata:
 - **口径/网络事实**：hf-mirror 对 google/* 选择性 403（lerobot/* 200）、huggingface.co 不通（Errno 101）；本地 sp 原件→HF fast tokenizer 转换（tokenizer_config.json `GemmaTokenizer` + 需 protobuf）与引擎 sp.Encode **token 级逐位等价（55/55）已实证**。
 - **引擎内部事实**：`pi05_rtx.py:413` embedding=lm_head 约定仅对 tied 权重成立；denoise 时间表引擎=参考=[1.0→0.1] NOISE_AT_ONE 同网格（已对表）；`_prefix_out`/`denoise_trace`/`prefix_features` 构造参数可开（load_model 签名过滤会吞，须直构前端类）；`_prefix_features_result` 是均值池化，要全序列直接切 `_prefix_out` buffer。
 - **流程事实**：只推 gitee（用户定案）；github fork 挂起（lovelyCat-Hn key 当前 publickey denied；ssh.github.com:443 可达但未授权）；FlashRT clone 本地领先上游 8 提交未推。
-- **挂账更新**：~~parity 金标~~已结；剩 **FAST 头（gemma_expert.lm_head）评估**=引擎能力验证最后一块；System 2 贪心口径 vs eager 的严格 parity 可选。
+- **挂账更新**：~~parity 金标~~已结；~~System 2 严格 parity~~已结（见下）；~~FAST 头~~**已结（10-28 晨）**：纯训练辅助损失（enable_fast_action_loss 门控的 CE），官方推理面无 FAST 路径（sample_actions 纯 flow、postprocessor 无 FAST 解码步），引擎不移植=正确动作；证据 evidence/fineart_fast_head_eval/README.md（六条代码证据）。剩 **③ e2e+延迟三口径**=引擎能力验证最后一块。
+
+**✅ System 2 parity 完结（2026-10-28，BENCHMARKS §十三）**：
+- **生产路径定义（源码实证）**：`PolicyRunner.query(kind="next_subtask")` → processor 只设 MESSAGES_RENDERED → `generate_text`→`select_message` **全默认**（temperature=0 贪心、kv-cache、无 loc 抑制）；prompt=`<bos>User: {task}\nAssistant:`（10 token，Assistant 尾标仅 raw runtime 路径加，recipe 渲染消息不加，processor :384-387）；文本路径 `_lang_causal_marks` 恒 None=全双向。
+- **抓修两个真 bug（`text_decode_rtx.py`）**：① `_preprocess_images` 缺 `[0,1]→[−1,1]`（官方 modeling_pi05.py:1441），修复前视觉输入域差一倍；② **`_SiglipLayer.forward` q/k/v 直接 view 裸 LN 输出——q_proj/k_proj/v_proj 是死模块**（权重加载全对但 forward 不调用），修复前塔 l00 cos 0.7366、vision_feats −0.15、子任务文本跑飞。教训：**此前「forward 源码已验证正确」是误读**——hook 证据（LN1=1.0 而 out_proj=0.62）与"正确源码"矛盾时，逐字重读源码优先于一切推理。
+- **三层判决**：fp32 同装置（`probe_subtask_engine_cpu_fp32.py`，引擎全链 cast fp32）**文本逐位全等+11/11 token+cos_min 0.9999912 = 结构 parity PASS**（System 1 窄带判据平移）；生产 bf16 GPU：step3 `basket`↔`mat` 低裕度翻转（margin 0.56/0.67）=纯精度（结构已被上行闭环）；分级：pixel 逐位 0.0 / vision_feats 1−1e-11 / img_emb 0.99999 / prefix（18 层 bf16 复利）0.85–0.99。
+- **方法论新增**：**中间隐状态 cos 对 bf16 权重路线极敏感（prefix_lang 0.85）、端到端 logits 鲁棒（0.994+，分叉步 0.998）**——判据永远用端到端 logits 或 fp32 化引擎，勿拿前缀隐状态硬卡；257k 维 logit 向量的 bf16 自然偏移在 1e-3 量级，与 14 维动作的 1e-5 带不可比。
+- **探针坑三枚**：① PyTorch forward hook **返回非 None 会替换模块输出**（lambda 收尾 setdefault 的返回值把 projector 输出换成输入 → 1152/2048 之谜），抓输入+输出须显式 `return None`；② **裸张量属性 `.float()` 是 out-of-place no-op**（`self.lm_head = g(...)` 直赋），cast 后须重赋值；③ Bash 后台「launcher 模式」（`nohup … & echo`）会让任务通知提前触发→compare 读到旧 npz，直接把脚本本身作为后台命令跑。
+- **参考侧跑法（固化在 golden_subtask_ref.py）**：`HF_HUB_OFFLINE=1` 必带 + `policy.config.text_tokenizer_name = 本地 paligemma_sp224 目录`（select_message 内部按 config 走 hub id 加载 loc tokenizer，绕过 pipeline 覆盖，本机无外网路由会 5×指数重试假死）。
+- 工具链：`policies/fineart_vla/golden_subtask_{ref,engine,compare}.py` + `probe_subtask_{engine,ref,compare,engine_cpu_fp32}.py` + `probe_subtask_stages_*` + `probe_tower_walk_single_process.py` + `probe_siglip_{sdpa_capture,instrumented,layer0_matrix,...}.py`（诊断链全程留档）；evidence/fineart_subtask_parity/（README=三层判决+复现；*.npz 未入库）。

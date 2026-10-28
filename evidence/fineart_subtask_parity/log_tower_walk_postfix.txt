@@ -1,0 +1,12 @@
+/home/galbot/miniforge3/envs/lerobot_cpu/lib/python3.12/site-packages/torch/cuda/__init__.py:180: UserWarning: CUDA initialization: The NVIDIA driver on your system is too old (found version 11040). Please update your GPU driver by downloading and installing a new version from the URL: http://www.nvidia.com/Download/index.aspx Alternatively, go to: https://pytorch.org to install a PyTorch version that has been compiled with your version of the CUDA driver. (Triggered internally at /pytorch/c10/cuda/CUDAFunctions.cpp:119.)
+  return torch._C._cuda_getDeviceCount() > 0
+WARNING:root:No accelerated backend detected. Using default cpu, this will be slow.
+WARNING:lerobot.configs.policies:Device 'cuda' is not available. Switching to 'cpu'.
+Loading weights from local directory
+emb0 cos=1.0000000000
+layer0 cos=1.0000000000
+layer1 cos=1.0000000000
+layer2 cos=1.0000000000
+post_ln cos=1.0000000000
+旧文件 emb0 cos = 1.0
+旧文件 l00 cos  = 0.7365951937730449

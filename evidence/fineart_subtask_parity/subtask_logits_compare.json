@@ -1,0 +1,112 @@
+{
+  "steps_engine": 9,
+  "steps_ref": 11,
+  "compared_steps": 9,
+  "chosen_all_equal": false,
+  "argmax_all_equal": false,
+  "cos_mean": 0.9938589141927624,
+  "cos_min": 0.966786190625524,
+  "first_diverge": {
+    "step": 3,
+    "argmax_equal": false,
+    "chosen_equal": false,
+    "cos": 0.9981568561583144,
+    "margin_engine": 0.55859375,
+    "margin_ref": 0.734375,
+    "top1_engine": 1.515625,
+    "top1_ref": 3.515625
+  },
+  "per_step": [
+    {
+      "step": 0,
+      "argmax_equal": true,
+      "chosen_equal": true,
+      "cos": 0.999638198007336,
+      "margin_engine": 0.8359375,
+      "margin_ref": 2.9921875,
+      "top1_engine": -1.6015625,
+      "top1_ref": 0.6171875
+    },
+    {
+      "step": 1,
+      "argmax_equal": true,
+      "chosen_equal": true,
+      "cos": 0.9997277005957693,
+      "margin_engine": 12.37109375,
+      "margin_ref": 15.88330078125,
+      "top1_engine": 0.37109375,
+      "top1_ref": -0.11669921875
+    },
+    {
+      "step": 2,
+      "argmax_equal": true,
+      "chosen_equal": true,
+      "cos": 0.9973810468633473,
+      "margin_engine": 1.97265625,
+      "margin_ref": 3.703125,
+      "top1_engine": 0.92578125,
+      "top1_ref": 6.59375
+    },
+    {
+      "step": 3,
+      "argmax_equal": false,
+      "chosen_equal": false,
+      "cos": 0.9981568561583144,
+      "margin_engine": 0.55859375,
+      "margin_ref": 0.734375,
+      "top1_engine": 1.515625,
+      "top1_ref": 3.515625
+    },
+    {
+      "step": 4,
+      "argmax_equal": false,
+      "chosen_equal": false,
+      "cos": 0.966786190625524,
+      "margin_engine": 1.75,
+      "margin_ref": 4.2890625,
+      "top1_engine": 6.0625,
+      "top1_ref": 1.1796875
+    },
+    {
+      "step": 5,
+      "argmax_equal": true,
+      "chosen_equal": true,
+      "cos": 0.9993532203447799,
+      "margin_engine": 17.44140625,
+      "margin_ref": 18.9658203125,
+      "top1_engine": -0.55859375,
+      "top1_ref": -0.1591796875
+    },
+    {
+      "step": 6,
+      "argmax_equal": false,
+      "chosen_equal": false,
+      "cos": 0.9950292119898156,
+      "margin_engine": 1.9375,
+      "margin_ref": 2.83203125,
+      "top1_engine": -8.875,
+      "top1_ref": 0.61328125
+    },
+    {
+      "step": 7,
+      "argmax_equal": false,
+      "chosen_equal": false,
+      "cos": 0.9920280658558314,
+      "margin_engine": 2.73046875,
+      "margin_ref": 11.5390625,
+      "top1_engine": 1.7421875,
+      "top1_ref": 1.2265625
+    },
+    {
+      "step": 8,
+      "argmax_equal": false,
+      "chosen_equal": false,
+      "cos": 0.9966297372941443,
+      "margin_engine": 10.4296875,
+      "margin_ref": 19.62109375,
+      "top1_engine": 0.4296875,
+      "top1_ref": -0.50390625
+    }
+  ],
+  "verdict": "FAIL"
+}

@@ -1,0 +1,16 @@
+{
+  "text": "Put the blue basket on the pink mat",
+  "task": "pick up the object",
+  "steps": 9,
+  "tok_ids": [
+    13298,
+    573,
+    3868,
+    12220,
+    611,
+    573,
+    9010,
+    1926,
+    1
+  ]
+}

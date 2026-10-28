@@ -1,0 +1,199 @@
+{
+  "weights": {
+    "ln1.w": {
+      "bit_equal": true,
+      "shape_a": [
+        1152
+      ],
+      "shape_b": [
+        1152
+      ],
+      "max_abs_diff": 0.0
+    },
+    "ln1.b": {
+      "bit_equal": true,
+      "shape_a": [
+        1152
+      ],
+      "shape_b": [
+        1152
+      ],
+      "max_abs_diff": 0.0
+    },
+    "q.w": {
+      "bit_equal": true,
+      "shape_a": [
+        1152,
+        1152
+      ],
+      "shape_b": [
+        1152,
+        1152
+      ],
+      "max_abs_diff": 0.0
+    },
+    "q.b": {
+      "bit_equal": true,
+      "shape_a": [
+        1152
+      ],
+      "shape_b": [
+        1152
+      ],
+      "max_abs_diff": 0.0
+    },
+    "k.w": {
+      "bit_equal": true,
+      "shape_a": [
+        1152,
+        1152
+      ],
+      "shape_b": [
+        1152,
+        1152
+      ],
+      "max_abs_diff": 0.0
+    },
+    "k.b": {
+      "bit_equal": true,
+      "shape_a": [
+        1152
+      ],
+      "shape_b": [
+        1152
+      ],
+      "max_abs_diff": 0.0
+    },
+    "v.w": {
+      "bit_equal": true,
+      "shape_a": [
+        1152,
+        1152
+      ],
+      "shape_b": [
+        1152,
+        1152
+      ],
+      "max_abs_diff": 0.0
+    },
+    "v.b": {
+      "bit_equal": true,
+      "shape_a": [
+        1152
+      ],
+      "shape_b": [
+        1152
+      ],
+      "max_abs_diff": 0.0
+    },
+    "o.w": {
+      "bit_equal": true,
+      "shape_a": [
+        1152,
+        1152
+      ],
+      "shape_b": [
+        1152,
+        1152
+      ],
+      "max_abs_diff": 0.0
+    },
+    "o.b": {
+      "bit_equal": true,
+      "shape_a": [
+        1152
+      ],
+      "shape_b": [
+        1152
+      ],
+      "max_abs_diff": 0.0
+    },
+    "fc1.w": {
+      "bit_equal": true,
+      "shape_a": [
+        4304,
+        1152
+      ],
+      "shape_b": [
+        4304,
+        1152
+      ],
+      "max_abs_diff": 0.0
+    },
+    "fc1.b": {
+      "bit_equal": true,
+      "shape_a": [
+        4304
+      ],
+      "shape_b": [
+        4304
+      ],
+      "max_abs_diff": 0.0
+    },
+    "fc2.w": {
+      "bit_equal": true,
+      "shape_a": [
+        1152,
+        4304
+      ],
+      "shape_b": [
+        1152,
+        4304
+      ],
+      "max_abs_diff": 0.0
+    },
+    "fc2.b": {
+      "bit_equal": true,
+      "shape_a": [
+        1152
+      ],
+      "shape_b": [
+        1152
+      ],
+      "max_abs_diff": 0.0
+    },
+    "ln2.w": {
+      "bit_equal": true,
+      "shape_a": [
+        1152
+      ],
+      "shape_b": [
+        1152
+      ],
+      "max_abs_diff": 0.0
+    },
+    "ln2.b": {
+      "bit_equal": true,
+      "shape_a": [
+        1152
+      ],
+      "shape_b": [
+        1152
+      ],
+      "max_abs_diff": 0.0
+    }
+  },
+  "trace": {
+    "emb0": {
+      "cos": 1.0
+    },
+    "ln1": {
+      "cos": 1.0000000000000002
+    },
+    "attn_out_proj": {
+      "cos": 1.0
+    },
+    "residual1": {
+      "cos": 1.0
+    },
+    "ln2": {
+      "cos": 1.0
+    },
+    "mlp": {
+      "cos": 1.0
+    },
+    "out": {
+      "cos": 1.0000000000000002
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "text": "Put the blue mat into the center of the table",
+  "task": "pick up the object",
+  "dtype": "fp32",
+  "steps": 11,
+  "tok_ids": [
+    13298,
+    573,
+    3868,
+    1926,
+    1280,
+    573,
+    5086,
+    576,
+    573,
+    3037,
+    1
+  ]
+}

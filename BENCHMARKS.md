@@ -487,3 +487,41 @@ cd ~/lerobot && OMP_NUM_THREADS=8 ~/miniforge3/envs/lerobot_cpu/bin/python -u \
     ~/holy/policies/fineart_vla/golden_reference.py
 ~/miniforge3/envs/flash_pyrt311/bin/python ~/holy/policies/fineart_vla/golden_compare.py
 ```
+
+## 十三、fineart_vla System 2 子任务生成 parity（2026-10-28，golden_subtask_* / probe_subtask_*）
+
+条件：同 §十二 机器与 ckpt；task=`pick up the object`，3 视角噪声图 seed 8-9-10；
+生产路径镜像 `query(kind="next_subtask")`→`generate_text`（贪心/kv-cache/无 loc 抑制），
+prompt=`<bos>User: {task}\nAssistant:` 10 token 双侧逐位一致；引擎 SubtaskDecoder
+bf16 GPU vs 参考 CPU eager。原始件：`evidence/fineart_subtask_parity/`（含 README
+与复现命令；*.npz 未入库）。
+
+**表 13-1 分口径判定**
+
+| 口径 | token 门 | cos min / mean | 判定 |
+|---|---|---|---|
+| fp32 同装置（引擎 CPU fp32 vs 参考 fp32，11 步） | 文本逐位全等，11/11 全同 | 0.9999912 / 0.9999977 | **结构 parity PASS**（窄带判据同 §十二） |
+| 生产 bf16（引擎 GPU vs 参考 fp32，9 vs 11 步） | FAIL：step3 `basket`↔`mat`（margin 0.56 vs 0.67） | 0.9673 / 0.9939 | 纯精度效应 |
+| 参考 bf16-autocast vs fp32 | 同文本 | — | 参考侧精度鲁棒 |
+
+**表 13-2 前缀分级（引擎 bf16 GPU vs 参考 fp32，cos）**
+
+| 级 | pixel | vision_feats | img_emb | prefix_vision(768) | prefix_lang(10) | prefix_last |
+|---|---|---:|---:|---:|---:|---:|
+| max_abs_diff / cos | 0.0（逐位） | 1−1e-11 | 0.99999 | 0.844–0.991 | −0.009–0.852 | 0.9869 |
+
+⚠ 注脚：① 修复两个真 bug 后数据：`_preprocess_images` 缺 ×2−1（官方
+modeling_pi05.py:1441）；`_SiglipLayer.forward` q/k/v 未过投影（死模块，
+修复前塔 l00 cos 0.7366 / vision_feats −0.15）。② prefix 级低 cos 为 18 层
+bf16 权重路线复利偏移，fp32 化后全链回窄带（表 13-1 行 1）。③ 参考 fp32 与
+bf16-autocast 同文本。④ 参考侧跑法必带 `HF_HUB_OFFLINE=1` +
+`config.text_tokenizer_name` 指本地 paligemma_sp224（select_message 内部走
+hub id 加载 loc tokenizer，本机无外网路由会无限重试）。
+
+复现：
+```bash
+~/miniforge3/envs/flash_pyrt311/bin/python ~/holy/policies/fineart_vla/golden_subtask_engine.py
+~/miniforge3/envs/flash_pyrt311/bin/python ~/holy/policies/fineart_vla/probe_subtask_engine.py
+cd ~/holy && ~/miniforge3/envs/lerobot_cpu/bin/python policies/fineart_vla/probe_subtask_engine_cpu_fp32.py
+~/miniforge3/envs/lerobot_cpu/bin/python ~/holy/policies/fineart_vla/golden_subtask_compare.py
+```

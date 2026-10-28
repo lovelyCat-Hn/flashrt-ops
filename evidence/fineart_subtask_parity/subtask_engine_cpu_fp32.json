@@ -1,0 +1,9 @@
+{
+  "text": "Put the blue mat into the center of the table",
+  "steps": 11,
+  "token_gate": "PASS_text_equal_11_11",
+  "cos_min": 0.9999911724633426,
+  "cos_mean": 0.9999970088196286,
+  "verdict": "结构判据 PASS（fp32 同装置，cos>=0.99999 窄带 + 文本逐位全等）",
+  "note": "GPU bf16 生产口径另见 subtask_logits_compare.json（step3 低裕度翻转，纯精度）"
+}

@@ -1,0 +1,9 @@
+C1 vs C2（同调用两遍）: 1.000000000000
+h1 vs hook.layer_norm1_out : 1.000000000000
+q  vs hook.q_proj_out      : 0.035264983076
+k  vs hook.k_proj_out      : 0.031461589520
+v  vs hook.v_proj_out      : 0.003483581914
+att_flat vs hook.out_proj_IN: 1.000000000000
+att_flat shape=(3, 256, 1152) hook_in shape=(3, 256, 1152)
+my.scale=0.11785113019775792  hd**-0.5=0.11785113019775792
+C1 vs (xe+out_proj(att)) manual : 1.000000000000
