@@ -22,7 +22,8 @@ G1 线结论见 `agent_memory/`（源机/部署机/machine3 全为 G1），本�
 `S1JointGroup` 枚举（.pyi 4721 行）：`head` / `left_arm` / `right_arm` / `torso` /
 `left_gripper` / `right_gripper` / `swerve_chassis`。
 
-关节名：`left_arm_joint1..7`、`right_arm_joint1..7`、`torso_joint1`、`head_joint1..2`。
+关节名：`left_arm_joint1..7`、`right_arm_joint1..7`、`torso_lift_joint1`、`head_joint1..2`。
+⚠ **torso 运行时实名 = `torso_lift_joint1`**（get_joint_names 实测，run_s1_loop 首跑抓出）；yuqiz config 文档写 `torso_joint1`，与 SDK 返回不符——按实读名为准。
 运行时以 `robot.get_joint_names(only_active_joint, groups)` 为准（传 `[]` 返回全部组）。
 
 ## 3. 19 维状态布局与限位（yuqiz 采集口径，已真机验证）
