@@ -91,6 +91,9 @@ AP.add_argument("--max-joint-delta-per-step", "--delta-max",
                 help="臂链钳 rad/tick（0=关仅限位）〔旧名 --delta-max〕")
 AP.add_argument("--swap-gap-ms", type=float, default=0.0,
                 help="块间 hold ms（模拟推理落地窗；忠实回放=0，G1 定案）")
+AP.add_argument("--seam-cont", dest="seam_cont", action="store_true",
+                help="块界从上一块末目标续锚（数据连续口径，消接缝顿挫）；"
+                     "默认关=从当前读数重锚（执行器同款安全行为，含 LP 尾反向）")
 AP.add_argument("--no-read-back", action="store_true",
                 help="块尾不做关节回读残差（exec 模式默认回读）")
 AP.add_argument("--exec", dest="do_exec", action="store_true",
@@ -226,7 +229,8 @@ def _new_tel(executing: bool) -> dict:
     return {"config": {**{k: getattr(args, k) for k in (
         "data", "synthetic", "seed", "rounds", "ctrl_hz",
         "execute_actions_per_chunk", "frames_per_row", "rows_per_cmd",
-        "filter_alpha", "max_joint_delta_per_step", "swap_gap_ms")},
+        "filter_alpha", "max_joint_delta_per_step", "swap_gap_ms",
+        "seam_cont")},
         "executing": executing},
         "chunks": []}
 
@@ -243,7 +247,8 @@ def run_replay(robot, body_names, names, chunks, grip, executing: bool,
     for rep in range(args.rounds):
         for ci, chunk in enumerate(chunks):
             tr = time.perf_counter()
-            prev = rsl.state_to_prev(state_raw)      # 行插值链起点=本块读数
+            prev = (dict(last_tgt) if (args.seam_cont and last_tgt)
+                    else rsl.state_to_prev(state_raw))  # 续锚上块末目标 / 重锚读数
             ema = dict(prev)
             n = (len(chunk) if args.execute_actions_per_chunk <= 0
                  else max(0, min(args.execute_actions_per_chunk, len(chunk))))
