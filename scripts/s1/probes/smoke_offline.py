@@ -21,8 +21,11 @@ sent = []           # (names, tfs)——每次直发一条
 cur = {}            # 关节名→最后已发值（stub 的"物理"状态）
 
 class Stub:
+    def __init__(self, cur, sent):
+        self.cur, self.sent = cur, sent
+
     def get_joint_positions(self, joint_names=None, **kw):
-        return [cur.get(n, 0.0) for n in joint_names]
+        return [self.cur.get(n, 0.0) for n in joint_names]
 
     def get_gripper_state(self, name):
         class G:
@@ -32,8 +35,19 @@ class Stub:
     def set_joint_commands(self, cmds, joint_names=None, time_from_start_s=0.0):
         assert time_from_start_s == 0.0, f"tfs 应=0，got {time_from_start_s}"
         for n, c in zip(joint_names, cmds):
-            cur[n] = float(c.position)
-        sent.append((list(joint_names), time_from_start_s))
+            self.cur[n] = float(c.position)
+        self.sent.append((list(joint_names), time_from_start_s))
+        return None
+
+    def set_joint_commands_batch(self, traj):
+        names = list(traj.joint_names)
+        pts = traj.points
+        assert pts, "batch 空"
+        tfs = [p.time_from_start_second for p in pts]
+        assert all(b < a for b, a in zip(tfs, tfs[1:])), f"tfs 须严格递增: {tfs}"
+        for n, c in zip(names, pts[-1].joint_command_vec):
+            self.cur[n] = float(c.position)     # 末点=批末行目标
+        self.sent.append((names, ("batch", len(pts))))
         return None
 
     def set_gripper_command(self, *a, **kw):
@@ -41,7 +55,7 @@ class Stub:
 
 
 names, chunks, grip = m.load_traj(None, 2)
-stub = Stub()
+stub = Stub(cur, sent)
 
 from policies.base import HEAD_JOINTS, TORSO_JOINTS
 
@@ -70,3 +84,21 @@ print("  sent calls:", len(sent), "| all tfs=0:", all(t == 0.0 for _, t in sent)
 print("  per-chunk (exec):", [(c["clamped"], round(c["residual_max"], 9))
                               for c in tel["chunks"]])
 print("  worst arm residual after chain clamp:", round(worst, 4), "rad")
+
+# ── 跨行 batch 路径（rows_per_cmd=2 × frames_per_row=4 → 100 行=50 次调用，
+#    每次 8 点、tfs 覆盖 2 行窗口 66.7ms 口径）──
+cur2, sent2 = {}, []
+tel_b = m._new_tel(executing=True)
+m.rsl.args.rows_per_cmd, m.rsl.args.frames_per_row = 2, 4
+m.rsl._args[0] = m.rsl.args
+stub2 = Stub(cur2, sent2)
+m.run_replay(stub2, body17, names, chunks, grip, True, tel_b)
+m.rsl.args.rows_per_cmd, m.rsl.args.frames_per_row = 1, 1
+m.rsl._args[0] = m.rsl.args
+assert len(sent2) == 50, len(sent2)
+assert all(kind == "batch" and npts == 8 for _, (kind, npts) in sent2), sent2[:3]
+assert sum(c["frames"] for c in tel_b["chunks"]) == 400   # 100 行 × 4 帧
+assert all(c["residual_max"] < 1e-6 for c in tel_b["chunks"])
+worst2 = max(abs(cur2[n] - v) for n, v in zip(names, chunks[-1][-1]) if n in m.ARM_JOINTS)
+assert worst2 <= 0.05 + 1e-9, worst2
+print("batch-path smoke OK: 50 calls × 8 pts (R=2×fr=4), tfs 严格递增")

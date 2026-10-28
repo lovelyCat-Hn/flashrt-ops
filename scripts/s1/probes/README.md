@@ -56,10 +56,29 @@ S1 遥测数据集（如 `~/datasets/clean_ready_224_1028`，galbot_one_s1，act
 | 键 | 默认 | 说明 |
 |---|---|---|
 | `--frames-per-row` | 1 | 1=纯 30Hz 直发（执行器默认）；>1=行内插值微流 |
+| `--rows-per-cmd` | 1 | 跨行打包行数 R：命令窗口=R×行周期（30Hz 实时窗口律配方=2×fr12） |
 | `--filter-alpha` | **0** | 回放忠实默认 0（显式传才滤波；与执行器 toml 档无关） |
 | `--max-joint-delta-per-step` | 0.05 | 臂链钳 rad/tick；0=关仅限位 |
 | `--swap-gap-ms` | 0 | 块间 hold 模拟推理落地窗（G1 定案忠实节奏=0） |
 | `--rounds` | 1 | 序列重复遍数 |
+
+### 真机窗口律（10-28 定性，用户耳听判据 + PVT toml 机制面）
+
+S1 臂 PVT 控制器（`/data/galbot/config/teleop/SingoriX/real/galbot_s1-v2.0/
+{left,right}_arm_pvt_ctrl.toml`）每关节 limit_vel=3.0 rad/s / limit_acc=25 /
+**target_pos 一阶低通 cutoff 3Hz @1kHz**（τ≈53ms，阶跃走完 ~150-250ms）。
+卡顿判据塌缩为**命令窗口**（=R×行周期）：
+
+| 配方 | 窗口 | 听感 |
+|---|---|---|
+| 15/30Hz × fr1（单点 tfs=0） | 无（指令="现在"） | 卡卡（步频力矩反复） |
+| 30Hz × fr2/fr6（单行 batch） | 33.3ms | 「还好」（前瞻余量薄，≈20ms lookahead 易被抖动击穿） |
+| 15Hz × fr2/fr12/fr24 | 66.7ms | 安静；点距越细越佳（fr24=2.78ms 最佳） |
+
+→ 执行器 30Hz 实时等价配方 = **`--rows-per-cmd 2 --frames-per-row 12`**
+（窗口 66.7ms + 点距≈2.8ms，两行一次 batch，零额外延迟——整块已在内存）。
+爪逐行独立 API 不受影响（A/B 矩阵实证爪无罪）。G1 同族 bypass 文档旁证：
+底层 MCU 点流按 4ms 重采样、队列保 ~20ms 前瞻。
 
 ### 安全
 

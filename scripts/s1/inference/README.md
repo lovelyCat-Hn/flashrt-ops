@@ -45,6 +45,7 @@ policies/pi05.py         pi05 适配器（G1 16/23 维语义；接口留位）
 | `prompt` | System 2 任务提示 | 同名 |
 | `execute_actions_per_chunk` | 水位：0=整块行流完立即重推理；N=消费 N 行即重推理（都逐帧墙钟直发） | 同名同款（现役 0） |
 | `frames_per_row` | 每行帧数：1=不插值直发（默认，用户定案） | G1 traj 同名旗（cmd_every=1 同语义恒成立） |
+| `rows_per_cmd` | 跨行打包行数 R：命令窗口=R×行周期。10-28 真机窗口律：单点/33.3ms 窗卡顿、66.7ms 窗安静；30Hz 实时配方=2×fr12 | S1 扩展键（G1 无） |
 | `max_joint_delta_per_step` | 包络 0.05 rad/步（臂） | 同名同值 |
 | `filter_alpha` | 行目标 EMA，0=关（G1 档 0.3 现役；S1 首跑先 0） | 同名（同事 action_filter.lowpass.alpha） |
 | `subtask_every` | System 2 降频摊销（S1 扩展键） | G1 无此概念 |

@@ -13,6 +13,12 @@ ctrl_hz = 30.0                          # 行节拍（S1 扩展键；G1 定盘 3
 execute_actions_per_chunk = 0
 # 不插值纯 30Hz 直发（用户定案；G1 traj 同名旗）；>1 启用行内插值微流
 frames_per_row = 1
+# 跨行打包行数 R：命令窗口=R×行周期（与行周期解耦）。10-28 真机窗口律
+# （回放台 A/B 用户耳听判据）：卡顿⇔单点无未来（R=1&fr=1）或窗口过短
+# （30Hz 单行 33.3ms 仅"还好"）；66.7ms 窗全安静、点距细更佳（15Hz fr24
+# 最佳）。30Hz 实时等价推荐 R=2×fr12（窗口 66.7ms/点距≈2.8ms）；
+# 真机首验前保持 1=逐行原路径
+rows_per_cmd = 1
 # rad/步（同事 control 段同名键同值；对原始增量 0.00% 截断=封版）
 max_joint_delta_per_step = 0.05
 # 行目标 EMA（同事 action_filter.lowpass.alpha 同名）：α=新样本权重；

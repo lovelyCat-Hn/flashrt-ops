@@ -71,6 +71,13 @@ AP.add_argument("--execute-actions-per-chunk", "--n-action-steps",
 AP.add_argument("--frames-per-row", type=int, default=1,
                 help="每行动作的流式帧数（默认 1=不插值纯 30Hz 直发，用户定案；"
                      ">1 启用帧插值，帧距 = ctrl_hz 倒数/帧数）")
+AP.add_argument("--rows-per-cmd", type=int, default=1,
+                help="每次 set_joint_commands 打包行数 R（命令窗口=R×行周期，"
+                     "与行周期解耦）。10-28 真机窗口律：卡顿⇔单点无未来"
+                     "（R=1 且 fr=1）或窗口过短（30Hz 单行=33.3ms 仅『还好』）；"
+                     "66.7ms 窗全安静、点距细更佳（15Hz fr24 用户评最佳）。"
+                     "30Hz 实时等价配方=R=2（窗口 66.7ms）×frames_per_row 12"
+                     "（点距≈2.8ms）。1=逐行原路径（默认）")
 AP.add_argument("--max-joint-delta-per-step", "--delta-max",
                 dest="max_joint_delta_per_step", type=float, default=0.05,
                 help="包络护栏：单步相对当前读数的最大关节增量（rad，臂；"
@@ -192,13 +199,15 @@ def main() -> int:
             infer_ms = (time.perf_counter() - t1) * 1000
             # 水位语义（同事/lerobot 同名键同款；发令=G1 traj 同款逐帧墙钟流）：
             # 0=整块行流完立即重推理；N=消费 N 行即重推理。两种都按绝对截止
-            # tick 逐行直发（tfs=0，节拍权在脚本），不整块打包给控制器。
+            # tick 直发（rows_per_cmd 控打包粒度，节拍权在脚本，不整块打包给控制器）。
             full_chunk = args.execute_actions_per_chunk <= 0
             n = (len(chunk) if full_chunk
                  else max(0, min(args.execute_actions_per_chunk, len(chunk))))
             sent, clamped, frames = 0, 0, 0
-            prev = state_to_prev(state_raw)      # 行插值链起点 = 本轮读数
-            ema = dict(prev)                     # EMA 状态（每块从读数重锚，最小版）
+            R = max(1, args.rows_per_cmd)
+            chain = state_to_prev(state_raw)     # 流插值链基准 = 最后已发（exec）
+            ema = dict(chain)                    # EMA 状态（每块从读数重锚，最小版）
+            pending = []                         # 已规划待打包的行 (names, tgt)
             for k in range(n):
                 tg = adapter.to_s1(chunk[k], state_raw)
                 if tg is None:
@@ -209,12 +218,21 @@ def main() -> int:
                     tg = ema_row(tg, ema, args.filter_alpha)
                     names, tgt, cl = plan_row(tg, state_raw)
                     clamped += cl
+                    pending.append((names, tgt))
+                    if executing:
+                        send_grippers(robot, tg, state_raw)
+                    else:
+                        for nm, v in zip(names, tgt):
+                            chain[nm] = v       # dry-run：链随规划走（无下发）
+                if len(pending) >= R or (k == n - 1 and pending):
                     if executing:
                         sent += 1
-                        frames += stream_row(robot, names, tgt, prev)
-                        send_grippers(robot, tg, state_raw)
-                    for nm, v in zip(names, tgt):
-                        prev[nm] = v
+                        frames += stream_rows(robot, pending[0][0],
+                                              [t for _, t in pending], chain)
+                    for names_i, tgt_i in pending:
+                        for nm, v in zip(names_i, tgt_i):
+                            chain[nm] = v       # 批末行 = 新链基准（最后已发）
+                    pending.clear()
                 sleep_to(tr + period * (k + 1))  # 绝对截止节拍（G1 同款；欠账不追发）
             rows.append({"round": r, "infer_ms": round(infer_ms, 1),
                          "steps": n, "sent": sent, "frames": frames,
@@ -355,10 +373,12 @@ def plan_row(tg: S1Targets, state_raw: np.ndarray):
     return names, out, clamped
 
 
-def stream_row(robot, names, tgt, prev: dict[str, float]) -> int:
-    """一行→帧流下发（G1 traj 同款）：fr=1（默认）=单帧 set_joint_commands
-    tfs=0（立即执行；行节拍靠脚本墙钟 sleep_to，不在 tfs 里）；fr>1=A/B
-    插值微流，行内帧小 batch 累计 tfs（帧距=行周期/帧数）。返回帧数。"""
+def stream_rows(robot, names, rows_tgt, prev: dict[str, float]) -> int:
+    """一组行目标→一次下发（跨行 batch，窗口=R×行周期，与行周期解耦）。
+    10-28 真机窗口律：卡顿⇔控制器看不到未来（单点 tfs=0）或窗口过短
+    （30Hz 单行=33.3ms）；66.7ms 窗全安静、点距细更佳。行 j 段从上一行
+    末目标出发 fr 帧线性走到本行目标，tfs 全批累计；末点恰在窗口末。
+    R=1 且 fr=1 退化为单点 tfs=0（原路径逐位不变）。返回帧数。"""
     args = _args[0]
     fr = max(1, args.frames_per_row)
     from galbot_sdk.s1 import JointCommand
@@ -374,8 +394,8 @@ def stream_row(robot, names, tgt, prev: dict[str, float]) -> int:
             out.append(c)
         return out
 
-    if fr == 1:
-        st = robot.set_joint_commands(_cmds(tgt), joint_names=names,
+    if len(rows_tgt) == 1 and fr == 1:
+        st = robot.set_joint_commands(_cmds(rows_tgt[0]), joint_names=names,
                                       time_from_start_s=0.0)
         if st is not None and getattr(st, "value", 0) != 0:
             print(f"⚠ set_joint_commands → {st}")
@@ -385,26 +405,36 @@ def stream_row(robot, names, tgt, prev: dict[str, float]) -> int:
     traj = Trajectory()
     traj.joint_names = names
     pts = []
-    for i in range(1, fr + 1):
-        a = i / fr
-        p = TrajectoryPoint()
-        p.time_from_start_second = round(dt * i, 6)   # 行内累计时刻（33ms 窗）
-        vec = []
-        for nm, tv in zip(names, tgt):
-            c = JointCommand()
-            base = prev.get(nm, tv)
-            c.position = base + (tv - base) * a
-            c.velocity = 0.0
-            c.acceleration = 0.0
-            c.effort = 0.0
-            vec.append(c)
-        p.joint_command_vec = vec
-        pts.append(p)
+    base = [float(prev.get(nm, tv)) for nm, tv in zip(names, rows_tgt[0])]
+    idx = 0
+    for tgt in rows_tgt:
+        end = [float(v) for v in tgt]
+        for i in range(1, fr + 1):
+            a = i / fr
+            p = TrajectoryPoint()
+            p.time_from_start_second = round(dt * (idx + i), 6)  # 全批累计时刻
+            vec = []
+            for q in range(len(names)):
+                c = JointCommand()
+                c.position = base[q] + (end[q] - base[q]) * a
+                c.velocity = 0.0
+                c.acceleration = 0.0
+                c.effort = 0.0
+                vec.append(c)
+            p.joint_command_vec = vec
+            pts.append(p)
+        base = end
+        idx += fr
     traj.points = pts
     st = robot.set_joint_commands_batch(traj)
     if st is not None and getattr(st, "value", 0) != 0:
         print(f"⚠ set_joint_commands_batch → {st}")
-    return fr
+    return len(pts)
+
+
+def stream_row(robot, names, tgt, prev: dict[str, float]) -> int:
+    """单行→帧流下发（兼容入口；=stream_rows 单行版）。"""
+    return stream_rows(robot, names, [tgt], prev)
 
 
 def send_grippers(robot, tg: S1Targets, state_raw: np.ndarray) -> None:

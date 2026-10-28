@@ -23,6 +23,7 @@ vs 推理）。刻意比主执行器多一层：每 tick 重读臂关节刷新�
 
 A/B 维度（v1 精简，G1 台的 stream/direct/stepwait/tfs 谱系按需再移植）：
   --frames-per-row（1=纯 30Hz 直发，同执行器默认；>1=行内插值微流）
+  --rows-per-cmd（跨行打包，窗口=R×行周期；10-28 窗口律：66.7ms 窗全安静）
   --filter-alpha（回放忠实默认 **0**，显式传才滤波——与执行器 toml 档无关）
   --max-joint-delta-per-step（臂链钳，默认 0.05；0=关仅限位）
   --swap-gap-ms（块间 hold 模拟推理落地窗；G1 定案忠实节奏=0）
@@ -79,6 +80,9 @@ AP.add_argument("--execute-actions-per-chunk", "--n-action-steps",
                 help="每块消费行数：0=整块；N=只放前 N 行〔旧名 --n-action-steps〕")
 AP.add_argument("--frames-per-row", type=int, default=1,
                 help="每行流式帧数（1=不插值直发，执行器默认；>1=行内插值微流）")
+AP.add_argument("--rows-per-cmd", type=int, default=1,
+                help="每次 set_joint_commands 打包行数 R（窗口=R×行周期；"
+                     "1=逐行。30Hz 实时窗口律配方=2×fr12，见 run_s1_loop）")
 AP.add_argument("--filter-alpha", "--ema-alpha", dest="filter_alpha",
                 type=float, default=0.0,
                 help="行目标 EMA α=新样本权重；回放忠实默认 0〔旧名 --ema-alpha〕")
@@ -98,6 +102,7 @@ args = AP.parse_args()
 for _k, _v in dict(ctrl_hz=args.ctrl_hz,
                    execute_actions_per_chunk=args.execute_actions_per_chunk,
                    frames_per_row=args.frames_per_row,
+                   rows_per_cmd=args.rows_per_cmd,
                    filter_alpha=args.filter_alpha,
                    max_joint_delta_per_step=args.max_joint_delta_per_step,
                    grip_velocity=0.05, grip_effort=10).items():
@@ -220,8 +225,9 @@ def read_back(robot, names: list[str], last_tgt: dict[str, float]) -> dict:
 def _new_tel(executing: bool) -> dict:
     return {"config": {**{k: getattr(args, k) for k in (
         "data", "synthetic", "seed", "rounds", "ctrl_hz",
-        "execute_actions_per_chunk", "frames_per_row", "filter_alpha",
-        "max_joint_delta_per_step", "swap_gap_ms")}, "executing": executing},
+        "execute_actions_per_chunk", "frames_per_row", "rows_per_cmd",
+        "filter_alpha", "max_joint_delta_per_step", "swap_gap_ms")},
+        "executing": executing},
         "chunks": []}
 
 
@@ -244,6 +250,8 @@ def run_replay(robot, body_names, names, chunks, grip, executing: bool,
             clamped = frames = 0
             seam_max = None
             late_ms = []
+            R = max(1, rsl.args.rows_per_cmd)
+            pending = []      # 已规划待打包的行 (names, tgt)——窗口=R×行周期
             for k in range(n):
                 if executing:
                     refresh_arm_state(robot, state_raw, names)
@@ -256,10 +264,8 @@ def run_replay(robot, body_names, names, chunks, grip, executing: bool,
                 if not executing:
                     advance_arm_state(state_raw, names, tgt, rnames)
                 if executing:
-                    frames += rsl.stream_row(robot, rnames, tgt, prev)
-                    rsl.send_grippers(robot, tg, state_raw)
-                for nm, v in zip(rnames, tgt):
-                    prev[nm] = v
+                    rsl.send_grippers(robot, tg, state_raw)   # 爪逐行（矩阵实证爪无罪）
+                pending.append((rnames, tgt))
                 if k == 0 and last_tgt:
                     d = [abs(prev[nm] - last_tgt[nm]) * 1000
                          for nm in rnames if nm in last_tgt
@@ -267,6 +273,14 @@ def run_replay(robot, body_names, names, chunks, grip, executing: bool,
                     seam_max = max(d) if d else None
                 if k == n - 1:
                     last_tgt = dict(zip(rnames, tgt))
+                if len(pending) >= R or k == n - 1:
+                    if executing:
+                        frames += rsl.stream_rows(robot, pending[0][0],
+                                                  [t for _, t in pending], prev)
+                    for nm_i, tgt_i in pending:
+                        for nm, v in zip(nm_i, tgt_i):
+                            prev[nm] = v      # 批末行 = 新插值链基准
+                    pending.clear()
                 late = (time.perf_counter() - (tr + period * (k + 1))) * 1000
                 late_ms.append(max(0.0, late))
                 rsl.sleep_to(tr + period * (k + 1))   # 绝对截止节拍；欠账不追发
