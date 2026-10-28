@@ -9,8 +9,9 @@
 
 执行路线（用户定案 2026-10-28：对齐 run_g1_loop_traj 的流式哲学，勿退回
 set_joint_positions——官方明示后者不适合流式）：
-  lerobot 动作块 → 逐行动作 → --frames-per-row 帧线性插值 → set_joint_commands_batch
-  一次流式提交（官方 batch 接口 docstring 明示适用 "VLA inference batch output"；
+  lerobot 动作块 → 逐行动作 → --frames-per-row 帧插值（默认 1=不插值纯 30Hz 直发，
+  用户定案；>1 才启用插值）→ set_joint_commands_batch 一次流式提交
+  （官方 batch 接口 docstring 明示适用 "VLA inference batch output"；
   每点 time_from_start_second = 相对轨迹起点的累计时刻）。夹爪仍走独立 API
   （对应 G1 --grip-state-cmd 位）。⚠ tfs/S1 WBC 耦合语义未真机验证——
   G1 血泪史（tfs0 每点全停滞后 2.1×、tfs33.3 stall 判死）上机前先小步复验。
@@ -60,9 +61,9 @@ AP.add_argument("--rounds", type=int, default=3, help="换块轮数")
 AP.add_argument("--ctrl-hz", type=float, default=30.0)
 AP.add_argument("--n-action-steps", type=int, default=10,
                 help="每块消费步数（水位；默认 10=在役配方）")
-AP.add_argument("--frames-per-row", type=int, default=8,
-                help="每行动作插值的流式帧数（G1 traj 定案 8 帧流留任；"
-                     "帧距 = ctrl_hz 倒数/帧数，默认 30/8≈240Hz 流）")
+AP.add_argument("--frames-per-row", type=int, default=1,
+                help="每行动作的流式帧数（默认 1=不插值纯 30Hz 直发，用户定案；"
+                     ">1 启用帧插值，帧距 = ctrl_hz 倒数/帧数）")
 AP.add_argument("--delta-max", type=float, default=0.05,
                 help="包络护栏：单步相对当前读数的最大关节增量（rad，臂）")
 AP.add_argument("--grip-velocity", type=float, default=0.05)

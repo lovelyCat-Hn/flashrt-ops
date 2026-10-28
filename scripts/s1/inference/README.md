@@ -6,7 +6,8 @@
 
 ## 执行路线（流式，对齐 G1 traj 哲学）
 
-lerobot 动作块 → 逐行动作 → `--frames-per-row` 帧线性插值（默认 8 帧/G1 定案）
+lerobot 动作块 → 逐行动作 → `--frames-per-row` 帧插值（**默认 1 = 不插值，
+纯 30Hz 直发**，用户定案；>1 启用插值，帧距 = ctrl_hz 倒数/帧数）
 → `set_joint_commands_batch` 一次流式提交。batch 接口官方 docstring 明示适用
 "VLA inference batch output"；每点 `time_from_start_second` = 相对轨迹起点的累计
 时刻（官方示例口径，首点=dt）。`set_joint_positions` 不用于执行（官方明示不适合
