@@ -1,11 +1,11 @@
 ---
 name: galbot-fineart-vla-flashrt-port
-description: FineART-VLA（π0.5+语言头）接入 FlashRT：引擎能力验证线全完结（10-28）——①flow parity 0.999991✅②System 2 结构 PASS（抓修两视觉塔真 bug）✅FAST 头不移植✅③e2e 三口径✅；部署线=新 scope
+description: FineART-VLA（π0.5+语言头）接入 FlashRT：引擎能力验证线全完结（10-28）——①flow parity 0.999991✅②System 2 结构 PASS（抓修两视觉塔真 bug）✅FAST 头不移植✅③e2e 三口径✅④通用 S1 执行器 run_s1_loop 落地（dry-run 全链绿，--exec 三闸）；部署线=新 scope
 metadata:
   node_type: memory
   type: project
   originSessionId: 8689eb05-8c56-416a-9e8c-9e6525e95e8c
-  modified: 2026-10-28T04:48:18.094Z
+  modified: 2026-10-28T06:57:18.329Z
 ---
 
 **FineART-VLA 接入 FlashRT 可行性评估（2026-10-27，只读调研，未动机器/未写代码）**。用户意向：在 FlashRT 上加载第二个 policy（fineart_vla，Scale AI×HF 出品，源码在 `~/lerobot/src/lerobot/policies/fineart_vla/`，README 指向 docs/source/policy_fineart_vla_README.md）。
@@ -64,3 +64,7 @@ metadata:
 - **探针坑三枚**：① PyTorch forward hook **返回非 None 会替换模块输出**（lambda 收尾 setdefault 的返回值把 projector 输出换成输入 → 1152/2048 之谜），抓输入+输出须显式 `return None`；② **裸张量属性 `.float()` 是 out-of-place no-op**（`self.lm_head = g(...)` 直赋），cast 后须重赋值；③ Bash 后台「launcher 模式」（`nohup … & echo`）会让任务通知提前触发→compare 读到旧 npz，直接把脚本本身作为后台命令跑。
 - **参考侧跑法（固化在 golden_subtask_ref.py）**：`HF_HUB_OFFLINE=1` 必带 + `policy.config.text_tokenizer_name = 本地 paligemma_sp224 目录`（select_message 内部按 config 走 hub id 加载 loc tokenizer，绕过 pipeline 覆盖，本机无外网路由会 5×指数重试假死）。
 - 工具链：`policies/fineart_vla/golden_subtask_{ref,engine,compare}.py` + `probe_subtask_{engine,ref,compare,engine_cpu_fp32}.py` + `probe_subtask_stages_*` + `probe_tower_walk_single_process.py` + `probe_siglip_{sdpa_capture,instrumented,layer0_matrix,...}.py`（诊断链全程留档）；evidence/fineart_subtask_parity/（README=三层判决+复现；*.npz 未入库）。
+
+**✅ ④ 通用 S1 推理执行器落地（2026-10-28，ops d03af19，用户定案架构）**：`scripts/s1/inference/run_s1_loop.py` = run_g1_loop_traj.py 的 S1 镜像 + **适配器解耦**——执行器只管 S1 SDK 交互/循环节拍/安全栏/遥测，policy 专属（引擎加载/观测预处理/动作语义/System 2）全住 `policies/<name>.py`（base=PolicyAdapter 接口+S1Targets+S1 限位/夹爪换算；fineart_vla=ALOHA 14 维+System 2 hook；pi05=G1 16/23 维留位）。**新增 policy = 加一个文件注册进 ADAPTERS，执行器零改动**。SDK 调用形=run_g1_loop_traj 家族（GalbotRobot/SensorType/get_rgb_data/get_rgb_data(JPEG)→BGR 软解→letterbox224）。**三重闸零运动默认**：①默认 dry-run 全链照跑不发指令；②`--exec` 需适配器 `needs_mapping=True`——fineart(ALOHA 14)/pi05(G1 16)→S1 19 维语义映射均未定义（随微调线落地），**结构性拒绝**；③交互确认+`start_controller("all")` 显式开启+包络护栏（限位表逐关节钳位+`--delta-max` 相对当前读数，臂 only）。**2 轮 dry-run 全链绿**：SDK init→17 关节显式读→引擎 11.2s→每轮 S2+S1 infer 232ms→固定 tick 消费 10 步→遥测 `evidence/s1_loop/run_<policy>_<ts>.json`。事实：首次 `generate_subtask` 含一次性预热 ~26s（其后 ~0.6–0.9s）；torso 运行时实名 `torso_lift_joint1`（见 [[galbot-s1-sdk-and-body-basics]]）；用法/扩展见 `scripts/s1/inference/README.md`。
+
+**⚠ 执行路线纠正（2026-10-28 用户指出，同日改毕）**：初版误走 `set_joint_positions` 单步——G1 traj 脚本的立意就是**流式适配 lerobot 动作块语义**，S1 镜像不该退回单点位（官方明示该接口不适合流式）。已改：逐行动作→`--frames-per-row`（默认 8=G1 定案帧流）线性插值→`set_joint_commands_batch` 一次流式提交（官方 docstring 明示适用 "VLA inference batch output"；每点 `time_from_start_second`=累计时刻，官方示例 dt=0.008）；夹爪仍独立 API（G1 `--grip-state-cmd` 同位）；护栏改钳**行目标**（插值帧由已钳目标构造，不会被帧绕过）。流式构建器离线冒烟过（Trajectory 构造/帧距/插值端点/delta-max 实效）；⚠ **tfs×singorix WBC 真机语义未验证**——G1 血泪史（tfs0 每点全停滞后 2.1×、tfs33.3 stall 判死）上机前小步复验。

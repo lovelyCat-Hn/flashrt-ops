@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 8689eb05-8c56-416a-9e8c-9e6525e95e8c
-  modified: 2026-10-27T05:38:37.441Z
+  modified: 2026-10-28T06:57:28.073Z
 ---
 
 **S1 SDK/本体基线（2026-10-27 盘点，机器 SN=R002AAFF21AA0063，ROBOT_SERIES=S1，HW 2.1，BODY_TYPE=A，双臂 A21）**。与 G1 线的关键差异（来源 [[galbot-s1-machine-state]] 机型差异的落地细节）：
@@ -20,3 +20,11 @@ metadata:
 **SDK 源码包已到位（2026-10-27 下午，用户下载）**：`~/GalbotSDK/` = **1.10.0**，与本机 runtime 版本逐字匹配（VERSION 文件核对）。含 `examples/s1/python/`（galbot_robot/motion/navigation/perception/tutorials 六组，**tutorials/example5_execute_vla.py = VLA 集成模板**、example6_pick_and_place）、`docs/s1/zh/`（mkdocs HTML：api_python_reference/set_config_reference/tutorials）、`galbot_sdk/linux-aarch64-gcc1330/include/.../galbot_sdk_type.hpp`（C++ 头注释=API 语义权威）。`~/lerobot` 也已克隆（machine3 同款）。
 
 **S1 关节速查表已入仓**：`~/holy/docs/s1-joint-api-quickref.md`（随 67655e7 已推 gitee）。核心事实：19 维布局/限位表出自 yuqiz config.py，源头=官方 `/data/galbot/config/teleop/SingoriX/real/galbot_s1-v2.0/*.toml`；**左右臂 j2/j4 限位不对称**（[-1.9808,1.7191] vs [-1.7191,1.9808]，映射/包络必须左右各建）；**头部限位两处口径不一致**（SDK 示例注释 ±0.7854/±0.6109 vs TOML ±0.7592/±0.5847）待实测定案；torso 限位 [0,1.0]；夹爪状态维 0–100% 与 pi05 同口径、物理行程 0.007–0.11 m 换算待标定；`set_joint_positions` 签名与 G1 相同，`set_joint_commands` 高频接口（100Hz 示例）+ `set_joint_commands_batch` 是 traj 执行器候选。另有 repo 级 skill `bench-report`（维护 BENCHMARKS.md 用）随 holy/.claude 就位。
+
+**⚠ torso 运行时实名（2026-10-28 实测，get_joint_names 实读）**：= **`torso_lift_joint1`**，quickref/config 文档写的 `torso_joint1` 与 SDK 返回不符——按文档名读必 KeyError。执行器/限位表/状态布局常量已按实名修正（policies/base.py），quickref 已注 discrepancy。
+
+**⚠ torso = 升降柱，位置语义 = 高度米非 rad（2026-10-28 用户提醒 + 官方实证）**：S1 与 G1 躯干本质不同——G1 无 torso（leg5 旋转关节），S1 torso 是**升降柱**，位置/限位 [0.0,1.0] 单位=**米**（升降高度）。证据：官方 `GalbotSDK/examples/s1/cpp/galbot_robot/src/request_target_example.cpp:268` `kTorsoJt = 0.60; // torso target height, meter` + yuqiz 位姿 torso 0.65/0.75 实证。勿按 rad 处理；限位表注释/S1Targets 文档/quickref 已全部改注 m。
+
+**通用 S1 推理执行器已落地（2026-10-28，ops d03af19）**：`scripts/s1/inference/run_s1_loop.py`（policy 无关 + `policies/` 适配器解耦，详见 [[galbot-fineart-vla-flashrt-port]] ④段与 `scripts/s1/inference/README.md`）。dry-run 全链已验证的读路径：`get_joint_names(only_active_joint=True, joint_groups=[...])` + `get_joint_positions(joint_names=显式列表)`（group 模式坑同 G1）+ `get_gripper_state("<side>_gripper")`（String 名，width 属性）；**下发路径 dry-run 未触发，真机 --exec 前属未验证面**；`--exec` 现被 needs_mapping=False 结构性拒绝（ALOHA 14/G1 16→S1 19 语义映射未定义）。
+
+**流式执行路线定案（2026-10-28 用户纠正，同日改毕）**：S1 执行器与 G1 traj 同哲学=**流式适配 lerobot 动作块**——`set_joint_positions` 勿用于执行（官方明示不适合流式），走 `set_joint_commands(_batch)`：batch=非阻塞多点轨迹，docstring 明示适用 "VLA inference batch output"；`Trajectory.joint_names` 优先于 groups；每点 `time_from_start_second`=相对轨迹起点累计时刻（官方示例 dt=0.008≈125Hz）；单点 `set_joint_commands` 高频口（标准关节只吃 position，**爪关节 position=宽度米且 velocity/effort 生效**——爪未来可并入流式待验）。⚠ G1 tfs 血泪史（tfs0 每点全停滞后 2.1×、tfs33.3 stall 判死）→ S1 真机首验先小步复验 tfs×WBC 语义。
