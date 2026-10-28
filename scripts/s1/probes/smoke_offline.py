@@ -46,10 +46,12 @@ stub = Stub()
 from policies.base import HEAD_JOINTS, TORSO_JOINTS
 
 body17 = m.ARM_JOINTS + TORSO_JOINTS + HEAD_JOINTS
-tel = m.run_replay(stub, body17, names, chunks, grip, executing=True)
+tel = m._new_tel(executing=True)
+m.run_replay(stub, body17, names, chunks, grip, True, tel)
 
 # dry-run 口径：虚拟跟随下钳位应远小于冻结态（回归 advance_arm_state）
-tel_dry = m.run_replay(None, None, names, chunks, grip, executing=False)
+tel_dry = m._new_tel(executing=False)
+m.run_replay(None, None, names, chunks, grip, False, tel_dry)
 assert tel_dry["chunks"][0]["clamped"] <= tel["chunks"][0]["clamped"] * 2
 
 total_rows = sum(c["rows"] for c in tel["chunks"])

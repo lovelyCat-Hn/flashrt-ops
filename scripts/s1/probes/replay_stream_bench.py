@@ -217,17 +217,22 @@ def read_back(robot, names: list[str], last_tgt: dict[str, float]) -> dict:
     return {"residual_max": mx, "residual": res}
 
 
-def run_replay(robot, body_names, names, chunks, grip, executing: bool) -> dict:
-    """主回放循环——逐行下发路径与 run_s1_loop 逐指令同构。→ 遥测 dict。"""
-    period = 1.0 / args.ctrl_hz
-    state_raw = (rsl.read_s1_state(robot, body_names)[0] if executing
-                 else synthetic_state())
-    last_tgt: dict[str, float] = {}          # 跨块缝计量：上一块最后行目标
-    tel = {"config": {**{k: getattr(args, k) for k in (
+def _new_tel(executing: bool) -> dict:
+    return {"config": {**{k: getattr(args, k) for k in (
         "data", "synthetic", "seed", "rounds", "ctrl_hz",
         "execute_actions_per_chunk", "frames_per_row", "filter_alpha",
         "max_joint_delta_per_step", "swap_gap_ms")}, "executing": executing},
         "chunks": []}
+
+
+def run_replay(robot, body_names, names, chunks, grip, executing: bool,
+               tel: dict) -> None:
+    """主回放循环——逐行下发路径与 run_s1_loop 逐指令同构。
+    遥测累积进传入的 tel（Ctrl-C 时 main 侧可落盘部分遥测）。"""
+    period = 1.0 / args.ctrl_hz
+    state_raw = (rsl.read_s1_state(robot, body_names)[0] if executing
+                 else synthetic_state())
+    last_tgt: dict[str, float] = {}          # 跨块缝计量：上一块最后行目标
 
     for rep in range(args.rounds):
         for ci, chunk in enumerate(chunks):
@@ -298,7 +303,8 @@ def main() -> int:
 
     if not args.do_exec:
         print("（dry-run：不发指令，零 SDK，只走节拍与护栏路径）")
-        tel = run_replay(None, None, names, chunks, grip, executing=False)
+        tel = _new_tel(executing=False)
+        run_replay(None, None, names, chunks, grip, False, tel)
         _dump(tel)
         return 0
 
@@ -318,8 +324,13 @@ def main() -> int:
             raise SystemExit("未确认，退出。")
         robot.start_controller("all")
         print("✓ start_controller(all)——执行模式")
-        tel = run_replay(robot, body_names, names, chunks, grip, executing=True)
-        _dump(tel)
+        tel = _new_tel(executing=True)
+        try:
+            run_replay(robot, body_names, names, chunks, grip, True, tel)
+            _dump(tel)
+        except KeyboardInterrupt:
+            _dump(tel)        # 中断也落盘部分遥测（v1 缺口：卡顿首跑日志全丢）
+            raise
     finally:
         # SDK 优雅关停（执行器 main 尾同款三连；缺它=退出段 C++ 析构段错误，
         # 10-28 回放台拒答路径实证）

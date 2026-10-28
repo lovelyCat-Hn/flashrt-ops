@@ -66,7 +66,9 @@ S1 遥测数据集（如 `~/datasets/clean_ready_224_1028`，galbot_one_s1，act
 dry-run 默认**零 SDK**（任何机器可跑；dry-run 状态走虚拟跟随，钳位计数=
 真实链钳行为而非冻结态伪影）。`--exec` 需交互确认 + `start_controller`
 （急停手不离，模式切换失力矩 10-27 教训）。包络 = S1_LIMITS 钳位 +
-delta-max 臂链钳（每 tick 重读基准）。Ctrl-C 即退（遥测不落盘）。
+delta-max 臂链钳（每 tick 重读基准）。Ctrl-C 即退并落盘部分遥测。
+SDK 会话退出走优雅三连 request_shutdown/wait_for_shutdown/destroy（缺它=
+退出段 C++ 析构 Segmentation fault，10-28 实证）。
 
 ### 用法
 
