@@ -1,6 +1,6 @@
 ---
 name: galbot-fineart-vla-flashrt-port
-description: FineART-VLA（π0.5+语言头）接入 FlashRT：引擎能力验证线；System 1 parity 0.999991✅+System 2 parity 结构判据✅（10-28 抓修两个视觉塔真 bug）；挂账=FAST 头+e2e 延迟
+description: FineART-VLA（π0.5+语言头）接入 FlashRT：引擎能力验证线全完结（10-28）——①flow parity 0.999991✅②System 2 结构 PASS（抓修两视觉塔真 bug）✅FAST 头不移植✅③e2e 三口径✅；部署线=新 scope
 metadata:
   node_type: memory
   type: project
@@ -52,7 +52,9 @@ metadata:
 - **口径/网络事实**：hf-mirror 对 google/* 选择性 403（lerobot/* 200）、huggingface.co 不通（Errno 101）；本地 sp 原件→HF fast tokenizer 转换（tokenizer_config.json `GemmaTokenizer` + 需 protobuf）与引擎 sp.Encode **token 级逐位等价（55/55）已实证**。
 - **引擎内部事实**：`pi05_rtx.py:413` embedding=lm_head 约定仅对 tied 权重成立；denoise 时间表引擎=参考=[1.0→0.1] NOISE_AT_ONE 同网格（已对表）；`_prefix_out`/`denoise_trace`/`prefix_features` 构造参数可开（load_model 签名过滤会吞，须直构前端类）；`_prefix_features_result` 是均值池化，要全序列直接切 `_prefix_out` buffer。
 - **流程事实**：只推 gitee（用户定案）；github fork 挂起（lovelyCat-Hn key 当前 publickey denied；ssh.github.com:443 可达但未授权）；FlashRT clone 本地领先上游 8 提交未推。
-- **挂账更新**：~~parity 金标~~已结；~~System 2 严格 parity~~已结（见下）；~~FAST 头~~**已结（10-28 晨）**：纯训练辅助损失（enable_fast_action_loss 门控的 CE），官方推理面无 FAST 路径（sample_actions 纯 flow、postprocessor 无 FAST 解码步），引擎不移植=正确动作；证据 evidence/fineart_fast_head_eval/README.md（六条代码证据）。剩 **③ e2e+延迟三口径**=引擎能力验证最后一块。
+- **挂账更新**：~~parity 金标~~已结；~~System 2 严格 parity~~已结（见下）；~~FAST 头~~**已结（10-28 晨）**：纯训练辅助损失（enable_fast_action_loss 门控的 CE），官方推理面无 FAST 路径（sample_actions 纯 flow、postprocessor 无 FAST 解码步），引擎不移植=正确动作；证据 evidence/fineart_fast_head_eval/README.md（六条代码证据）。**✅ ③ e2e+延迟三口径完结（2026-10-28，BENCHMARKS §十四）——引擎能力验证线全部完结**：
+`policies/fineart_vla/bench_e2e_latency.py` 三模式（noload/sdk/loop，零运动）。数：S1 p50 231.9-232.6ms 三口径稳（graph on）；S2 p50 885-905ms；Σ p50 ~1.13s；**SDK 栈在场成本 Σ +12ms（+1.1%），几乎全在 S2 的 CPU 长往返，S1 +0.7≈噪声**（对照 pi05 sdkfree Δ2.3 同判）；循环 60 轮稳态服务节拍 **0.89 Hz**=每轮都生成文本的上界（官方 S2 可降频摊销；仅 S1 ≈4.3 Hz，chunk50@30Hz 执行窗 1.67s 服务余量足）。SDK 调用形=run_g1_loop_traj.py（`galbot_sdk.s1` GalbotRobot init 相机订阅+get_rgb_data 探针，**无 start_controller**）。证据细节：冻帧 20/20 同句=贪心确定；循环每轮换帧→S2 文本随观测变化（响应机制证据）。证据 evidence/fineart_e2e_latency/。
+**完结清单**：①flow parity 0.999991 结构判据✅；②System 2 结构 PASS（fp32 文本全等+窄带）✅；FAST 头=官方无推理面不移植✅；③e2e 三口径✅。复现边界（复盘口径）：跨构造位等不可比（判据=窄带 cos+token 门）；bf16 下 S2 低裕度 token 不锁字（结构无罪）；parity 输入=合成帧。后续若上部署线=新 scope（S1 关节映射+微调，见 Stage 0 卡点段）。
 
 **✅ System 2 parity 完结（2026-10-28，BENCHMARKS §十三）**：
 - **生产路径定义（源码实证）**：`PolicyRunner.query(kind="next_subtask")` → processor 只设 MESSAGES_RENDERED → `generate_text`→`select_message` **全默认**（temperature=0 贪心、kv-cache、无 loc 抑制）；prompt=`<bos>User: {task}\nAssistant:`（10 token，Assistant 尾标仅 raw runtime 路径加，recipe 渲染消息不加，processor :384-387）；文本路径 `_lang_causal_marks` 恒 None=全双向。

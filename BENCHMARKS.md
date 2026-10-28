@@ -381,6 +381,7 @@ cache_frames=1、合成观测（随机图×3+1px 平移扰动）、种子 202610
 | 表 7-x 闭环 | `~/holy/scripts/g1/inference/run_g1_loop.py --nav-suspend [--exec] --n-action-steps 25 --steps-per-command 25 --pace 0.35 --pace-div 1.5`（⚠ `--exec` 驱臂） |
 | 表 8-x RTC 引导消融 | `~/miniforge3/envs/flash_pyrt311/bin/python ~/holy/scripts/g1/eval/rtc_ablation.py 12 --out ~/holy/evidence/20261009_rtc_guided_ablation` |
 | 表 12-1 parity 金标 | `golden_engine.py` → `golden_reference.py` → `golden_compare.py`（三连，见 `evidence/fineart_parity/README.md`） |
+| 表 14-1 e2e 三口径 | `bench_e2e_latency.py --mode noload|sdk|loop`（见 `evidence/fineart_e2e_latency/README.md`） |
 | 表 13-1/13-2 System 2 parity | `golden_subtask_engine.py` → `golden_subtask_ref.py` → `golden_subtask_compare.py` + `probe_subtask_engine_cpu_fp32.py`（见 `evidence/fineart_subtask_parity/README.md`） |
 | 原始输出 | `evidence/20261006-07_quant_kv_ablation/`（quant）；`evidence/20261009_rtc_guided_ablation/`（RTC）；闭环日志 `logs/loop_*.log` |
 
@@ -526,4 +527,33 @@ hub id 加载 loc tokenizer，本机无外网路由会无限重试）。
 ~/miniforge3/envs/flash_pyrt311/bin/python ~/holy/policies/fineart_vla/probe_subtask_engine.py
 cd ~/holy && ~/miniforge3/envs/lerobot_cpu/bin/python policies/fineart_vla/probe_subtask_engine_cpu_fp32.py
 ~/miniforge3/envs/lerobot_cpu/bin/python ~/holy/policies/fineart_vla/golden_subtask_compare.py
+```
+
+## 十四、fineart_vla e2e + 延迟三口径（2026-10-28，bench_e2e_latency.py）
+
+条件：同 §十三 机器/env/ckpt；链路 = generate_subtask（S2）+ infer（S1，chunk 50/
+step 10/14 维，graph on）串行全链；状态 golden seed7→q01/q99 归一化；SDK 口径 =
+`galbot_sdk.s1` GalbotRobot 相机订阅在场（调用形 run_g1_loop_traj.py，零
+start_controller=零运动）；空载/SDK 冻结合成帧，循环每轮换帧换噪声 60 轮。
+原始件：`evidence/fineart_e2e_latency/`（含 README 与口径注）。
+
+**表 14-1 三口径延迟（ms，p50）**
+
+| 口径 | S2 | S1 | Σ | Σ p90 | 循环稳态节拍 |
+|---|---:|---:|---:|---:|---:|
+| 空载（冻结合成帧，20 轮） | 893.6 | 231.9 | 1125.7 | 1134.7 | — |
+| SDK 在场（20 轮） | 905.0 | 232.6 | 1137.7 | 1146.5 | — |
+| 循环（换帧，60 轮） | 885.0 | 232.1 | 1116.7 | 1143.8 | 0.89 Hz |
+
+⚠ 注脚：① Δ(sdk−空载) = Σ +12.0 ms（+1.1%），几乎全在 S2（+11.4）；S1 +0.7 ≈ 噪声
+（对照 pi05 表 5-3 sdkfree Δ2.3=噪声）。② 冻帧口径文本 20/20 同句=贪心确定；循环
+换帧 → 文本随观测变化（机制证据）。③ 0.89 Hz = 每轮都生成文本的上界节拍；官方
+用法 S2 可降频摊销；仅 S1 节拍 ≈4.3 Hz（chunk 50@30Hz 执行窗 1.67s，服务余量足）。
+④ 全轮 (50,14) 有限值。
+
+复现：
+```bash
+~/miniforge3/envs/flash_pyrt311/bin/python ~/holy/policies/fineart_vla/bench_e2e_latency.py --mode noload|loop
+LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib ~/miniforge3/envs/flash_pyrt311/bin/python \
+    ~/holy/policies/fineart_vla/bench_e2e_latency.py --mode sdk
 ```

@@ -1,0 +1,253 @@
+{
+  "mode": "sdk",
+  "rounds": 20,
+  "task": "pick up the object",
+  "ckpt": "/home/galbot/holy/models/fineart_vla_midtrained",
+  "sdk_present": true,
+  "s2_stat": {
+    "mean": 906.2,
+    "p50": 905.0,
+    "p90": 913.9,
+    "min": 891.9,
+    "max": 934.6
+  },
+  "s1_stat": {
+    "mean": 232.7,
+    "p50": 232.6,
+    "p90": 233.1,
+    "min": 231.3,
+    "max": 236.0
+  },
+  "total_stat": {
+    "mean": 1139.0,
+    "p50": 1137.7,
+    "p90": 1146.5,
+    "min": 1124.3,
+    "max": 1166.6
+  },
+  "loop_steady_hz": null,
+  "all_finite": true,
+  "shapes_ok": true,
+  "rows": [
+    {
+      "round": 3,
+      "t_s2_ms": 900.8,
+      "t_s1_ms": 232.6,
+      "t_total_ms": 1133.4,
+      "actions_shape": [
+        50,
+        14
+      ],
+      "finite": true
+    },
+    {
+      "round": 4,
+      "t_s2_ms": 901.3,
+      "t_s1_ms": 233.0,
+      "t_total_ms": 1134.3,
+      "actions_shape": [
+        50,
+        14
+      ],
+      "finite": true
+    },
+    {
+      "round": 5,
+      "t_s2_ms": 912.3,
+      "t_s1_ms": 232.5,
+      "t_total_ms": 1144.9,
+      "actions_shape": [
+        50,
+        14
+      ],
+      "finite": true
+    },
+    {
+      "round": 6,
+      "t_s2_ms": 904.3,
+      "t_s1_ms": 232.4,
+      "t_total_ms": 1136.7,
+      "actions_shape": [
+        50,
+        14
+      ],
+      "finite": true
+    },
+    {
+      "round": 7,
+      "t_s2_ms": 906.0,
+      "t_s1_ms": 232.7,
+      "t_total_ms": 1138.7,
+      "actions_shape": [
+        50,
+        14
+      ],
+      "finite": true
+    },
+    {
+      "round": 8,
+      "t_s2_ms": 891.9,
+      "t_s1_ms": 232.4,
+      "t_total_ms": 1124.3,
+      "actions_shape": [
+        50,
+        14
+      ],
+      "finite": true
+    },
+    {
+      "round": 9,
+      "t_s2_ms": 895.7,
+      "t_s1_ms": 236.0,
+      "t_total_ms": 1131.8,
+      "actions_shape": [
+        50,
+        14
+      ],
+      "finite": true
+    },
+    {
+      "round": 10,
+      "t_s2_ms": 895.0,
+      "t_s1_ms": 234.4,
+      "t_total_ms": 1129.3,
+      "actions_shape": [
+        50,
+        14
+      ],
+      "finite": true
+    },
+    {
+      "round": 11,
+      "t_s2_ms": 934.6,
+      "t_s1_ms": 232.0,
+      "t_total_ms": 1166.6,
+      "actions_shape": [
+        50,
+        14
+      ],
+      "finite": true
+    },
+    {
+      "round": 12,
+      "t_s2_ms": 928.0,
+      "t_s1_ms": 232.4,
+      "t_total_ms": 1160.4,
+      "actions_shape": [
+        50,
+        14
+      ],
+      "finite": true
+    },
+    {
+      "round": 13,
+      "t_s2_ms": 910.2,
+      "t_s1_ms": 232.4,
+      "t_total_ms": 1142.6,
+      "actions_shape": [
+        50,
+        14
+      ],
+      "finite": true
+    },
+    {
+      "round": 14,
+      "t_s2_ms": 904.6,
+      "t_s1_ms": 232.4,
+      "t_total_ms": 1137.1,
+      "actions_shape": [
+        50,
+        14
+      ],
+      "finite": true
+    },
+    {
+      "round": 15,
+      "t_s2_ms": 900.8,
+      "t_s1_ms": 232.6,
+      "t_total_ms": 1133.4,
+      "actions_shape": [
+        50,
+        14
+      ],
+      "finite": true
+    },
+    {
+      "round": 16,
+      "t_s2_ms": 904.8,
+      "t_s1_ms": 232.9,
+      "t_total_ms": 1137.6,
+      "actions_shape": [
+        50,
+        14
+      ],
+      "finite": true
+    },
+    {
+      "round": 17,
+      "t_s2_ms": 905.1,
+      "t_s1_ms": 232.7,
+      "t_total_ms": 1137.8,
+      "actions_shape": [
+        50,
+        14
+      ],
+      "finite": true
+    },
+    {
+      "round": 18,
+      "t_s2_ms": 907.2,
+      "t_s1_ms": 232.8,
+      "t_total_ms": 1140.0,
+      "actions_shape": [
+        50,
+        14
+      ],
+      "finite": true
+    },
+    {
+      "round": 19,
+      "t_s2_ms": 905.6,
+      "t_s1_ms": 232.6,
+      "t_total_ms": 1138.3,
+      "actions_shape": [
+        50,
+        14
+      ],
+      "finite": true
+    },
+    {
+      "round": 20,
+      "t_s2_ms": 907.9,
+      "t_s1_ms": 231.3,
+      "t_total_ms": 1139.2,
+      "actions_shape": [
+        50,
+        14
+      ],
+      "finite": true
+    },
+    {
+      "round": 21,
+      "t_s2_ms": 908.3,
+      "t_s1_ms": 232.0,
+      "t_total_ms": 1140.3,
+      "actions_shape": [
+        50,
+        14
+      ],
+      "finite": true
+    },
+    {
+      "round": 22,
+      "t_s2_ms": 900.0,
+      "t_s1_ms": 232.4,
+      "t_total_ms": 1132.4,
+      "actions_shape": [
+        50,
+        14
+      ],
+      "finite": true
+    }
+  ]
+}
