@@ -283,6 +283,14 @@ def run_replay(robot, body_names, names, chunks, grip, executing: bool) -> dict:
     return tel
 
 
+def _dump(tel: dict) -> None:
+    out = pathlib.Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / f"replay_{int(time.time())}.json"
+    path.write_text(json.dumps(tel, ensure_ascii=False, indent=1))
+    print(f"落盘 {path}")
+
+
 def main() -> int:
     names, chunks, grip = load_traj(args.data, args.synthetic)
     print(f"✓ 轨迹载入：{len(chunks)} 块 × {chunks.shape[1]} 行 × {chunks.shape[2]} 维"
@@ -291,16 +299,19 @@ def main() -> int:
     if not args.do_exec:
         print("（dry-run：不发指令，零 SDK，只走节拍与护栏路径）")
         tel = run_replay(None, None, names, chunks, grip, executing=False)
-    else:
-        from galbot_sdk.s1 import GalbotRobot
-        robot = GalbotRobot()
-        if not robot.init():
-            raise SystemExit("robot.init 失败（服务在跑吗？）")
-        body_names = robot.get_joint_names(only_active_joint=True,
-                                           joint_groups=["left_arm", "right_arm",
-                                                         "torso", "head"])
-        print(f"✓ SDK init；body 关节 {len(body_names)}")
-        time.sleep(3)
+        _dump(tel)
+        return 0
+
+    from galbot_sdk.s1 import GalbotRobot
+    robot = GalbotRobot()
+    if not robot.init(set()):
+        raise SystemExit("robot.init 失败（服务在跑吗？）")
+    body_names = robot.get_joint_names(only_active_joint=True,
+                                       joint_groups=["left_arm", "right_arm",
+                                                     "torso", "head"])
+    print(f"✓ SDK init；body 关节 {len(body_names)}")
+    time.sleep(3)
+    try:
         print("\n⚠⚠ --exec 将回放真实关节指令（无推理护栏之外的模型语义——"
               "轨迹即命令）。急停已释放？手臂旁无人/无障碍？手不离急停。")
         if input("确认继续？(y/N) ").strip().lower() != "y":
@@ -308,12 +319,13 @@ def main() -> int:
         robot.start_controller("all")
         print("✓ start_controller(all)——执行模式")
         tel = run_replay(robot, body_names, names, chunks, grip, executing=True)
-
-    out = pathlib.Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
-    path = out / f"replay_{int(time.time())}.json"
-    path.write_text(json.dumps(tel, ensure_ascii=False, indent=1))
-    print(f"落盘 {path}")
+        _dump(tel)
+    finally:
+        # SDK 优雅关停（执行器 main 尾同款三连；缺它=退出段 C++ 析构段错误，
+        # 10-28 回放台拒答路径实证）
+        robot.request_shutdown()
+        robot.wait_for_shutdown()
+        robot.destroy()
     return 0
 
 
