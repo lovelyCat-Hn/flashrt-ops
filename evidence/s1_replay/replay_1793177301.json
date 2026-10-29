@@ -1,0 +1,27 @@
+{
+ "config": {
+  "data": null,
+  "synthetic": 1,
+  "seed": 8,
+  "rounds": 1,
+  "ctrl_hz": 30.0,
+  "execute_actions_per_chunk": 0,
+  "frames_per_row": 1,
+  "filter_alpha": 0.0,
+  "max_joint_delta_per_step": 0.05,
+  "swap_gap_ms": 0.0,
+  "executing": false
+ },
+ "chunks": [
+  {
+   "chunk": 0,
+   "rep": 0,
+   "rows": 50,
+   "clamped": 20,
+   "frames": 0,
+   "late_ms_p50": 0.0,
+   "late_ms_max": 0.0,
+   "seam_max_mrad": null
+  }
+ ]
+}
