@@ -51,8 +51,9 @@ os.environ.setdefault("FLASH_RT_PI05_ACTION_CHUNK_SIZE", "50")   # 须在 import
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from policies import ADAPTERS, create  # noqa: E402
 from policies.base import (  # noqa: E402
-    HEAD_JOINTS, LEFT_ARM_JOINTS, RIGHT_ARM_JOINTS, S1_LIMITS, S1Targets,
-    TORSO_JOINTS, gripper_pct_to_width_m, gripper_width_m_to_pct, letterbox224)
+    HEAD_JOINTS, LEFT_ARM_JOINTS, RIGHT_ARM_JOINTS, S1_HOME_POSE, S1_LIMITS,
+    S1Targets, TORSO_JOINTS, gripper_pct_to_width_m, gripper_width_m_to_pct,
+    letterbox224)
 
 try:   # SDK 绑定（C 扩展，首次 import ~70ms）顶层预热——懒 import 放热路径会把
        # 首调成本记进 tick0 预算顶爆节拍（10-29 突发采样日志 bug 根因，见
@@ -109,6 +110,17 @@ AP.add_argument("--subtask-every", type=int, default=0,
                 help="每 N 块生成一次 System 2 子任务（0=关闭；fineart only）")
 AP.add_argument("--live-frames", action="store_true",
                 help="用真机相机取图（init 相机订阅）；默认合成噪声帧")
+AP.add_argument("--no-home-start", dest="home_start", action="store_false",
+                help="--exec 就位段开关（默认开）：开始前慢速就位到任务起始"
+                     "位姿 S1_HOME_POSE（47 集首帧中位，base.py；链钳渐进+2点"
+                     "时间轴批，回放台同款机制不卡卡）")
+AP.add_argument("--no-return-home", dest="return_home", action="store_false",
+                help="--exec 归位段开关（默认开）：结束/Ctrl-C 后慢速归位到"
+                     "同一位姿（再按一次 Ctrl-C 可跳过归位直接退出）")
+AP.add_argument("--home-tol", type=float, default=0.03,
+                help="就位/归位收敛判据：臂最大差 rad（默认 0.03）")
+AP.add_argument("--home-timeout", type=float, default=30.0,
+                help="就位/归位超时 s，超时警告放行（默认 30）")
 AP.add_argument("--exec", dest="do_exec", action="store_true",
                 help="发送指令驱动本体（默认 dry-run；需适配器有 S1 映射+交互确认）")
 AP.add_argument("--synthetic-seed", type=int, default=8)
@@ -174,13 +186,18 @@ def main() -> int:
 
     executing = False
     if args.do_exec:
-        print("\n⚠⚠ --exec 将发送关节指令。急停按钮已释放？手臂旁无人/无障碍？"
-              "\n⚠ 模式切换/接管瞬间手臂可能失力矩坠落（10-27 教训）——手不离急停。")
+        blind = "" if args.live_frames else (
+            "\n⚠⚠ 未带 --live-frames：本次用合成噪声图（盲跑）——模型看不到真实场景，"
+            "动起来无任务意义，仅验链路！")
+        print(f"\n⚠⚠ --exec 将发送关节指令。急停按钮已释放？手臂旁无人/无障碍？"
+              f"\n⚠ 模式切换/接管瞬间手臂可能失力矩坠落（10-27 教训）——手不离急停。{blind}")
         if input("确认继续？(y/N) ").strip().lower() != "y":
             raise SystemExit("未确认，退出。")
         robot.start_controller("all")
         executing = True
         print("✓ start_controller(all)——执行模式")
+        if args.home_start:
+            home_to(robot, body_names, home_pose_targets(), "就位")
     else:
         print("（dry-run：不发指令，动作目标只打印）")
 
@@ -271,10 +288,93 @@ def main() -> int:
         f = out / f"run_{args.policy}_{int(time.time())}.json"
         f.write_text(json.dumps(report, ensure_ascii=False, indent=2))
         print(f"落盘 {f}")
+        if executing and args.return_home:
+            try:
+                home_to(robot, body_names, home_pose_targets(), "归位")
+            except KeyboardInterrupt:
+                print("（跳过归位，直接退出）")
         robot.request_shutdown()
         robot.wait_for_shutdown()
         robot.destroy()
     return 0
+
+
+# ── 就位 / 归位（--exec 专用；dry-run 零运动不经过） ──
+
+def home_pose_targets() -> S1Targets:
+    """S1_HOME_POSE（base.py，47 集首帧中位）→ S1Targets（爪=全开宽度 m）。"""
+    return S1Targets(
+        left_arm=np.array(S1_HOME_POSE["left_arm"], dtype=np.float32),
+        right_arm=np.array(S1_HOME_POSE["right_arm"], dtype=np.float32),
+        left_grip_m=gripper_pct_to_width_m(S1_HOME_POSE["grip_pct"]),
+        right_grip_m=gripper_pct_to_width_m(S1_HOME_POSE["grip_pct"]),
+        torso=float(S1_HOME_POSE["torso"]),
+        head=np.array(S1_HOME_POSE["head"], dtype=np.float32))
+
+
+def home_to(robot, body_names, goal: S1Targets, tag: str) -> bool:
+    """慢速就位/归位（回放台 home_to 同款机制，真机已验不卡卡）：
+    每 ctrl_hz 拍重读臂态 → plan_row 链钳（fresh-read 字典=真值基准）→
+    攒 2 行 → 2 点时间轴批 tfs=period×(i+1)（与 R/fr 档解耦——就位段自己
+    不卡卡）。爪只发一次（全开）；torso/head 随批慢跟不阻塞收敛判据。
+    收敛 --home-tol（臂最大差 rad）/ 超时 --home-timeout 警告放行。"""
+    args = _args[0]
+    period = 1.0 / args.ctrl_hz
+    state_raw, _extras = read_s1_state(robot, body_names)
+    send_grippers(robot, goal, state_raw)
+    deadline = time.perf_counter() + args.home_timeout
+    pending, t_print, ok, err = [], 0.0, False, float("inf")
+    try:
+        while True:
+            tr = time.perf_counter()
+            arm_vals = robot.get_joint_positions(
+                joint_names=LEFT_ARM_JOINTS + RIGHT_ARM_JOINTS)  # 请求序配对（正确系）
+            for i in range(7):
+                state_raw[i] = float(arm_vals[i])        # 左臂 ← state_raw[0:7]
+                state_raw[8 + i] = float(arm_vals[7 + i])  # 右臂 ← [8:15]
+            err = max(
+                max(abs(float(state_raw[i]) - float(v))
+                    for i, v in enumerate(goal.left_arm)),
+                max(abs(float(state_raw[8 + i]) - float(v))
+                    for i, v in enumerate(goal.right_arm)))
+            if err < args.home_tol:
+                ok = True
+                break
+            if tr > deadline:
+                print(f"⚠ {tag}超时 {args.home_timeout:.0f}s"
+                      f"（臂差 {err * 1000:.0f} mrad）——放行，链钳兜底")
+                break
+            if tr - t_print > 1.0:
+                t_print = tr
+                print(f"  {tag}… 臂最大差 {err * 1000:.0f} mrad", flush=True)
+            names, tgt, _cl = plan_row(goal, state_to_prev(state_raw))
+            pending.append((names, tgt))
+            if len(pending) >= 2:
+                traj = Trajectory()
+                traj.joint_names = names
+                pts = []
+                for i, (_, tv) in enumerate(pending):
+                    p = TrajectoryPoint()
+                    p.time_from_start_second = round(period * (i + 1), 6)
+                    vec = []
+                    for q in range(len(names)):
+                        c = JointCommand()
+                        c.position = tv[q]
+                        c.velocity = c.acceleration = c.effort = 0.0
+                        vec.append(c)
+                    p.joint_command_vec = vec   # ⚠ getter 返副本：整体赋值
+                    pts.append(p)
+                traj.points = pts
+                st = robot.set_joint_commands_batch(traj)
+                if st is not None and getattr(st, "value", 0) != 0:
+                    print(f"⚠ {tag} batch → {st}")
+                pending = []
+            sleep_to(tr + period)
+        print(f"✓ {tag}{'收敛' if ok else '放行'}（臂差 {err * 1000:.0f} mrad）")
+        return ok
+    except KeyboardInterrupt:
+        print(f"\n→ {tag}被 Ctrl-C 打断")
+        raise
 
 
 # ── 观测 / 状态 / 指令（S1 通用件，policy 无关） ──

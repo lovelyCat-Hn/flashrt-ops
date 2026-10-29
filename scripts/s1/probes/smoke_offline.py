@@ -171,3 +171,53 @@ per_tick = len(log3["t"]) / len(log3["ticks_t"])
 assert 0.5 < per_tick <= 6, f"节流失守: {per_tick:.1f} 读/tick"
 print(f"log-path smoke OK: {len(log3['t'])} 突发样本 / 100 tick"
       f"（{per_tick:.1f}/tick，节流正常）")
+
+# ── run_s1_loop.home_to（执行器就位/归位，回放台同款机制）：stub 收敛 +
+#    全 2 点时间轴批 + 请求序配对 + 链钳渐进 ──
+sys.argv = ["run_s1_loop.py", "--policy", "pi05"]
+spec2 = importlib.util.spec_from_file_location(
+    "rsl", _here.parent / "inference" / "run_s1_loop.py")
+m2 = importlib.util.module_from_spec(spec2)
+spec2.loader.exec_module(m2)
+
+curh2, senth2, grips = {}, [], [0]
+
+
+class Stub2:
+    def get_joint_positions(self, joint_names=None, **kw):
+        return [self.cur.get(n, 0.0) for n in joint_names]
+
+    def get_gripper_state(self, name):
+        class G:
+            width = 0.05      # 半闭 → home 全开死区外，应各下发一次
+        return G()
+
+    def set_gripper_command(self, *a, **kw):
+        grips[0] += 1
+
+    def set_joint_commands_batch(self, traj):
+        pts = traj.points
+        assert len(pts) == 2, f"home 批应 2 点，got {len(pts)}"
+        tfs = [p.time_from_start_second for p in pts]
+        assert tfs[1] > tfs[0] > 0, f"home tfs 应递增: {tfs}"
+        for n, c in zip(traj.joint_names, pts[-1].joint_command_vec):
+            self.cur[n] = float(c.position)
+        senth2.append(("batch", len(pts)))
+
+    def set_joint_commands(self, *a, **kw):   # home 路径不该走单点
+        raise AssertionError("home_to 走了单点路径")
+
+
+stub2 = Stub2()
+stub2.cur = curh2
+goal2 = m2.home_pose_targets()
+okh2 = m2.home_to(stub2, body17, goal2, "smoke就位")
+assert okh2, "home_to 未收敛"
+worsth = max(abs(curh2[n] - float(v))
+             for names_g, grp in ((m2.LEFT_ARM_JOINTS, goal2.left_arm),
+                                  (m2.RIGHT_ARM_JOINTS, goal2.right_arm))
+             for n, v in zip(names_g, grp))
+assert worsth <= 0.05 + 1e-9, worsth
+assert grips[0] == 2, grips[0]     # 双爪各一次（全开）
+print(f"home_to(run_s1_loop) smoke OK: {len(senth2)} 批 × 2 点时间轴，"
+      f"链钳收敛 worst {worsth*1000:.0f} mrad，爪下发 {grips[0]} 次")
