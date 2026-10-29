@@ -62,23 +62,66 @@ S1 遥测数据集（如 `~/datasets/clean_ready_224_1028`，galbot_one_s1，act
 | `--swap-gap-ms` | 0 | 块间 hold 模拟推理落地窗（G1 定案忠实节奏=0） |
 | `--rounds` | 1 | 序列重复遍数 |
 
-### 真机窗口律（10-28 定性，用户耳听判据 + PVT toml 机制面）
+### 真机卡顿定案（10-28 深夜收官；早前"窗口律"结论已降级，见第 1 条）
 
 S1 臂 PVT 控制器（`/data/galbot/config/teleop/SingoriX/real/galbot_s1-v2.0/
-{left,right}_arm_pvt_ctrl.toml`）每关节 limit_vel=3.0 rad/s / limit_acc=25 /
-**target_pos 一阶低通 cutoff 3Hz @1kHz**（τ≈53ms，阶跃走完 ~150-250ms）。
-卡顿判据塌缩为**命令窗口**（=R×行周期）：
+{left,right}_arm_pvt_ctrl.toml`）每关节 limit_vel=3.0 / limit_acc=25 /
+**target_pos 3Hz 低通 @1kHz**（τ≈53ms，指令恒滞后 ~50ms）。排查史两段：
 
-| 配方 | 窗口 | 听感 |
+1. 早期 A/B 全带 `--execute-actions-per-chunk 20` 伪影（50 行块只放 20 行=
+   每块界丢 30 行≈1s 动作→人工跳变 300-500 mrad 大/小逐块交替）；遥测铁证=
+   钳位/残差与跳变幅度逐块相关——**delta-max 顶棚追赶段=卡卡真源**（速度/
+   加速度饱和）。
+2. `r/c=0` 复测（30Hz R2×fr12）：钳位塌缩 0-50、迟到全程 0、rep 界缝
+   2.1 mrad（数据集首尾闭环），用户听感『挺不错』。
+
+残留『切换顿挫』=块界重锚（prev/EMA 锚回滞后 ~30 mrad 的当前读数→目标流
+小反向；平滑非齿轮；**执行器同款安全行为**——真换块必须从"现在在哪"重
+规划）。`--seam-cont`（续锚上块末目标）仅属回放台；executor 接缝归 G1
+工具箱线（异步预取/EMA 接缝调度/RTC 引导，闭环线挂账）。
+
+**回放忠实定稿配方**：`--execute-actions-per-chunk 0 --rows-per-cmd 2
+--frames-per-row 12 --seam-cont`。fr=1 单点直发仍真卡（阶跃灌 LP 的步频
+力矩反复，与伪影无关）；R2fr1 对照骨架同款、密度二阶未再分。SDK 语义
+（pyi 官方）：单点 set_joint_commands 标准关节只有 position 生效
+（velocity/effort 忽略，爪例外）；batch 接口 velocity/acc 语义未验证勿盲用。
+
+### 电机异响电流签名排查（10-29 工具落地；--log-hz + --marks + kaka_signature.py）
+
+目的：定位**残留**异响（r/c=0 干净配方下偶发 + fr=1 单点直发的系统性卡卡）
+的电机层根因。仪表盘已验证（10-28 零运动探针）：`get_joint_states` 的
+`current` 字段=真力矩代理（静态重力基线可达 ±3A，纹波 ±0.05A）；
+`effort` 恒 0 未用；`velocity/acceleration` 有但加速度噪声大（±0.1-0.17）；
+timestamp_ns 可用。**电流签名判据表**：
+
+| 假设 | 电流签名 | 辅证 |
 |---|---|---|
-| 15/30Hz × fr1（单点 tfs=0） | 无（指令="现在"） | 卡卡（步频力矩反复） |
-| 30Hz × fr2/fr6（单行 batch） | 33.3ms | 「还好」（前瞻余量薄，≈20ms lookahead 易被抖动击穿） |
-| 15Hz × fr2/fr12/fr24 | 66.7ms | 安静；点距越细越佳（fr24=2.78ms 最佳） |
+| A 齿隙扫过 | 反向瞬间电流过零/大幅 \|Δcur\| 尖峰 | 误差换向点对齐 |
+| B 加速度饱和（limit_acc=25） | 电流顶棚平台 + acc p95≈limit | 追赶段（钳位计数高）重合 |
+| C 速度饱和急停（limit_vel=3） | \|vel\| p95→3 后电流骤降 | — |
+| D hunting（kp100/kd40） | 静止段电流固定频率振荡（FFT 显著峰） | 已初排：静态保持无振荡 ✝ |
+| E stick-slip | 低速段速度微脉冲 | — |
 
-→ 执行器 30Hz 实时等价配方 = **`--rows-per-cmd 2 --frames-per-row 12`**
-（窗口 66.7ms + 点距≈2.8ms，两行一次 batch，零额外延迟——整块已在内存）。
-爪逐行独立 API 不受影响（A/B 矩阵实证爪无罪）。G1 同族 bypass 文档旁证：
-底层 MCU 点流按 4ms 重采样、队列保 ~20ms 前瞻。
+**跑法**（每跑一段，听到异响按回车打标；Ctrl-C/自然结束都落盘）：
+
+```bash
+# ① 激发跑（故意带 r/c=20 伪影=已知追赶卡卡源）+ 高频采样 + 耳打标：
+bash ~/joint_observer/run_observed.sh replay_stream_bench.py \
+  --data ~/datasets/clean_ready_224_1028_traj_ep0_1_2.npz --rounds 2 \
+  --ctrl-hz 30.0 --execute-actions-per-chunk 20 --rows-per-cmd 2 \
+  --frames-per-row 12 --filter-alpha 0.1 --max-joint-delta-per-step 0.05 \
+  --swap-gap-ms 0 --log-hz 200 --marks --out ~/holy/evidence/s1_replay --exec
+# ② 安静对照跑（定稿配方 + 同采样），残留异响也打标：
+#    同上换 --execute-actions-per-chunk 0 --seam-cont
+# ③ 分析（kaka 窗=标记±1.5s vs 静窗对照；FFT 只报显著峰>8×谱底）：
+~/miniforge3/envs/flash_pyrt311/bin/python scripts/s1/probes/kaka_signature.py \
+  ~/holy/evidence/s1_replay/kaka_*.npz
+```
+
+合成自测已验（注入 j3 12Hz ±2.5A：响窗 p95/尖峰率/速度全中、其余关节零
+假阳性、FFT 独中 12Hz）。真机注意：log_hz=200 时 tick 内突发采样≈每 tick
+3 读（30Hz R 大窗口时更多）；真实 SDK get_joint_states 单次 ~ms 级，
+若迟到升高可降 `--log-hz 100`。
 
 ### 安全
 

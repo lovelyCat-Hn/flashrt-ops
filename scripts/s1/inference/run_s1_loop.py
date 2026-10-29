@@ -54,6 +54,13 @@ from policies.base import (  # noqa: E402
     HEAD_JOINTS, LEFT_ARM_JOINTS, RIGHT_ARM_JOINTS, S1_LIMITS, S1Targets,
     TORSO_JOINTS, gripper_pct_to_width_m, gripper_width_m_to_pct, letterbox224)
 
+try:   # SDK 绑定（C 扩展，首次 import ~70ms）顶层预热——懒 import 放热路径会把
+       # 首调成本记进 tick0 预算顶爆节拍（10-29 突发采样日志 bug 根因，见
+       # probes/replay_stream_bench.py）。无 SDK 环境（--list-policies/合成回放）仍可加载。
+    from galbot_sdk.s1 import JointCommand, Trajectory, TrajectoryPoint  # noqa: E402
+except ImportError:
+    JointCommand = Trajectory = TrajectoryPoint = None
+
 AP = argparse.ArgumentParser(description=__doc__,
                              formatter_class=argparse.RawDescriptionHelpFormatter)
 AP.add_argument("--policy", default="fineart_vla", choices=sorted(ADAPTERS))
@@ -380,8 +387,7 @@ def stream_rows(robot, names, rows_tgt, prev: dict[str, float]) -> int:
     末目标出发 fr 帧线性走到本行目标，tfs 全批累计；末点恰在窗口末。
     R=1 且 fr=1 退化为单点 tfs=0（原路径逐位不变）。返回帧数。"""
     args = _args[0]
-    fr = max(1, args.frames_per_row)
-    from galbot_sdk.s1 import JointCommand
+    fr = max(1, args.frames_per_row)   # JointCommand/Trajectory 已顶层预热（勿懒 import 进热路径）
 
     def _cmds(vals):
         out = []
@@ -400,7 +406,6 @@ def stream_rows(robot, names, rows_tgt, prev: dict[str, float]) -> int:
         if st is not None and getattr(st, "value", 0) != 0:
             print(f"⚠ set_joint_commands → {st}")
         return 1
-    from galbot_sdk.s1 import Trajectory, TrajectoryPoint
     dt = (1.0 / args.ctrl_hz) / fr
     traj = Trajectory()
     traj.joint_names = names

@@ -94,6 +94,11 @@ AP.add_argument("--swap-gap-ms", type=float, default=0.0,
 AP.add_argument("--seam-cont", dest="seam_cont", action="store_true",
                 help="块界从上一块末目标续锚（数据连续口径，消接缝顿挫）；"
                      "默认关=从当前读数重锚（执行器同款安全行为，含 LP 尾反向）")
+AP.add_argument("--log-hz", type=float, default=0.0,
+                help="tick 内高频状态突发采样（pos/vel/acc/cur + 末发目标），"
+                     "落 kaka_*.npz；0=关。根因排查用（电流=力矩代理）")
+AP.add_argument("--marks", action="store_true",
+                help="回放中按回车打异响标记（时间戳进 npz，与日志同钟）")
 AP.add_argument("--no-read-back", action="store_true",
                 help="块尾不做关节回读残差（exec 模式默认回读）")
 AP.add_argument("--exec", dest="do_exec", action="store_true",
@@ -235,11 +240,28 @@ def _new_tel(executing: bool) -> dict:
         "chunks": []}
 
 
+MARKS = []      # perf_counter 时刻（耳听异响打标）
+
+
+def _mark_reader() -> None:
+    import threading
+    def _loop():
+        for _line in sys.stdin:   # 裸回车也要记（按回车一次一记；勿 strip 过滤空行）
+            MARKS.append(time.perf_counter())
+            print(f"  ✓ 标记 #{len(MARKS)}", flush=True)
+    threading.Thread(target=_loop, daemon=True).start()
+
+
 def run_replay(robot, body_names, names, chunks, grip, executing: bool,
-               tel: dict) -> None:
+               tel: dict, log=None) -> None:
     """主回放循环——逐行下发路径与 run_s1_loop 逐指令同构。
-    遥测累积进传入的 tel（Ctrl-C 时 main 侧可落盘部分遥测）。"""
+    遥测累积进传入的 tel（Ctrl-C 时 main 侧可落盘部分遥测）。
+    log=None 或 dict（--log-hz>0 时传 dict）：tick 内突发采样高频状态。"""
     period = 1.0 / args.ctrl_hz
+    log_hz = float(getattr(args, "log_hz", 0.0) or 0.0)
+    if log is not None:
+        log.update(t=[], pos=[], vel=[], acc=[], cur=[], tick=[],
+                   ticks_t=[], ticks_tgt=[], marks=MARKS, names=names)
     state_raw = (rsl.read_s1_state(robot, body_names)[0] if executing
                  else synthetic_state())
     last_tgt: dict[str, float] = {}          # 跨块缝计量：上一块最后行目标
@@ -286,6 +308,26 @@ def run_replay(robot, body_names, names, chunks, grip, executing: bool,
                         for nm, v in zip(nm_i, tgt_i):
                             prev[nm] = v      # 批末行 = 新插值链基准
                     pending.clear()
+                if executing and log is not None:
+                    dl = tr + period * (k + 1)
+                    k0 = time.perf_counter()
+                    log["ticks_t"].append(k0)
+                    log["ticks_tgt"].append([float(v) for v in tgt])
+                    i = 0
+                    while time.perf_counter() + 0.002 < dl:
+                        st_j = robot.get_joint_states(joint_names=names)
+                        log["t"].append(time.perf_counter())
+                        log["pos"].append([float(s.position) for s in st_j])
+                        log["vel"].append([float(s.velocity) for s in st_j])
+                        log["acc"].append([float(s.acceleration) for s in st_j])
+                        log["cur"].append([float(s.current) for s in st_j])
+                        log["tick"].append(len(log["ticks_t"]) - 1)
+                        i += 1
+                        # 网格点钳到 dl-2ms：不钳则末格越过后 nxt<dl 恒假，
+                        # tick 尾部 ~3ms 全速空转（10-29 采样密度 bug 根因二）
+                        nxt = min(k0 + (i + 1) / log_hz, dl - 0.002)
+                        if time.perf_counter() < nxt:
+                            rsl.sleep_to(nxt)
                 late = (time.perf_counter() - (tr + period * (k + 1))) * 1000
                 late_ms.append(max(0.0, late))
                 rsl.sleep_to(tr + period * (k + 1))   # 绝对截止节拍；欠账不追发
@@ -307,12 +349,26 @@ def run_replay(robot, body_names, names, chunks, grip, executing: bool,
     return tel
 
 
-def _dump(tel: dict) -> None:
+def _dump(tel: dict, log: dict | None = None) -> None:
     out = pathlib.Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     path = out / f"replay_{int(time.time())}.json"
     path.write_text(json.dumps(tel, ensure_ascii=False, indent=1))
     print(f"落盘 {path}")
+    if log is not None and log.get("t"):
+        import numpy as np
+        kp = out / f"kaka_{int(time.time())}.npz"
+        np.savez(kp, t=np.array(log["t"]),
+                 pos=np.array(log["pos"]), vel=np.array(log["vel"]),
+                 acc=np.array(log["acc"]), cur=np.array(log["cur"]),
+                 tick=np.array(log["tick"]),
+                 ticks_t=np.array(log["ticks_t"]),
+                 ticks_tgt=np.array(log["ticks_tgt"]),
+                 marks=np.array(MARKS),
+                 names=np.array(log["names"]),
+                 config=json.dumps(tel["config"]))
+        print(f"落盘 {kp}（{len(log['t'])} 样本 × {len(log['names'])} 关节 | "
+              f"标记 {len(MARKS)}）")
 
 
 def main() -> int:
@@ -343,12 +399,16 @@ def main() -> int:
             raise SystemExit("未确认，退出。")
         robot.start_controller("all")
         print("✓ start_controller(all)——执行模式")
+        if args.marks:
+            _mark_reader()
+            print("✓ 打标线程挂载：回放中听到异响按回车一次一记")
         tel = _new_tel(executing=True)
+        log = ({"marks": MARKS} if args.log_hz > 0 else None)
         try:
-            run_replay(robot, body_names, names, chunks, grip, True, tel)
-            _dump(tel)
+            run_replay(robot, body_names, names, chunks, grip, True, tel, log)
+            _dump(tel, log)
         except KeyboardInterrupt:
-            _dump(tel)        # 中断也落盘部分遥测（v1 缺口：卡顿首跑日志全丢）
+            _dump(tel, log)   # 中断也落盘部分遥测（v1 缺口：卡顿首跑日志全丢）
             raise
     finally:
         # SDK 优雅关停（执行器 main 尾同款三连；缺它=退出段 C++ 析构段错误，

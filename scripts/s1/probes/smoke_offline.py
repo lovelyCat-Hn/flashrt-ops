@@ -53,6 +53,18 @@ class Stub:
     def set_gripper_command(self, *a, **kw):
         return None
 
+    def get_joint_states(self, joint_names=None, **kw):
+        class S:
+            pass
+        out = []
+        for n in joint_names:
+            s = S()
+            s.joint_name = n
+            s.position = self.cur.get(n, 0.0)
+            s.velocity = s.acceleration = s.current = 0.0
+            out.append(s)
+        return out
+
 
 names, chunks, grip = m.load_traj(None, 2)
 stub = Stub(cur, sent)
@@ -102,3 +114,24 @@ assert all(c["residual_max"] < 1e-6 for c in tel_b["chunks"])
 worst2 = max(abs(cur2[n] - v) for n, v in zip(names, chunks[-1][-1]) if n in m.ARM_JOINTS)
 assert worst2 <= 0.05 + 1e-9, worst2
 print("batch-path smoke OK: 50 calls × 8 pts (R=2×fr=4), tfs 严格递增")
+
+# ── 高频日志路径（--log-hz 口径）：tick 对齐 + 节流密度（网格钳 dl 后 ~3-4 读/tick；
+#    曾有双 bug：热路径懒 import 顶爆 tick0 + 网格越界尾部空转 → 114 样本/tick）──
+m.rsl.args.ctrl_hz, m.args.ctrl_hz = 50, 50
+m.rsl.args.log_hz, m.args.log_hz = 200, 200
+m.rsl._args[0] = m.rsl.args
+cur3, sent3 = {}, []
+tel3 = m._new_tel(executing=True)
+log3 = {}
+stub3 = Stub(cur3, sent3)
+m.run_replay(stub3, body17, names, chunks, grip, True, tel3, log3)
+m.rsl.args.ctrl_hz, m.args.ctrl_hz = 500, 500
+m.rsl.args.log_hz, m.args.log_hz = 0.0, 0.0
+m.rsl._args[0] = m.rsl.args
+assert len(log3["t"]) > 0 and len(log3["pos"]) == len(log3["t"])
+assert len(log3["ticks_tgt"]) == len(log3["ticks_t"]) == 100
+assert len(log3["pos"][0]) == len(names)
+per_tick = len(log3["t"]) / len(log3["ticks_t"])
+assert 0.5 < per_tick <= 6, f"节流失守: {per_tick:.1f} 读/tick"
+print(f"log-path smoke OK: {len(log3['t'])} 突发样本 / 100 tick"
+      f"（{per_tick:.1f}/tick，节流正常）")
