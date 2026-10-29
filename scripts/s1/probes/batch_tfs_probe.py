@@ -100,14 +100,16 @@ try:
         ps = float(robot.get_joint_positions(joint_names=jn)[0])
         tr = Trajectory()
         tr.joint_names = jn
+        pts = []
         for tgt, tf in zip(targets, tfss):
             pt = TrajectoryPoint()
             pt.time_from_start_second = tf
             c = JointCommand()
             c.position = tgt
             c.velocity = c.acceleration = c.effort = 0.0
-            pt.joint_command_vec.append(c)
-            tr.points.append(pt)
+            pt.joint_command_vec = [c]   # ⚠ SDK getter 返副本：vec/points 勿 append，整体赋值
+            pts.append(pt)
+        tr.points = pts
         t0 = time.perf_counter()
         robot.set_joint_commands_batch(tr)
         report(label, burst(dur), t0,

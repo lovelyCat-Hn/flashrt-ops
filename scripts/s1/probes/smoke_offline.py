@@ -134,6 +134,20 @@ assert all(npts == 2 for _, (_, npts) in sent4)
 assert sum(c["rows"] for c in tel_z["chunks"]) == 100
 print("tfs-zero smoke OK: 50 calls × 2 pts (R=2×fr=1), 全零 tfs 放行")
 
+# ── 就位段 home_to（链钳渐进+自带时间轴批；与 args R/fr 解耦，
+#    R1×fr1 档也不退化为单点 tfs=0——就位段自己不能卡卡）──
+m.rsl.args.ctrl_hz, m.args.ctrl_hz = 500, 500
+curh, senth = {}, []
+sr = m.synthetic_state()
+goal_h = m.row_to_targets(names, chunks[0][0], None)
+okh = m.home_to(Stub(curh, senth), names, goal_h, sr)
+assert okh, "home_to 未收敛"
+assert len(senth) > 0 and all(k == "batch" and n == 2 for _, (k, n) in senth), \
+    senth[:2]
+assert m._arm_err(sr, goal_h) < m.args.home_tol
+print(f"home_to smoke OK: {len(senth)} 批 × 2 点时间轴，收敛 "
+      f"{m._arm_err(sr, goal_h)*1000:.0f} mrad < {m.args.home_tol}")
+
 # ── 高频日志路径（--log-hz 口径）：tick 对齐 + 节流密度（网格钳 dl 后 ~3-4 读/tick；
 #    曾有双 bug：热路径懒 import 顶爆 tick0 + 网格越界尾部空转 → 114 样本/tick）──
 m.rsl.args.ctrl_hz, m.args.ctrl_hz = 50, 50

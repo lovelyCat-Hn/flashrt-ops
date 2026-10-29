@@ -102,6 +102,16 @@ AP.add_argument("--log-hz", type=float, default=0.0,
                      "落 kaka_*.npz；0=关。根因排查用（电流=力矩代理）")
 AP.add_argument("--marks", action="store_true",
                 help="回放中按回车打异响标记（时间戳进 npz，与日志同钟）")
+AP.add_argument("--no-go-start", dest="go_start", action="store_false",
+                help="关闭回放前慢速就位（默认开：链钳渐进+时间轴批走到数据集"
+                     "首行位姿；10-29 补——此前首块链钳兼任就位会吞 chunk0 前段，"
+                     "且各跑起始臂位不一引入对比方差）")
+AP.add_argument("--return-start", dest="return_start", action="store_true",
+                help="回放结束后归位到脚本启动时的臂位（默认关；拍对照视频用）")
+AP.add_argument("--home-tol", type=float, default=0.03,
+                help="就位收敛判据：臂关节 |读-目标| 最大值 rad（默认 0.03）")
+AP.add_argument("--home-timeout", type=float, default=30.0,
+                help="就位超时 s（超时打印警告后放行，回放链钳仍兜底）")
 AP.add_argument("--no-read-back", action="store_true",
                 help="块尾不做关节回读残差（exec 模式默认回读）")
 AP.add_argument("--exec", dest="do_exec", action="store_true",
@@ -247,6 +257,94 @@ def _new_tel(executing: bool) -> dict:
 MARKS = []      # perf_counter 时刻（耳听异响打标）
 
 
+def capture_pose(robot, names: list[str]):
+    """当前臂/torso/head 读数 → S1Targets（--return-start 的归位目标）。"""
+    want = [nm for nm in names if nm in ARM_JOINTS + TORSO_JOINTS + HEAD_JOINTS]
+    vals = robot.get_joint_positions(joint_names=want)
+    tg = S1Targets()
+    la, ra, hd = [], [], []
+    for nm, v in zip(want, vals):
+        if nm in LEFT_ARM_JOINTS:
+            la.append(float(v))
+        elif nm in RIGHT_ARM_JOINTS:
+            ra.append(float(v))
+        elif nm in TORSO_JOINTS:
+            tg.torso = float(v)
+        elif nm in HEAD_JOINTS:
+            hd.append(float(v))
+    tg.left_arm = np.array(la) if la else None
+    tg.right_arm = np.array(ra) if ra else None
+    tg.head = np.array(hd) if hd else None
+    return tg
+
+
+def _arm_err(state_raw: np.ndarray, tg) -> float:
+    """臂读数 vs 目标的最大差（就位收敛判据）。torso/head 不参与门控：
+    refresh 只刷臂（读它就要付 get 延迟），torso 由 plan_row 限幅慢跟。"""
+    e = 0.0
+    if tg.left_arm is not None:
+        e = max(e, float(np.max(np.abs(state_raw[:7] - tg.left_arm))))
+    if tg.right_arm is not None:
+        e = max(e, float(np.max(np.abs(state_raw[8:15] - tg.right_arm))))
+    return e
+
+
+def home_to(robot, names: list[str], goal, state_raw: np.ndarray) -> bool:
+    """回放前慢速就位 / 结束归位：链钳渐进 + 自带时间轴批。
+
+    每 ctrl_hz 拍：重读臂态刷链钳基准 → plan_row 钳位 → 攒 2 行 →
+    2 点 tfs=[行周期, 2×行周期] 批发。与 args 解耦（R1×fr1 档也不退化成
+    单点 tfs=0——就位段自己不能卡卡，10-29 教训同理）。收玫判据=臂最大差
+    < --home-tol；超时警告放行（回放链钳仍兜底）。"""
+    from galbot_sdk.s1 import JointCommand, Trajectory, TrajectoryPoint
+    period = 1.0 / args.ctrl_hz
+    deadline = time.perf_counter() + args.home_timeout
+    pending, t_print = [], 0.0
+    converged = False
+    try:
+        while True:
+            tr = time.perf_counter()
+            refresh_arm_state(robot, state_raw, names)
+            err = _arm_err(state_raw, goal)
+            if err < args.home_tol:
+                converged = True
+                break
+            if tr > deadline:
+                print(f"⚠ 就位超时 {args.home_timeout:.0f}s（残差 {err*1000:.0f} mrad）"
+                      "——放行，回放链钳兜底")
+                break
+            if tr - t_print > 1.0:
+                t_print = tr
+                print(f"  就位… 最大臂差 {err*1000:.0f} mrad", flush=True)
+            rnames, tgt, _cl = rsl.plan_row(goal, state_raw)
+            pending.append((rnames, tgt))
+            if len(pending) >= 2:
+                traj = Trajectory()
+                traj.joint_names = rnames
+                pts = []
+                for i, (_, tv) in enumerate(pending):
+                    pt = TrajectoryPoint()
+                    pt.time_from_start_second = round(period * (i + 1), 6)
+                    vec = []
+                    for v in tv:
+                        c = JointCommand()
+                        c.position = float(v)
+                        c.velocity = c.acceleration = c.effort = 0.0
+                        vec.append(c)
+                    pt.joint_command_vec = vec
+                    pts.append(pt)
+                traj.points = pts   # ⚠ SDK 绑定 .points getter 返副本，append 无效
+                robot.set_joint_commands_batch(traj)
+                pending.clear()
+            while time.perf_counter() < tr + period - 0.002:
+                time.sleep(0.001)
+    except KeyboardInterrupt:
+        raise
+    print(f"✓ 就位{'收敛' if converged else '放行'}"
+          f"（终差 {_arm_err(state_raw, goal)*1000:.0f} mrad）")
+    return converged
+
+
 def _mark_reader() -> None:
     import threading
     def _loop():
@@ -388,7 +486,8 @@ def main() -> int:
           f"（{len(names)} 关节名；grip={'有' if grip is not None else '无'}）")
 
     if not args.do_exec:
-        print("（dry-run：不发指令，零 SDK，只走节拍与护栏路径）")
+        print("（dry-run：不发指令，零 SDK，只走节拍与护栏路径；"
+              "--exec 将先慢速就位到数据集首行再回放，--no-go-start 关）")
         tel = _new_tel(executing=False)
         run_replay(None, None, names, chunks, grip, False, tel)
         _dump(tel)
@@ -413,6 +512,12 @@ def main() -> int:
         if args.marks:
             _mark_reader()
             print("✓ 打标线程挂载：回放中听到异响按回车一次一记")
+        state_raw = rsl.read_s1_state(robot, body_names)[0]
+        start_pose = (capture_pose(robot, names) if args.return_start else None)
+        if args.go_start:
+            print("— 慢速就位到数据集首行位姿（链钳渐进+时间轴批）…")
+            home_to(robot, names, row_to_targets(names, chunks[0][0], None),
+                    state_raw)
         tel = _new_tel(executing=True)
         log = ({"marks": MARKS} if args.log_hz > 0 else None)
         try:
@@ -421,6 +526,9 @@ def main() -> int:
         except KeyboardInterrupt:
             _dump(tel, log)   # 中断也落盘部分遥测（v1 缺口：卡顿首跑日志全丢）
             raise
+        if start_pose is not None:
+            print("— 归位到脚本启动位姿…")
+            home_to(robot, names, start_pose, state_raw)
     finally:
         # SDK 优雅关停（执行器 main 尾同款三连；缺它=退出段 C++ 析构段错误，
         # 10-28 回放台拒答路径实证）

@@ -149,6 +149,15 @@ delta-max 臂链钳（每 tick 重读基准）。Ctrl-C 即退并落盘部分遥
 SDK 会话退出走优雅三连 request_shutdown/wait_for_shutdown/destroy（缺它=
 退出段 C++ 析构 Segmentation fault，10-28 实证）。
 
+**就位/归位（10-29 补）**：`--exec` 默认先**慢速就位**到数据集首行位姿
+（链钳渐进 + 自带 2 点时间轴批，与 R/fr 档解耦——就位段自己不卡卡；
+`--no-go-start` 关），修复此前"首块链钳兼任就位"吞 chunk0 前段 + 各跑
+起始臂位不一的对比方差；`--return-start` 归位到脚本启动位姿（拍对照视频
+用）。收敛判据 `--home-tol`（0.03 rad）臂最大差、超时 `--home-timeout`
+（30s）警告放行。⚠ SDK 绑定坑：`Trajectory.points`/`joint_command_vec`
+getter 返回**副本**，append 静默无效——必须构建本地 list 整体赋值
+（smoke 用真实绑定类可复现此坑）。
+
 ### 用法
 
 ```bash
