@@ -56,8 +56,10 @@ class Stub:
     def get_joint_states(self, joint_names=None, **kw):
         class S:
             pass
+        # 复刻真机坑：无视请求序，按"规范序"（左臂先）返回——逼对号逻辑显式按名配对
+        want = sorted(joint_names or [])   # 恰好把 left_arm_* 排在 right_arm_* 前
         out = []
-        for n in joint_names:
+        for n in want:
             s = S()
             s.joint_name = n
             s.position = self.cur.get(n, 0.0)
@@ -131,6 +133,9 @@ m.rsl._args[0] = m.rsl.args
 assert len(log3["t"]) > 0 and len(log3["pos"]) == len(log3["t"])
 assert len(log3["ticks_tgt"]) == len(log3["ticks_t"]) == 100
 assert len(log3["pos"][0]) == len(names)
+# Stub 乱序返回时按名对号必须成立（末样本=stub 当前位置，按 names 序）
+assert all(abs(p - cur3[n]) < 1e-9 for p, n in zip(log3["pos"][-1], names)), \
+    "log pos 未按 joint_name 对号（位置序配对复发）"
 per_tick = len(log3["t"]) / len(log3["ticks_t"])
 assert 0.5 < per_tick <= 6, f"节流失守: {per_tick:.1f} 读/tick"
 print(f"log-path smoke OK: {len(log3['t'])} 突发样本 / 100 tick"

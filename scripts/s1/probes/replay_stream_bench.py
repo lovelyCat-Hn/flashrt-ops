@@ -316,11 +316,18 @@ def run_replay(robot, body_names, names, chunks, grip, executing: bool,
                     i = 0
                     while time.perf_counter() + 0.002 < dl:
                         st_j = robot.get_joint_states(joint_names=names)
+                        # ⚠ SDK 返回序≠请求序（10-29 实测请求 [右臂,左臂] 返回
+                        # [左臂,右臂]，同 group 乱序坑族）——必须按 joint_name 对号
+                        by_nm = {s.joint_name: s for s in st_j}
+                        if any(n not in by_nm for n in names):
+                            raise RuntimeError(
+                                f"get_joint_states 返回对不上号（请求 {len(names)} "
+                                f"返回 {len(st_j)}，joint_name 空？）——拒绝采错标数据")
                         log["t"].append(time.perf_counter())
-                        log["pos"].append([float(s.position) for s in st_j])
-                        log["vel"].append([float(s.velocity) for s in st_j])
-                        log["acc"].append([float(s.acceleration) for s in st_j])
-                        log["cur"].append([float(s.current) for s in st_j])
+                        log["pos"].append([float(by_nm[n].position) for n in names])
+                        log["vel"].append([float(by_nm[n].velocity) for n in names])
+                        log["acc"].append([float(by_nm[n].acceleration) for n in names])
+                        log["cur"].append([float(by_nm[n].current) for n in names])
                         log["tick"].append(len(log["ticks_t"]) - 1)
                         i += 1
                         # 网格点钳到 dl-2ms：不钳则末格越过后 nxt<dl 恒假，
