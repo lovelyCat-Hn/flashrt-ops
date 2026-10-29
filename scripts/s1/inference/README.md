@@ -1,8 +1,18 @@
 # S1 通用推理执行路线（policy 无关）
 
-`run_g1_loop_traj.py` 的 S1 镜像，按 policy 适配器解耦：**执行器只做 S1 SDK 交互、
-循环节拍、安全栏与遥测；policy 专属的一切（引擎加载/观测预处理/动作语义/System 2）
-全部住 `policies/<name>.py`。**
+两个执行器（2026-10-29 起）：
+
+- **`run_s1_loop_traj.py` = G1 traj 直移植版【现役主线】**：用户定案「G1 traj
+  就是行为标准，写 traj 就是为了 S1 直接用」——整文件复制
+  `run_g1_loop_traj.py`，只换机体件（SDK 面/27 维 state/取图/爪标定缺省/
+  内嵌 warm/导航栈删除）。行为逻辑（水位预取/换块弃尾/星饿/链钳/EMA/融合/
+  QuitWatcher）逐行未动。唯一发令侧改形：G1 逐帧单点 tfs=0 流 → S1 每拍
+  一包 `set_joint_commands_batch` 带时间轴批（S1 ③定案：tfs=0 ASAP=卡卡，
+  时间轴是解药；与回放台四角闭环④同款形状）。配置=同目录 `s1_config.py`
+  读 `config/s1.toml`（CLI > toml > BUILTIN 三态）。
+- **`run_s1_loop.py` = 适配器版**：policy 解耦多policy 入口（fineart 线用），
+  回放台/冒烟仍 import 它（`rsl`）。与新主线并行为 A/B 备胎，日常闭环走
+  traj 移植版。
 
 ## 执行路线（流式，G1 traj 同款逐帧墙钟流）
 
@@ -22,7 +32,10 @@ lerobot 动作块 → 逐行动作 → 逐帧 `set_joint_commands` 直发（**tf
 ## 结构
 
 ```
-run_s1_loop.py        执行器本体（policy 无关）
+run_s1_loop_traj.py   G1 traj 直移植版执行器（现役主线，见上）
+run_s1_loop.py        适配器版执行器（多 policy；回放台/冒烟依赖）
+s1_config.py          traj 版共享配置（config/s1.toml 三态回填）
+s1_traj_interp.py     轨迹流插值器（g1_traj_interp.py 逐行副本）
 policies/__init__.py  ADAPTERS 注册表 + create(name)
 policies/base.py      PolicyAdapter 接口 + S1Targets + S1 关节/限位/夹爪换算
 policies/fineart_vla.py  fineart 适配器（ALOHA 14 维；System 2 hook）

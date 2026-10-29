@@ -1,51 +1,54 @@
-# S1 通用推理执行器档案（run_s1_loop.py）——键名与 G1 config/g1.toml [lerobot]
-# 同体系（lerobot/同事路线对齐名，命名档案=docs/lerobot-alignment.md）。
-# 顶层键 = CLI dest 名；CLI 显式传参覆盖 toml；文件不存在则全用内置默认。
+# S1 推理执行器共用档案——两个读者：run_s1_loop.py（适配器版，内联预扫描
+# 只取它认识的键）与 run_s1_loop_traj.py（G1 traj 直移植版，s1_config 全量
+# 三态回填）。键名与 G1 config/g1.toml [lerobot] 对齐体系
+# （docs/lerobot-alignment.md）。顶层键 = CLI dest 名；CLI 显式传参覆盖 toml；
+# 文件不存在则全用内置默认（s1_config.BUILTIN 镜像本文件）。
 
 policy = "pi05"
 ckpt = "/home/galbot/model_weights/pi05/S1_run_20261028_121132_b3f637a6_010000/pretrained_model"
 prompt = "test"                          # 训练 task 字符串（tasks.parquet 全库唯一；in-distribution）
 rounds = 200
-ctrl_hz = 30.0                          # 行节拍（S1 扩展键；G1 定盘 30Hz 口径）
+ctrl_hz = 30.0                           # 行节拍（traj 脚本 dest=fps；勿降速=时间维 OOD）
 
-# 水位=预取触发阈值（G1 traj 同名语义，10-29 管线化）：0=换块即预取（本块
-# 第 0 步下发后立即起跑下一块推理，块长≈推理时延，换块弃尾）；N=消费到
-# 第 K 步起跑。发令=G1 traj 同款逐帧墙钟直发，不整块打包
+# 水位=预取触发阈值（G1 traj 同名语义）：0=换块即预取（本块第 0 步下发后
+# 立即后台起跑下一块推理，块长≈推理时延）；N=消费到第 K 步起跑。
+# 换块=推理落地即整块换入弃尾；星饿超 starve-limit（CLI，默认 2.0s）停环
 execute_actions_per_chunk = 0
-# 不插值纯 30Hz 直发（用户定案；G1 traj 同名旗）；>1 启用行内插值微流
-frames_per_row = 1
-# 跨行打包行数 R：命令窗口=R×行周期（与行周期解耦）。10-28 真机窗口律
-# （回放台 A/B 用户耳听判据）：卡顿⇔单点无未来（R=1&fr=1）或窗口过短
-# （30Hz 单行 33.3ms 仅"还好"）；66.7ms 窗全安静、点距细更佳（15Hz fr24
-# 最佳）。30Hz 实时等价推荐 R=2×fr12（窗口 66.7ms/点距≈2.8ms）；
-# 真机首验前保持 1=逐行原路径
-rows_per_cmd = 1
+# 行内插值帧数（10-29 晚 ③定案定档 12）：S1 singorix WBC 按 tfs 时间轴细插，
+# tfs=0 ASAP=参考跳变→LP 削顶→力矩跳变=卡卡；traj 移植版每拍并一包带时间轴
+# 批（2.78ms 点距×33.3ms 窗）=四角闭环④静配方。G1 traj 默认 1 勿抄（G1 伺服
+# 吃单点流，S1 不吃）
+frames_per_row = 12
 # rad/步（同事 control 段同名键同值；对原始增量 0.00% 截断=封版）
 max_joint_delta_per_step = 0.05
 # 行目标 EMA（同事 action_filter.lowpass.alpha 同名）：α=新样本权重；
 # S1 初档 0.1（用户定案 2026-10-28；G1 现役 0.3，首跑后可 A/B）
 filter_alpha = 0.1
 
-grip_velocity = 0.05
+# ── 爪（关节流=traj 标准）──
+grip_path = "joint"                      # joint=set_joint_commands 关节流；cmd=set_gripper_command 逃生门
+grip_velocity = 0.05                     # m/s 速度帽（pyi：爪维 velocity/effort 生效）
 grip_effort = 10
-# 爪发送路径（G1 traj 同名同默认）：joint=set_joint_commands 关节流【traj
-# 标准：position=宽度米/velocity 速度帽/effort 生效，每拍无条件发密流免费】；
-# cmd=set_gripper_command 逃生门（onset/吞令定律端点，复现对照用）
-grip_path = "joint"
-# fineart System 2 子任务生成降频摊销（每 N 块一次；S1 扩展键，G1 无此概念；0=关）
-# pi05=System 1 only 无 subtask 入口 → 0（fineart 线再用 25）
-subtask_every = 0
-live_frames = false
+grip_chg = 2.0                           # 仅 cmd 逃生门消费（joint 路各门旁路）
+
+# ── traj 标准配方键（G1 [lerobot] 定档；run_s1_loop.py 不消费，忽略即可）──
+skip_frames = true                       # 换块跳帧安装（水位 0 的官配对）
+aggregate_fn = "weighted_average"        # 换块融合 α=0.7 新（官方默认）
+cmd_every = 1                            # 纯流式直发
+burst_reserve_ms = 0.0
+cache_frames = 1                         # 2 已判死（G1 9/30 实录）
+max_excursion = 3.0
+# S1 判读（勿照抄 G1 定档的键）：
+grip_state_cmd = false                   # state 爪维喂实时回读（SDK 爪回读滞后未测，首跑专项核查）
+nav_suspend = false                      # S1 无导航栈，旗标 no-op（兼容档键）
+execution_horizon = 0                    # trained-RTC 专属；S1 pi05 非 RTC 权重
+head_crop = false                        # S1 训练口径=4:3 letterbox 全幅
 
 # ── G1 [lerobot] 键的 S1 判读（无对应=刻意不带，非遗漏）──
-#   skip_frames / aggregate_fn : G1 换块跳帧安装/融合机构，S1 未带（水位 0 下
-#                                块边界融合行为待真机首验再定）
-#   cmd_every = 1              : S1 同语义恒为逐行直发（frames_per_row=1）；
-#                                frames_per_row>1 是 G1 traj 同款插值微流，另册
-#   grip_state_cmd = true      : 10-29 爪并关节流（grip_path=joint=traj 标准）
-#                                后无独立开关语义；state 爪维仍喂实时回读，
-#                                SDK 爪回读滞后未测——真机首跑专项核查
-#   nav_suspend = true         : S1 执行器无导航栈互动，N/A
-#   execution_horizon = 10     : trained-RTC 专属；fineart rtc_config=None，N/A
-#   head_crop = true           : G1 sft_1012 训练口径；fineart=360×640→224
-#                                letterbox 全幅，N/A
+#   rows_per_cmd               : traj 移植版无跨行打包（每拍一包=行内 fr 帧，
+#                                33.3ms 窗；四角④ R1fr2 已验静）——适配器版
+#                                run_s1_loop.py 专属键
+#   subtask_every              : fineart System 2 降频键，适配器版专属
+#   live_frames                : 适配器版合成图开关；traj 版取图即真实相机
+#                                （冻结守卫常开），无此概念
+#   execution_horizon = 10     : 同上 execution_horizon=0 判读

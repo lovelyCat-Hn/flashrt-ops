@@ -175,7 +175,7 @@ ap.add_argument("--merge", type=int, default=1,
 ap.add_argument("--continuous-ref", action="store_true",
                 help="换块参考链从 last_tgt 接续（链钳锚+EMA 不回臂位重锚；"
                      "replay 台同款语义，10-26 回放 A/B=块首 |Δcmd| 124→12、"
-                     "残差 p50 −56%）。与 --entry-match/--ref-offset 互斥（同管"
+                     "残差 p50 −56%%）。与 --entry-match/--ref-offset 互斥（同管"
                      "换块链锚）；--blend/--skip-install 自带接续无需同开。默认关")
 ap.add_argument("--entry-match", action="store_true",
                 help="入口动态匹配换块（10-17 回放台 entry-match 移植，用户提案；"

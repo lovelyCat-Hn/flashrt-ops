@@ -1,11 +1,11 @@
 ---
 name: galbot-s1-pi05-inference
-description: S1 pi05 真权重（lerobot 导出）接入 run_s1_loop 推理线——语义链/适配器/四坑/管线化（traj=行为标准）/爪关节流，dry-run 全绿待真机 exec
+description: S1 pi05 真权重推理线——语义链/四坑/管线化/traj 直移植版执行器（现役主线，10-29 落地待真机 exec）
 metadata:
   node_type: memory
   type: project
   originSessionId: 8689eb05-8c56-416a-9e8c-9e6525e95e8c
-  modified: 2026-10-29T09:48:04.586Z
+  modified: 2026-10-29T10:46:33.467Z
 ---
 
 # S1 pi05 推理线（2026-10-29 落地，接 [[galbot-fineart-vla-flashrt-port]] 的执行器底座）
@@ -34,3 +34,5 @@ metadata:
 **管线化（10-29 用户定案，销 G1 异步预取 −12% 挂账）+ traj=行为标准**：用户明示「G1 traj 就是行为标准，写 traj 就是为了 S1 直接用，勿被 native 带偏」。①**水位=预取触发阈值**（traj 同名语义，非消费上限）：0=换块即预取（本块第 0 步下发后立即后台线程起跑下一块推理）、N=消费到第 K 步触发；**换块=推理落地即整块换入弃尾**（不等消费完）→ obs 年龄恒≈推理时延 0.3s（同步口径 0→1.67s 渐增），dry-run 实证消费 10/50、换块周期 0.37s、**迟到 max 6ms**（常驻遥测）；**星饿**（块耗尽推理未归）=不下发臂保持，超 `--starve-limit` 2.0s（traj 同名同默认）判挂死停循环；to_s1 锚=推理时读数（模型语义），链钳/EMA 锚=块界新读数；SDK 调用全主线程、工作线程只碰 torch；首块 obs 新抓（obs0=载入前校准帧隔着就位段已陈旧）；infer_pool.shutdown(wait=True) 在 SDK 三连前。②**爪=关节流**（`--grip-path joint` 默认=traj 标准；cmd=set_gripper_command 逃生门带 2mm 死区）：`set_joint_commands(joint_groups=["left_gripper","right_gripper"])` **position=宽度米、velocity=速度帽(toml 0.05)被尊重、effort=10**（pyi 明示爪维 velocity/effort 生效）；**每发送拍无条件发**——onset/吞令/chg 各门属 cmd 端点专属（G1 P6 三格），joint 路径密流免费；EMA 照带（ema_row 全滤臂/torso/head/爪，块界从 state_raw 爪 pct 维播种宽度米）；home 双爪一包一次。
 
 **坑④（自咬）——绝对节拍基准必须块首取一次**：`tr=time.perf_counter()` 进拍内→`sleep_to(tr+period·(k+1))` 截止成**二次曲线**（拍间隔 33→67→100→133ms 递增，4 拍吞掉 290ms 推理窗=假象「GIL 争用」）；正解=块首 t0 一次、`sleep_to(t0+period·(k+1))`（G1 next_t 累计同款）。同轮另修：换循环时 r 忘自增=round0 死循环（dry-run 即现形）。
+
+**traj 直移植版 run_s1_loop_traj.py（10-29 深夜落地，用户定案「直接把 G1 traj 复制过来换关节」，取代逐处打补丁路线）**：run_g1_loop_traj.py 整文件复制，**只换机体件**——①SDK 面 galbot_sdk.g1→s1（G1JointGroup 枚举→组名字符串 "left/right_gripper"，set_gripper_command 5 参同形）；②state 27 维=[右臂7,右爪%,左臂7,左爪%,torso,head2,swerve×8 恒0]，read_joints 双形态（ARM_NAMES=14 臂一次读；STATE_NAMES=臂+torso/head+get_gripper_state 宽度米拼装）；③取图 get_rgb_data(SensorType, RgbOutputFormat.JPEG, True)；④爪标定 ckpt 无 manifest→出厂缺省 0.007/0.11m+告警；⑤**发令批形态=唯一行为侧改动**：G1 逐帧单点 tfs=0 流→每拍一包 set_joint_commands_batch（tick 内 fr 帧并批、tfs 全批累计 fdt·(i+1)=墙钟节拍；③定案 tfs=0 ASAP=卡卡、时间轴是解药；四角④同款形状；--tfs-ms 保留为批内追加余量）；⑥**warm 内嵌**（G1 手跑 g1_pose_warmup→s1_warm()：set_joint_positions is_blocking 臂+头@0.15rad/s→1s→torso@0.2→双爪关节流一包全开，目标 S1_HOME_POSE；--exec 确认后就位+自然跑完归位；q/Ctrl-C 照 traj 立即 os._exit 不复位；10-29 适配器版 1.5rad/s 链钳被用户判「一瞬间复位」10× 超速=治愈动因）；⑦NavSuspend 整类删（旗标留档键 no-op）。水位/换块弃尾/星饿/链钳/EMA/融合/QuitWatcher/日志/汇总逐行未动。配套：s1_config.py（扁平键版 g1_config，读 config/s1.toml 三态回填）+s1_traj_interp.py（插值器逐行副本）+s1.toml 重构（frames_per_row 1→12、新增 skip_frames/aggregate_fn 等 traj 配方键、run_s1_loop 预扫描 `k in _known` 过滤不冲突）。配置链预 SDK 段全绿实测（toml 全键覆盖/banner 水位 0+fr12/爪缺省告警）。**两坑**：G1 traj 原版 help 串裸 `%`（`−56%）`）在 py≥3.11 `--help` 即炸=潜伏 bug 两机各修一处 `%%`；适配器版 home_to 批 tfs=period×(i+1) 但链钳 1.5rad/s=复位过速病根（机制对、速率错）。**待真机 exec**：先无 --exec 干跑（SDK init+取图+推理+首块计划打印，零运动）再 --exec；就位 warm 与进环各一次回车确认。
