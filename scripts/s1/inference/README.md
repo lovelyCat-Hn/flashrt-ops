@@ -6,10 +6,15 @@
   就是行为标准，写 traj 就是为了 S1 直接用」——整文件复制
   `run_g1_loop_traj.py`，只换机体件（SDK 面/27 维 state/取图/爪标定缺省/
   内嵌 warm/导航栈删除）。行为逻辑（水位预取/换块弃尾/星饿/链钳/EMA/融合/
-  QuitWatcher）逐行未动。唯一发令侧改形：G1 逐帧单点 tfs=0 流 → S1 每拍
-  一包 `set_joint_commands_batch` 带时间轴批（S1 ③定案：tfs=0 ASAP=卡卡，
-  时间轴是解药；与回放台四角闭环④同款形状）。配置=同目录 `s1_config.py`
-  读 `config/s1.toml`（CLI > toml > BUILTIN 三态）。
+  QuitWatcher）逐行未动。发令侧改形：G1 逐帧单点 tfs=0 流 → S1 带时间轴批
+  `set_joint_commands_batch`（S1 ③定案：tfs=0 ASAP=卡卡，时间轴是解药；
+  与回放台四角闭环④同款形状）。**10-29 审查四处落地**：①取图 fresh_obs
+  搬进推理工作线程（主线程同步取图 p50 ~86ms≈2.6 拍=每块预取拍丢拍重锚；
+  干跑实证 tick 服务 max 130.8→22.6ms、丢拍 1→0；--no-obs-worker 回退门，
+  SDK 双线程并发待真机确认）；②--rows-per-cmd R 跨行攒批（R2×fr8=66.7ms
+  窗×16 点，换块弃半窗/星饿冲账）；③fr 12→8（4.17ms≈wbc_dt 4ms 采样周期）；
+  ④--cmd-every>1 S1 硬拦（WBC 直视计划断点，跨行平滑走 ②）。
+  配置=同目录 `s1_config.py` 读 `config/s1.toml`（CLI > toml > BUILTIN 三态）。
 - **`run_s1_loop.py` = 适配器版**：policy 解耦多policy 入口（fineart 线用），
   回放台/冒烟仍 import 它（`rsl`）。与新主线并行为 A/B 备胎，日常闭环走
   traj 移植版。
@@ -57,8 +62,8 @@ policies/pi05.py         pi05 适配器（G1 16/23 维语义；接口留位）
 |---|---|---|
 | `prompt` | System 2 任务提示 | 同名 |
 | `execute_actions_per_chunk` | 水位：0=整块行流完立即重推理；N=消费 N 行即重推理（都逐帧墙钟直发） | 同名同款（现役 0） |
-| `frames_per_row` | 每行帧数：1=不插值直发（默认，用户定案） | G1 traj 同名旗（cmd_every=1 同语义恒成立） |
-| `rows_per_cmd` | 跨行打包行数 R：命令窗口=R×行周期。10-28 真机窗口律：单点/33.3ms 窗卡顿、66.7ms 窗安静；30Hz 实时配方=2×fr12 | S1 扩展键（G1 无） |
+| `frames_per_row` | 每行帧数（现役 8=4.17ms 点距≈wbc_dt 4ms）：1=不插值直发 | G1 traj 同名旗（cmd_every=1 同语义恒成立） |
+| `rows_per_cmd` | 跨行打包行数 R：命令窗口=R×行周期。R2×fr8=66.7ms 窗×16 点=30Hz 实时配方（10-28 真机窗口律：33.3ms 窗「还好」、66.7ms 窗安静；10-29 起为 traj 版正式键） | S1 扩展键（G1 无） |
 | `max_joint_delta_per_step` | 包络 0.05 rad/步（臂） | 同名同值 |
 | `filter_alpha` | 行目标 EMA，0=关（G1 档 0.3 现役；S1 首跑先 0） | 同名（同事 action_filter.lowpass.alpha） |
 | `subtask_every` | System 2 降频摊销（S1 扩展键） | G1 无此概念 |

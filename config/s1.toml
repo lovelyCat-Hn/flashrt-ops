@@ -14,11 +14,16 @@ ctrl_hz = 30.0                           # 行节拍（traj 脚本 dest=fps；�
 # 立即后台起跑下一块推理，块长≈推理时延）；N=消费到第 K 步起跑。
 # 换块=推理落地即整块换入弃尾；星饿超 starve-limit（CLI，默认 2.0s）停环
 execute_actions_per_chunk = 0
-# 行内插值帧数（10-29 晚 ③定案定档 12）：S1 singorix WBC 按 tfs 时间轴细插，
-# tfs=0 ASAP=参考跳变→LP 削顶→力矩跳变=卡卡；traj 移植版每拍并一包带时间轴
-# 批（2.78ms 点距×33.3ms 窗）=四角闭环④静配方。G1 traj 默认 1 勿抄（G1 伺服
-# 吃单点流，S1 不吃）
-frames_per_row = 12
+# 行内插值帧数（10-29 审查③定档 8）：S1 singorix WBC 按 tfs 时间轴细插，
+# tfs=0 ASAP=参考跳变→LP 削顶→力矩跳变=卡卡；traj 移植版每行并一包带时间轴
+# 批。8 帧=4.17ms 点距 ≈ wbc_dt 4ms（250Hz 采样周期）——一个控制周期一个点
+# 不浪费；此前 12（2.78ms）约 1/3 点被采样器跨过无收益。G1 traj 默认 1 勿抄
+# （G1 伺服吃单点流，S1 不吃）
+frames_per_row = 8
+# 跨行攒批行数 R（10-29 审查②）：攒 R 拍帧并一包、tfs 铺满 R×tick 窗、每 R 拍
+# 一发。R2×fr8 = 66.7ms 窗×16 点 = 30Hz 实时配方（真机窗口律 66.7ms 全安静、
+# 点距越细越佳）；R1=33.3ms 窗（四角④已验「还好」，备选对照）
+rows_per_cmd = 2
 # rad/步（同事 control 段同名键同值；对原始增量 0.00% 截断=封版）
 max_joint_delta_per_step = 0.05
 # 行目标 EMA（同事 action_filter.lowpass.alpha 同名）：α=新样本权重；
@@ -45,9 +50,6 @@ execution_horizon = 0                    # trained-RTC 专属；S1 pi05 非 RTC 
 head_crop = false                        # S1 训练口径=4:3 letterbox 全幅
 
 # ── G1 [lerobot] 键的 S1 判读（无对应=刻意不带，非遗漏）──
-#   rows_per_cmd               : traj 移植版无跨行打包（每拍一包=行内 fr 帧，
-#                                33.3ms 窗；四角④ R1fr2 已验静）——适配器版
-#                                run_s1_loop.py 专属键
 #   subtask_every              : fineart System 2 降频键，适配器版专属
 #   live_frames                : 适配器版合成图开关；traj 版取图即真实相机
 #                                （冻结守卫常开），无此概念
