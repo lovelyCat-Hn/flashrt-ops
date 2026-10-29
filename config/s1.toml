@@ -8,8 +8,9 @@ prompt = "test"                          # 训练 task 字符串（tasks.parquet
 rounds = 200
 ctrl_hz = 30.0                          # 行节拍（S1 扩展键；G1 定盘 30Hz 口径）
 
-# 水位 0：整块行流完（50 行≈1.67s）立即重推理（新鲜度第一杠杆；同事/G1
-# 同名键同款）。发令=G1 traj 同款逐帧墙钟直发（tfs=0），不整块打包
+# 水位=预取触发阈值（G1 traj 同名语义，10-29 管线化）：0=换块即预取（本块
+# 第 0 步下发后立即起跑下一块推理，块长≈推理时延，换块弃尾）；N=消费到
+# 第 K 步起跑。发令=G1 traj 同款逐帧墙钟直发，不整块打包
 execute_actions_per_chunk = 0
 # 不插值纯 30Hz 直发（用户定案；G1 traj 同名旗）；>1 启用行内插值微流
 frames_per_row = 1
@@ -27,6 +28,10 @@ filter_alpha = 0.1
 
 grip_velocity = 0.05
 grip_effort = 10
+# 爪发送路径（G1 traj 同名同默认）：joint=set_joint_commands 关节流【traj
+# 标准：position=宽度米/velocity 速度帽/effort 生效，每拍无条件发密流免费】；
+# cmd=set_gripper_command 逃生门（onset/吞令定律端点，复现对照用）
+grip_path = "joint"
 # fineart System 2 子任务生成降频摊销（每 N 块一次；S1 扩展键，G1 无此概念；0=关）
 # pi05=System 1 only 无 subtask 入口 → 0（fineart 线再用 25）
 subtask_every = 0
@@ -37,9 +42,9 @@ live_frames = false
 #                                块边界融合行为待真机首验再定）
 #   cmd_every = 1              : S1 同语义恒为逐行直发（frames_per_row=1）；
 #                                frames_per_row>1 是 G1 traj 同款插值微流，另册
-#   grip_state_cmd = true      : S1 爪走独立 API、state 爪维喂实时回读；SDK 爪
-#                                回读滞后未测——真机首跑专项核查（G1 滞后 6.3-8s，
-#                                忘带=R 爪死 0）
+#   grip_state_cmd = true      : 10-29 爪并关节流（grip_path=joint=traj 标准）
+#                                后无独立开关语义；state 爪维仍喂实时回读，
+#                                SDK 爪回读滞后未测——真机首跑专项核查
 #   nav_suspend = true         : S1 执行器无导航栈互动，N/A
 #   execution_horizon = 10     : trained-RTC 专属；fineart rtc_config=None，N/A
 #   head_crop = true           : G1 sft_1012 训练口径；fineart=360×640→224

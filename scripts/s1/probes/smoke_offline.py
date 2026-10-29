@@ -193,7 +193,7 @@ class Stub2:
         return G()
 
     def set_gripper_command(self, *a, **kw):
-        grips[0] += 1
+        raise AssertionError("home 爪默认走关节流，不该碰 set_gripper_command")
 
     def set_joint_commands_batch(self, traj):
         pts = traj.points
@@ -204,13 +204,23 @@ class Stub2:
             self.cur[n] = float(c.position)
         senth2.append(("batch", len(pts)))
 
-    def set_joint_commands(self, *a, **kw):   # home 路径不该走单点
-        raise AssertionError("home_to 走了单点路径")
+    def set_joint_commands(self, cmds, joint_groups=[], joint_names=[],
+                           time_from_start_s=0.0):
+        # 10-29 爪=关节流（grip_path=joint，traj 标准）：home 双爪一包
+        if joint_groups and all("gripper" in g for g in joint_groups):
+            assert len(cmds) == len(joint_groups)
+            assert all(c.velocity > 0 and c.effort > 0 for c in cmds), \
+                "爪关节流须带 velocity 速度帽+effort（pyi：爪维生效）"
+            grips[0] += 1
+            return None
+        raise AssertionError("home_to 走了臂单点路径")
 
 
 stub2 = Stub2()
 stub2.cur = curh2
 goal2 = m2.home_pose_targets()
+m2.args.grip_path = "joint"
+m2._args[0] = m2.args
 okh2 = m2.home_to(stub2, body17, goal2, "smoke就位")
 assert okh2, "home_to 未收敛"
 worsth = max(abs(curh2[n] - float(v))
@@ -218,6 +228,6 @@ worsth = max(abs(curh2[n] - float(v))
                                   (m2.RIGHT_ARM_JOINTS, goal2.right_arm))
              for n, v in zip(names_g, grp))
 assert worsth <= 0.05 + 1e-9, worsth
-assert grips[0] == 2, grips[0]     # 双爪各一次（全开）
+assert grips[0] == 1, grips[0]     # 双爪一包一次（全开，关节流）
 print(f"home_to(run_s1_loop) smoke OK: {len(senth2)} 批 × 2 点时间轴，"
-      f"链钳收敛 worst {worsth*1000:.0f} mrad，爪下发 {grips[0]} 次")
+      f"链钳收敛 worst {worsth*1000:.0f} mrad，爪关节流 {grips[0]} 包（双爪一包）")

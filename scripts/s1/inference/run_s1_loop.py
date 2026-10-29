@@ -11,12 +11,17 @@
 set_joint_positions——官方明示后者不适合流式）：
   lerobot 动作块 → 逐行动作 → 逐帧 set_joint_commands 直发（默认 fr=1 =
   tfs0 立即执行，行节拍=脚本绝对截止墙钟 tick，G1 traj 同款；fr>1=A/B
-  插值微流，行内小 batch 累计 tfs）。水位（execute_actions_per_chunk）：
-  0=整块行流完（50 行≈1.67s）立即重推理；N=消费 N 行即重推理。
-  ⚠ G1 的异步预取（换块即预取/星饿 hold）未带——同步循环下重推理 232ms
-  ≪ 块长 1.67s，吞吐损失 ~12% 挂账；夹爪仍走独立 API（G1 --grip-state-cmd
-  位）。⚠ tfs×singorix WBC 真机语义未验证——G1 血泪史（tfs0 每点全停
-  滞后 2.1×、tfs33.3 stall 判死）上机前先小步复验。
+  插值微流，行内小 batch 累计 tfs）。管线化（10-29 用户定案 = run_g1_loop_traj
+  同款语义：**traj 即 S1 行为标准**）：水位=预取触发阈值，0=换块即预取（本块
+  第 0 步下发后立即起跑下一块推理，块长≈推理时延）；换块=推理落地即整块
+  换入弃尾（不等消费完）→ 观测年龄恒 ≈ 推理延迟（~0.4s，同步口径 0→1.67s
+  渐增），推理死时消掉（G1 异步预取 −12% 吞吐挂账销案）；星饿（块耗尽推理
+  未归）=不下发臂保持，超 --starve-limit 判挂死停循环（traj 同名同默认）。
+  SDK 调用全住主线程（robot 对象线程安全未验证），工作线程只碰 torch 引擎；
+  夹爪=关节流（--grip-path joint 默认=traj 标准：set_joint_commands 爪关节
+  position=宽度米/velocity 速度帽/effort 生效，每拍无条件发，EMA 照带；
+  cmd=set_gripper_command 逃生门）。⚠ tfs×singorix WBC 真机语义已验证
+  （回放台窗口律）。
 
 安全设计（三重闸 + 零运动默认）：
   ① 默认 dry-run：全链照跑（取图/推理/映射/打印），不发任何指令
@@ -73,9 +78,20 @@ AP.add_argument("--ctrl-hz", type=float, default=30.0,
                 help="行节拍 Hz（S1 扩展键；G1 定盘 30Hz 口径）")
 AP.add_argument("--execute-actions-per-chunk", "--n-action-steps",
                 dest="execute_actions_per_chunk", type=int, default=0,
-                help="水位（同事/lerobot 同名键，G1 toml 同款）：0=整块行流完"
-                     "（50 行≈1.67s）立即重推理（新鲜度第一杠杆）；N=消费 N 行"
-                     "即重推理。两种都逐帧墙钟节拍直发〔旧名 --n-action-steps〕")
+                help="预取水位阈值（G1 traj 同名语义）：0=换块即预取（本块第 0 步"
+                     "下发后立即起跑下一块推理，块长≈推理时延）；N=消费到第 K 步"
+                     "起跑。换块=推理落地即整块换入弃尾。逐帧墙钟节拍直发"
+                     "〔旧名 --n-action-steps〕")
+AP.add_argument("--starve-limit", type=float, default=2.0,
+                help="星饿安全停机阈值 s：块耗尽且推理未归超过该时长即停循环"
+                     "（默认 2.0s=正常推理余量 ~5×；星饿期不下发=臂保持，"
+                     "G1 traj 同名同默认）")
+AP.add_argument("--grip-path", choices=["joint", "cmd"], default="joint",
+                help="爪发送路径（G1 traj 同名同默认）：joint=set_joint_commands"
+                     " 关节流【默认，traj 标准；pyi 爪关节 position=宽度米、"
+                     "velocity/effort 生效；每拍无条件发，onset/吞令/chg 各门"
+                     "旁路=密流免费】；cmd=set_gripper_command【逃生门/复现对照，"
+                     "2mm 死区门只在此路有意义】")
 AP.add_argument("--frames-per-row", type=int, default=1,
                 help="每行动作的流式帧数（默认 1=不插值纯 30Hz 直发，用户定案；"
                      ">1 启用帧插值，帧距 = ctrl_hz 倒数/帧数）")
@@ -212,67 +228,147 @@ def main() -> int:
     adapter.load(ckpt, args.prompt, calib_obs=obs0)
     print(f"✓ 引擎加载 {args.policy} ← {ckpt}（{time.time() - t0:.1f}s）")
 
-    # ── 循环：取观测 → 读状态 →（可选 S2）→ 推理 → 按 ctrl_hz 消费 n 步 ──
+    # ── 循环（管线化 10-29 用户定案 = run_g1_loop_traj 同款语义，S1 化）：
+    #    水位（execute_actions_per_chunk）=预取触发阈值：0=换块即预取（本块
+    #    第 0 步下发后立即起跑下一块推理，块长≈推理时延）；N=消费到第 K 步
+    #    起跑。换块=推理落地即整块换入弃尾（不等消费完）→ 观测年龄恒 ≈ 推理
+    #    延迟（~0.4s，同步口径 0→1.67s 渐增），推理死时消掉（G1 异步预取
+    #    −12% 吞吐挂账销案）。星饿（块耗尽推理未归）=不下发，臂保持末批
+    #    目标，超 --starve-limit 判挂死停循环（G1 同名同默认）。SDK 调用全住
+    #    主线程（robot 对象线程安全未验证），工作线程只碰 torch 引擎。
+    #    to_s1 锚=推理时读数（模型语义，absolute_actions_processor 同款）；
+    #    链钳/EMA 锚=块界新读数（每块重锚，安全行为）。
     period = 1.0 / args.ctrl_hz
     rows = []
-    try:
-        for r in range(args.rounds):
-            tr = time.perf_counter()
-            obs = obs0 if r == 0 else (grab_obs(robot) if args.live_frames
-                                       else synthetic_obs(r))
-            state_raw, _extras = read_s1_state(robot, body_names)
+    from concurrent.futures import ThreadPoolExecutor
+
+    infer_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="infer")
+    infer_err = [None]                   # 工作线程异常→换块收集点重抛
+
+    def _bg_infer(obs_, state_, do_s2):
+        try:
             text = None
-            if args.subtask_every and r % args.subtask_every == 0:
-                t2 = time.perf_counter()
-                text = adapter.subtask(args.prompt, obs)
-                print(f"  [S2] {text!r}（{(time.perf_counter() - t2) * 1000:.0f} ms）")
+            if do_s2:
+                text = adapter.subtask(args.prompt, obs_)
             t1 = time.perf_counter()
-            chunk = adapter.infer(obs, state_raw)
-            infer_ms = (time.perf_counter() - t1) * 1000
-            # 水位语义（同事/lerobot 同名键同款；发令=G1 traj 同款逐帧墙钟流）：
-            # 0=整块行流完立即重推理；N=消费 N 行即重推理。两种都按绝对截止
-            # tick 直发（rows_per_cmd 控打包粒度，节拍权在脚本，不整块打包给控制器）。
-            full_chunk = args.execute_actions_per_chunk <= 0
-            n = (len(chunk) if full_chunk
-                 else max(0, min(args.execute_actions_per_chunk, len(chunk))))
+            ck = adapter.infer(obs_, state_)
+            return ck, (time.perf_counter() - t1) * 1000.0, text, state_
+        except Exception as e:
+            infer_err[0] = e
+            return None, 0.0, None, None
+
+    try:
+        # ── 首块阻塞推理（obs 新抓——obs0 是载入前校准帧，隔着就位段早已陈旧；
+        #    臂停在就位姿）──
+        obs = grab_obs(robot) if args.live_frames else synthetic_obs(0)
+        state_raw, _extras = read_s1_state(robot, body_names)
+        t1 = time.perf_counter()
+        chunk = adapter.infer(obs, state_raw)
+        infer_ms = (time.perf_counter() - t1) * 1000
+        infer_state = state_raw             # to_s1 模型语义锚（推理时读数）
+        wmark = max(0, min(args.execute_actions_per_chunk, len(chunk)))
+        r, aborted = 0, False
+        while r < args.rounds and not aborted:
+            # ── 块界：新读数重锚链钳/EMA（安全行为）──
+            state_n, _ = read_s1_state(robot, body_names)
+            chain = state_to_prev(state_n)   # 链钳基准+流插值链
+            ema = dict(chain)                # 爪 EMA 播种（宽度米，traj：EMA 照带）
+            ema["left_grip_m"] = gripper_pct_to_width_m(float(state_n[7]))
+            ema["right_grip_m"] = gripper_pct_to_width_m(float(state_n[15]))
+            t0 = time.perf_counter()   # 绝对节拍基准=块首取一次（G1 next_t 累计
+                                       # 同款；tr 进拍内会把截止拖成二次曲线，
+                                       # 10-29 dry-run 实证 4 拍吞掉 290ms 推理窗）
+            n = len(chunk)
             sent, clamped, frames = 0, 0, 0
             R = max(1, args.rows_per_cmd)
-            chain = state_to_prev(state_raw)     # 流插值链基准 + delta-max 钳位
-                                                 # 基准 = 最后已发（块界从新读数
-                                                 # 重启=重锚，安全行为；G1 同款）
-            ema = dict(chain)                    # EMA 状态（每块从读数重锚，最小版）
-            pending = []                         # 已规划待打包的行 (names, tgt)
-            for k in range(n):
-                tg = adapter.to_s1(chunk[k], state_raw)
-                if tg is None:
-                    if k == 0:
-                        print(f"  chunk{r} step0（dry-run）: "
-                              f"{np.array2string(chunk[k], precision=3, suppress_small=True)}")
-                else:
-                    tg = ema_row(tg, ema, args.filter_alpha)
-                    names, tgt, cl = plan_row(tg, chain)
-                    clamped += cl
-                    pending.append((names, tgt))
-                    if executing:
-                        send_grippers(robot, tg, state_raw)
+            pending = []                     # 已规划待打包的行 (names, tgt)
+            fut, launched = None, False
+            starve_ms = 0.0
+            late_max = 0.0
+            k = 0
+            while True:
+                if k < n:
+                    tg = adapter.to_s1(chunk[k], infer_state)
+                    if tg is None:
+                        if k == 0:
+                            print(f"  chunk{r} step0（dry-run）: "
+                                  f"{np.array2string(chunk[k], precision=3, suppress_small=True)}")
                     else:
-                        for nm, v in zip(names, tgt):
-                            chain[nm] = v       # dry-run：链随规划走（无下发）
-                if len(pending) >= R or (k == n - 1 and pending):
-                    if executing:
-                        sent += 1
-                        frames += stream_rows(robot, pending[0][0],
-                                              [t for _, t in pending], chain)
-                    for names_i, tgt_i in pending:
-                        for nm, v in zip(names_i, tgt_i):
-                            chain[nm] = v       # 批末行 = 新链基准（最后已发）
-                    pending.clear()
-                sleep_to(tr + period * (k + 1))  # 绝对截止节拍（G1 同款；欠账不追发）
+                        tg = ema_row(tg, ema, args.filter_alpha)
+                        names, tgt, cl = plan_row(tg, chain)
+                        clamped += cl
+                        pending.append((names, tgt))
+                        if executing:
+                            send_grips(robot, tg, state_n)
+                        else:
+                            for nm, v in zip(names, tgt):
+                                chain[nm] = v       # dry-run：链随规划走（无下发）
+                    if len(pending) >= R or (k == n - 1 and pending):
+                        if executing:
+                            sent += 1
+                            frames += stream_rows(robot, pending[0][0],
+                                                  [t for _, t in pending], chain)
+                        for names_i, tgt_i in pending:
+                            for nm, v in zip(names_i, tgt_i):
+                                chain[nm] = v       # 批末行 = 新链基准（最后已发）
+                        pending.clear()
+                    sleep_to(t0 + period * (k + 1))  # 绝对截止节拍（欠账不追发）
+                    late = time.perf_counter() - (t0 + period * (k + 1))
+                    late_max = max(late_max, late)   # 拍迟到（节拍健康诊断位）
+                    k += 1
+                elif fut is not None:
+                    # ── 星饿：块耗尽推理未归——不下发（臂保持末批目标，
+                    #    G1 traj 同款）；超阈值判挂死停循环 ──
+                    sleep_to(time.perf_counter() + period)
+                    starve_ms += period * 1000
+                    if starve_ms >= args.starve_limit * 1000:
+                        print(f"⛔ 星饿超 {args.starve_limit}s（推理未归）"
+                              "——判挂死，停止循环（臂保持原地）")
+                        aborted = True
+                        break
+                else:
+                    break                        # 末块流完，自然出口
+                # ── 换块判据（拍界）：推理落地即整块换入弃尾 ──
+                if fut is not None and fut.done():
+                    break
+                # ── 预取触发：消费到水位即起跑（水位 0=第 0 步下发后立即，
+                #    比 traj 晚一拍睡——obs 年龄多 33ms，量级无关）──
+                if (not launched and r + 1 < args.rounds
+                        and k >= max(1, wmark)):
+                    obs_n = (grab_obs(robot) if args.live_frames
+                             else synthetic_obs(r + 1))
+                    state_p, _ = read_s1_state(robot, body_names)
+                    do_s2 = bool(args.subtask_every
+                                 and (r + 1) % args.subtask_every == 0)
+                    fut = infer_pool.submit(_bg_infer, obs_n, state_p, do_s2)
+                    launched = True
+            if pending:                      # 提前换块的尾行补发
+                if executing:
+                    sent += 1
+                    frames += stream_rows(robot, pending[0][0],
+                                          [t for _, t in pending], chain)
+                for names_i, tgt_i in pending:
+                    for nm, v in zip(names_i, tgt_i):
+                        chain[nm] = v
+                pending.clear()
+            if fut is not None:
+                chunk, infer_ms, text, infer_state = fut.result()
+                if infer_err[0] is not None:
+                    raise infer_err[0]
+            else:
+                text = None
+            consumed = k
             rows.append({"round": r, "infer_ms": round(infer_ms, 1),
-                         "steps": n, "sent": sent, "frames": frames,
-                         "clamped": clamped, "text": text})
-            print(f"  round {r}: infer {infer_ms:.0f} ms | 消费 {n} 步 | "
-                  f"流式 {frames} 帧 | 钳位 {clamped}")
+                         "steps": consumed, "sent": sent, "frames": frames,
+                         "clamped": clamped, "discarded": max(0, n - consumed),
+                         "starve_ms": round(starve_ms, 1),
+                         "late_ms_max": round(late_max * 1000, 1), "text": text})
+            print(f"  round {r}: infer {infer_ms:.0f} ms | 消费 {consumed}/{n} 步"
+                  f" | 弃尾 {max(0, n - consumed)} | 流式 {frames} 帧 | 钳位 {clamped}"
+                  f" | 迟到max {late_max * 1000:.0f} ms"
+                  + (f" | 星饿 {starve_ms:.0f} ms" if starve_ms else "")
+                  + (f" | S2 {text!r}" if text else ""))
+            r += 1
     except KeyboardInterrupt:
         print("\n→ Ctrl-C 退出")
     finally:
@@ -282,6 +378,7 @@ def main() -> int:
                   "ctrl_hz": args.ctrl_hz,
                   "execute_actions_per_chunk": args.execute_actions_per_chunk,
                   "filter_alpha": args.filter_alpha,
+                  "grip_path": args.grip_path,
                   "live_frames": args.live_frames}
         out = pathlib.Path(args.out)
         out.mkdir(parents=True, exist_ok=True)
@@ -293,6 +390,7 @@ def main() -> int:
                 home_to(robot, body_names, home_pose_targets(), "归位")
             except KeyboardInterrupt:
                 print("（跳过归位，直接退出）")
+        infer_pool.shutdown(wait=True)   # join 在途推理（≤~0.4s）再拆 SDK
         robot.request_shutdown()
         robot.wait_for_shutdown()
         robot.destroy()
@@ -321,7 +419,7 @@ def home_to(robot, body_names, goal: S1Targets, tag: str) -> bool:
     args = _args[0]
     period = 1.0 / args.ctrl_hz
     state_raw, _extras = read_s1_state(robot, body_names)
-    send_grippers(robot, goal, state_raw)
+    send_grips(robot, goal, state_raw)
     deadline = time.perf_counter() + args.home_timeout
     pending, t_print, ok, err = [], 0.0, False, float("inf")
     try:
@@ -430,8 +528,9 @@ def state_to_prev(state_raw: np.ndarray) -> dict[str, float]:
 
 def ema_row(tg: S1Targets, ema: dict[str, float], alpha: float) -> S1Targets:
     """行目标 EMA 低通（G1 --ema-alpha 同语义：α=新样本权重，0=关）。
-    最小版：仅臂/torso/head，每块由调用方从读数重锚；安全钳位在其后
-    （plan_row），滤波值不会绕过限位/delta-max。爪不滤（无翻转证据）。"""
+    臂/torso/head/爪全滤（爪 EMA 照带=traj --grip-path joint 标准，键
+    left_grip_m/right_grip_m 由调用方在块界从读数播种）；安全钳位在其后
+    （plan_row），滤波值不会绕过限位/delta-max。"""
     if alpha <= 0:
         return tg
     import dataclasses
@@ -444,6 +543,11 @@ def ema_row(tg: S1Targets, ema: dict[str, float], alpha: float) -> S1Targets:
             ema[nm] = v
         return out
 
+    def filt1(key, v):
+        v = alpha * float(v) + (1.0 - alpha) * ema.get(key, float(v))
+        ema[key] = v
+        return v
+
     f = dataclasses.replace(tg)
     if tg.left_arm is not None:
         f.left_arm = filt(tg.left_arm, LEFT_ARM_JOINTS)
@@ -453,6 +557,10 @@ def ema_row(tg: S1Targets, ema: dict[str, float], alpha: float) -> S1Targets:
         f.torso = float(filt([tg.torso], TORSO_JOINTS)[0])
     if tg.head is not None:
         f.head = filt(tg.head, HEAD_JOINTS)
+    if tg.left_grip_m is not None:
+        f.left_grip_m = filt1("left_grip_m", tg.left_grip_m)
+    if tg.right_grip_m is not None:
+        f.right_grip_m = filt1("right_grip_m", tg.right_grip_m)
     return f
 
 
@@ -557,8 +665,36 @@ def stream_row(robot, names, tgt, prev: dict[str, float]) -> int:
     return stream_rows(robot, names, [tgt], prev)
 
 
+def send_grip_joint(robot, tg: S1Targets) -> None:
+    """--grip-path joint（默认，traj 标准）：夹爪并入 set_joint_commands
+    关节流。pyi：爪关节 position=宽度米、velocity/effort 生效（速度帽语义，
+    恒速段被钳）；每发送拍无条件发——onset/吞令/chg 各门属
+    set_gripper_command 端点专属（G1 10-21 P6 三格实证），joint 路径无
+    对象=全旁路，密流免费；EMA 在 ema_row 里照带。"""
+    args = _args[0]
+    cmds, groups = [], []
+    for grp, w in (("left_gripper", tg.left_grip_m),
+                   ("right_gripper", tg.right_grip_m)):
+        if w is None:
+            continue
+        c = JointCommand()
+        c.position = float(w)
+        c.velocity = float(args.grip_velocity)   # 速度帽（非 pursuit 追踪）
+        c.effort = float(args.grip_effort)       # 同事默认 10
+        cmds.append(c)
+        groups.append(grp)
+    if not cmds:
+        return
+    st = robot.set_joint_commands(cmds, joint_groups=groups,
+                                  time_from_start_s=0.0)
+    if st is not None and getattr(st, "value", 0) != 0:
+        print(f"⚠ grip 关节流 → {st}")
+
+
 def send_grippers(robot, tg: S1Targets, state_raw: np.ndarray) -> None:
-    """夹爪独立 API（不在 batch 轨迹里；G1 --grip-state-cmd 同位）。"""
+    """--grip-path cmd【逃生门/复现对照】=set_gripper_command 独立 API。
+    该路 onset=0.12s+行程/速度+吞令=训练外注入行为（G1 P6 破案），默认不走；
+    2mm 死区门只在此路有意义。"""
     args = _args[0]
     for side, w in (("left", tg.left_grip_m), ("right", tg.right_grip_m)):
         if w is None:
@@ -569,6 +705,14 @@ def send_grippers(robot, tg: S1Targets, state_raw: np.ndarray) -> None:
             robot.set_gripper_command(f"{side}_gripper", float(w),
                                       velocity_mps=args.grip_velocity,
                                       effort=args.grip_effort, is_blocking=False)
+
+
+def send_grips(robot, tg: S1Targets, state_raw: np.ndarray) -> None:
+    """爪发送分派：joint=关节流（traj 标准）；cmd=逃生门。"""
+    if _args[0].grip_path == "joint":
+        send_grip_joint(robot, tg)
+    else:
+        send_grippers(robot, tg, state_raw)
 
 
 def sleep_to(deadline: float) -> None:
