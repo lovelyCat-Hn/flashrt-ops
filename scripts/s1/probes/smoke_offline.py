@@ -44,7 +44,9 @@ class Stub:
         pts = traj.points
         assert pts, "batch 空"
         tfs = [p.time_from_start_second for p in pts]
-        assert all(b < a for b, a in zip(tfs, tfs[1:])), f"tfs 须严格递增: {tfs}"
+        assert (all(b < a for b, a in zip(tfs, tfs[1:]))
+                or all(t == 0.0 for t in tfs)), \
+            f"tfs 须严格递增或全零(--tfs-zero): {tfs}"
         for n, c in zip(names, pts[-1].joint_command_vec):
             self.cur[n] = float(c.position)     # 末点=批末行目标
         self.sent.append((names, ("batch", len(pts))))
@@ -116,6 +118,21 @@ assert all(c["residual_max"] < 1e-6 for c in tel_b["chunks"])
 worst2 = max(abs(cur2[n] - v) for n, v in zip(names, chunks[-1][-1]) if n in m.ARM_JOINTS)
 assert worst2 <= 0.05 + 1e-9, worst2
 print("batch-path smoke OK: 50 calls × 8 pts (R=2×fr=4), tfs 严格递增")
+
+# ── --tfs-zero 实验开关（G1 式 ASAP 批形态）：tfs 全零、其余不变 ──
+cur4, sent4 = {}, []
+m.rsl.args.rows_per_cmd, m.rsl.args.frames_per_row = 2, 1
+m.rsl.args.tfs_zero = True
+m.rsl._args[0] = m.rsl.args
+tel_z = m._new_tel(executing=True)
+m.run_replay(Stub(cur4, sent4), body17, names, chunks, grip, True, tel_z)
+m.rsl.args.rows_per_cmd, m.rsl.args.frames_per_row = 1, 1
+m.rsl.args.tfs_zero = False
+m.rsl._args[0] = m.rsl.args
+assert len(sent4) == 50 and all(kind == "batch" for _, (kind, _) in sent4)
+assert all(npts == 2 for _, (_, npts) in sent4)
+assert sum(c["rows"] for c in tel_z["chunks"]) == 100
+print("tfs-zero smoke OK: 50 calls × 2 pts (R=2×fr=1), 全零 tfs 放行")
 
 # ── 高频日志路径（--log-hz 口径）：tick 对齐 + 节流密度（网格钳 dl 后 ~3-4 读/tick；
 #    曾有双 bug：热路径懒 import 顶爆 tick0 + 网格越界尾部空转 → 114 样本/tick）──

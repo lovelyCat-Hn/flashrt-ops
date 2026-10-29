@@ -26,7 +26,13 @@ print(f"配置: ctrl={cfg['ctrl_hz']} R={cfg.get('rows_per_cmd')} fr={cfg['frame
       f"r/c={cfg['execute_actions_per_chunk']} | 样本 {len(t)} | 标记 {len(marks)}")
 dur = t[-1] - t[0]
 tgt_at = ticks_tgt[tick]                      # 每样本所属 tick 的末行目标
-err = np.abs(tgt_at - pos)                    # (N, J) 目标滞后（含 LP 尾）
+# ⚠ get_joint_states.position 与指令系符号相反（10-29 三跑实锤：同列相关
+# −0.97~−0.98、负镜像 +0.98、每关节偏移 c 跨跑稳定≈常量，臂关节全体）。
+# err 必须先镜像归位再取偏移：err = |(−pos−c)−tgt|，c=逐关节 med(−pos−tgt)。
+# 直接 |tgt−pos| 会抬到行程量级（②安静跑也"3.9 rad"，纯符号伪影）。
+neg = -pos
+_c = np.median(neg - tgt_at, axis=0)
+err = np.abs(neg - _c - tgt_at)               # (N, J) 目标滞后（含 LP 尾）
 
 in_mark = np.zeros(len(t), bool)
 for m in marks:

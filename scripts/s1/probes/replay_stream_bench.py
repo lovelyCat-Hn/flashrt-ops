@@ -83,6 +83,9 @@ AP.add_argument("--frames-per-row", type=int, default=1,
 AP.add_argument("--rows-per-cmd", type=int, default=1,
                 help="每次 set_joint_commands 打包行数 R（窗口=R×行周期；"
                      "1=逐行。30Hz 实时窗口律配方=2×fr12，见 run_s1_loop）")
+AP.add_argument("--tfs-zero", dest="tfs_zero", action="store_true",
+                help="【实验】batch 全零 tfs（G1 式 ASAP 批对照；"
+                     "run_s1_loop 同名开关，仅回放 A/B 用勿进闭环）")
 AP.add_argument("--filter-alpha", "--ema-alpha", dest="filter_alpha",
                 type=float, default=0.0,
                 help="行目标 EMA α=新样本权重；回放忠实默认 0〔旧名 --ema-alpha〕")
@@ -113,6 +116,7 @@ for _k, _v in dict(ctrl_hz=args.ctrl_hz,
                    rows_per_cmd=args.rows_per_cmd,
                    filter_alpha=args.filter_alpha,
                    max_joint_delta_per_step=args.max_joint_delta_per_step,
+                   tfs_zero=args.tfs_zero,
                    grip_velocity=0.05, grip_effort=10).items():
     setattr(rsl.args, _k, _v)
 rsl._args[0] = rsl.args

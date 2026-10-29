@@ -85,6 +85,12 @@ AP.add_argument("--rows-per-cmd", type=int, default=1,
                      "66.7ms 窗全安静、点距细更佳（15Hz fr24 用户评最佳）。"
                      "30Hz 实时等价配方=R=2（窗口 66.7ms）×frames_per_row 12"
                      "（点距≈2.8ms）。1=逐行原路径（默认）")
+AP.add_argument("--tfs-zero", dest="tfs_zero", action="store_true",
+                help="【实验开关，仅回放台 A/B 用】batch 路径把全部 tfs 清零"
+                     "（=G1 式 ASAP 直发形态，10-29 用户提议的对照假设）。"
+                     "singorix 文档 §5.1 预测：无时间轴 → 采样器塌缩/立即跳变，"
+                     "预期复现或加剧 fr1 卡卡；若安静则时间轴必要性被证伪。"
+                     "默认关（时间轴是现役配方的根基，勿在闭环用）")
 AP.add_argument("--max-joint-delta-per-step", "--delta-max",
                 dest="max_joint_delta_per_step", type=float, default=0.05,
                 help="包络护栏：单步相对当前读数的最大关节增量（rad，臂；"
@@ -417,7 +423,8 @@ def stream_rows(robot, names, rows_tgt, prev: dict[str, float]) -> int:
         for i in range(1, fr + 1):
             a = i / fr
             p = TrajectoryPoint()
-            p.time_from_start_second = round(dt * (idx + i), 6)  # 全批累计时刻
+            p.time_from_start_second = 0.0 if args.tfs_zero else round(
+                dt * (idx + i), 6)  # 全批累计时刻（--tfs-zero=全零，ASAP 实验对照）
             vec = []
             for q in range(len(names)):
                 c = JointCommand()

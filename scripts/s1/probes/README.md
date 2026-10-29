@@ -123,6 +123,23 @@ bash ~/joint_observer/run_observed.sh replay_stream_bench.py \
 3 读（30Hz R 大窗口时更多）；真实 SDK get_joint_states 单次 ~ms 级，
 若迟到升高可降 `--log-hz 100`。
 
+**⚠ npz err 列口径（10-29）**：`get_joint_states.position` 与指令系**符号相反**
+（臂关节全体：同列相关 −0.97~−0.98、负镜像 +0.98、每关节偏移 c 跨跑≈常量；
+该接口坑二，坑一=返回规范序）。kaka_signature 已修（镜像+逐关节 med 去偏，
+修后 err p50 25-35 mrad 合理）；电流/vel/acc 绝对值与谱判读不受符号影响；
+钳位/残差回读走 `get_joint_positions`（指令系，正确）不受影响。
+
+**三格 A/B 定案（10-29，同一数据集 30Hz r/c=0）**：①R1fr1 tfs=0 踢率 j1
+18.4/s、acc 触顶 23-30.5=卡卡；②R2fr12 时间轴批 acc 17-23 不触顶=安静；
+③R2×fr1 全零 tfs 批（G1 式 ASAP 假设，`--tfs-zero`）**卡卡回归且更凶**
+（踢率 30.5/s≈①1.65×、4 关节 16.7Hz 显著音调峰）→**时间轴必要性实锤，
+因果链闭环：跳变参考→LP 速率需求→limit_acc=25 削顶→逐级力矩跳变∝Δ**。
+文档语义（singorix_target_guide.md）：LinearInterpolate 按 tfs 时间轴自动
+细插——33ms 时间轴是解药非病因；tfs=0 改变的是参考形状（斜坡→阶跃）。
+原始件 `evidence/s1_replay/kaka_1793240742/1793240779/1793246486.npz`。
+头探针 `batch_tfs_probe.py`（A 单点 tfs=2s 判 OVERRIDE/PROVERRIDE、B 批次
+时间轴、C tfs=0、D 全零批；head_joint1 幅 0.03rad，stub 自测绿）挂账可选。
+
 ### 安全
 
 dry-run 默认**零 SDK**（任何机器可跑；dry-run 状态走虚拟跟随，钳位计数=
