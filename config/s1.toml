@@ -2,9 +2,9 @@
 # 同体系（lerobot/同事路线对齐名，命名档案=docs/lerobot-alignment.md）。
 # 顶层键 = CLI dest 名；CLI 显式传参覆盖 toml；文件不存在则全用内置默认。
 
-policy = "fineart_vla"
-ckpt = "/home/galbot/holy/models/fineart_vla_midtrained"
-prompt = "pick up the object"           # System 2 任务提示（G1 同名键）
+policy = "pi05"
+ckpt = "/home/galbot/model_weights/pi05/S1_run_20261028_121132_b3f637a6_010000/pretrained_model"
+prompt = "test"                          # 训练 task 字符串（tasks.parquet 全库唯一；in-distribution）
 rounds = 200
 ctrl_hz = 30.0                          # 行节拍（S1 扩展键；G1 定盘 30Hz 口径）
 
@@ -28,7 +28,8 @@ filter_alpha = 0.1
 grip_velocity = 0.05
 grip_effort = 10
 # fineart System 2 子任务生成降频摊销（每 N 块一次；S1 扩展键，G1 无此概念；0=关）
-subtask_every = 25
+# pi05=System 1 only 无 subtask 入口 → 0（fineart 线再用 25）
+subtask_every = 0
 live_frames = false
 
 # ── G1 [lerobot] 键的 S1 判读（无对应=刻意不带，非遗漏）──

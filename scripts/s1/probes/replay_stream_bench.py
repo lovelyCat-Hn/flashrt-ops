@@ -316,7 +316,7 @@ def home_to(robot, names: list[str], goal, state_raw: np.ndarray) -> bool:
             if tr - t_print > 1.0:
                 t_print = tr
                 print(f"  就位… 最大臂差 {err*1000:.0f} mrad", flush=True)
-            rnames, tgt, _cl = rsl.plan_row(goal, state_raw)
+            rnames, tgt, _cl = rsl.plan_row(goal, rsl.state_to_prev(state_raw))
             pending.append((rnames, tgt))
             if len(pending) >= 2:
                 traj = Trajectory()
@@ -388,7 +388,7 @@ def run_replay(robot, body_names, names, chunks, grip, executing: bool,
                                     grip[ci, k] if grip is not None else None)
                 if args.filter_alpha > 0:
                     tg = rsl.ema_row(tg, ema, args.filter_alpha)
-                rnames, tgt, cl = rsl.plan_row(tg, state_raw)
+                rnames, tgt, cl = rsl.plan_row(tg, rsl.state_to_prev(state_raw))
                 clamped += cl
                 if not executing:
                     advance_arm_state(state_raw, names, tgt, rnames)

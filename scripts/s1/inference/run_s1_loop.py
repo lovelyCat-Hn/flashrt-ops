@@ -93,8 +93,10 @@ AP.add_argument("--tfs-zero", dest="tfs_zero", action="store_true",
                      "默认关（时间轴是现役配方的根基，勿在闭环用）")
 AP.add_argument("--max-joint-delta-per-step", "--delta-max",
                 dest="max_joint_delta_per_step", type=float, default=0.05,
-                help="包络护栏：单步相对当前读数的最大关节增量（rad，臂；"
-                     "同事 control 段同名键同值）〔旧名 --delta-max〕")
+                help="包络护栏：链式限幅 ±rad/步（臂；相对最后已发目标，"
+                     "G1 traj 同款参考不重锚；块界从新读数重锚=安全行为。"
+                     "10-29 修正：曾用块首读数当基准=整块钳死在 ±0.05 龟速）"
+                     "〔旧名 --delta-max〕")
 AP.add_argument("--filter-alpha", "--ema-alpha",
                 dest="filter_alpha", type=float, default=0.0,
                 help="行目标 EMA 低通系数（同事 action_filter.lowpass.alpha 同名；"
@@ -218,7 +220,9 @@ def main() -> int:
                  else max(0, min(args.execute_actions_per_chunk, len(chunk))))
             sent, clamped, frames = 0, 0, 0
             R = max(1, args.rows_per_cmd)
-            chain = state_to_prev(state_raw)     # 流插值链基准 = 最后已发（exec）
+            chain = state_to_prev(state_raw)     # 流插值链基准 + delta-max 钳位
+                                                 # 基准 = 最后已发（块界从新读数
+                                                 # 重启=重锚，安全行为；G1 同款）
             ema = dict(chain)                    # EMA 状态（每块从读数重锚，最小版）
             pending = []                         # 已规划待打包的行 (names, tgt)
             for k in range(n):
@@ -229,7 +233,7 @@ def main() -> int:
                               f"{np.array2string(chunk[k], precision=3, suppress_small=True)}")
                 else:
                     tg = ema_row(tg, ema, args.filter_alpha)
-                    names, tgt, cl = plan_row(tg, state_raw)
+                    names, tgt, cl = plan_row(tg, chain)
                     clamped += cl
                     pending.append((names, tgt))
                     if executing:
@@ -352,8 +356,12 @@ def ema_row(tg: S1Targets, ema: dict[str, float], alpha: float) -> S1Targets:
     return f
 
 
-def plan_row(tg: S1Targets, state_raw: np.ndarray):
-    """包络护栏（限位表钳位 + delta-max 相对当前读数，臂 only）。
+def plan_row(tg: S1Targets, prev) -> tuple[list[str], list[float], int]:
+    """包络护栏（限位表钳位 + delta-max 链式限幅，臂 only）。
+    prev = 钳位基准 name→值映射：执行器传演进链 chain（最后已发/已规划，
+    G1 run_g1_loop_traj:1830 同款「参考不重锚」——曾用块首读数当基准会让
+    整块 50 行全钳在块首 ±delta-max 内=臂速 0.05 rad/块 龟速，10-29 对质
+    G1 修正）；回放台传每 tick 重读的 state_raw 转字典（真值链钳）。
     → (names, targets, clamped)。爪不在此列（独立 API）。"""
     args = _args[0]
     names, tgt = [], []
@@ -374,14 +382,14 @@ def plan_row(tg: S1Targets, state_raw: np.ndarray):
         lo, hi = S1_LIMITS[nm]
         v = min(max(v, lo), hi)
         if nm in LEFT_ARM_JOINTS + RIGHT_ARM_JOINTS:   # delta-max 只限臂（G1 v3 配方）
-            cur = float(state_raw[LEFT_ARM_JOINTS.index(nm)]
-                        if nm in LEFT_ARM_JOINTS
-                        else state_raw[8 + RIGHT_ARM_JOINTS.index(nm)])
-            dv = v - cur
-            if abs(dv) > args.max_joint_delta_per_step:
-                v = cur + float(np.clip(dv, -args.max_joint_delta_per_step,
-                                        args.max_joint_delta_per_step))
-                clamped += 1
+            cur = prev.get(nm) if hasattr(prev, "get") else None
+            if cur is not None:
+                dv = v - float(cur)
+                if abs(dv) > args.max_joint_delta_per_step:
+                    v = float(cur) + float(np.clip(
+                        dv, -args.max_joint_delta_per_step,
+                        args.max_joint_delta_per_step))
+                    clamped += 1
         out.append(v)
     return names, out, clamped
 
