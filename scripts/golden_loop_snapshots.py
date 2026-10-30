@@ -136,6 +136,11 @@ class _LiveNS(dict):
             return getattr(self._live[k], k)
         return super().__getitem__(k)
 
+    def __setitem__(self, k, v):
+        if k in self._live:
+            setattr(self._live[k], k, v)
+        super().__setitem__(k, v)
+
 
 def common_namespace(func_names, args, **extra):
     """函数已搬进 common/（步2b-1 起脚本不再含 def）：import + 模块属性回填。
@@ -144,16 +149,20 @@ def common_namespace(func_names, args, **extra):
     """
     from common.control import fusion as FU
     from common.control import guards as GD
+    from common.loop import traj_engine as TE
     home = {"build_rows": FU, "build_block_stream": FU,
-            "chunk_abs_block": GD, "env_first_violation": GD}
+            "chunk_abs_block": GD, "env_first_violation": GD,
+            "_rp_flush": TE}
     try:
         mods = {n: home[n] for n in func_names}
     except KeyError:
         return None
-    ns = _LiveNS({"_EMA_STATE": FU})
+    ns = _LiveNS({"_EMA_STATE": FU, "_rp_q": TE, "_rp_n": TE})
+    robot = _StubRobot()
     ns.update({"np": np, "args": args, "ARM_NAMES": ARM14,
-               "TICK": 1.0 / args.fps, "robot": _StubRobot(),
-               "_rp_q": [], "_rp_n": 0})
+               "TICK": 1.0 / args.fps, "robot": robot,
+               "TrajectoryPoint": _StubPoint, "JointCommand": _StubCmd,
+               "Trajectory": _StubTraj})
     ns.update(extra)
     for n, m in mods.items():
         ns[n] = getattr(m, n)
@@ -165,6 +174,14 @@ def common_namespace(func_names, args, **extra):
     GD.BASE_ARM = extra.get("BASE_ARM")
     GD.ENV_LO = extra.get("ENV_LO")
     GD.ENV_HI = extra.get("ENV_HI")
+    TE.args = args                       # _rp_flush（TE 模块属性）回填
+    TE.TICK = 1.0 / args.fps
+    TE.ARM_NAMES = ARM14
+    TE.robot = robot                     # 与 ns["robot"] 同实例（sent 读数）
+    TE.TrajectoryPoint, TE.JointCommand, TE.Trajectory = (
+        _StubPoint, _StubCmd, _StubTraj)
+    TE._rp_q = list(extra.get("_rp_q", []))
+    TE._rp_n = extra.get("_rp_n", 0)
     return ns
 
 
