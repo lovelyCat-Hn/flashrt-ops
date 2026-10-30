@@ -14,6 +14,10 @@
   SDK 双线程并发待真机确认）；②--rows-per-cmd R 跨行攒批（R2×fr8=66.7ms
   窗×16 点，换块弃半窗/星饿冲账）；③fr 12→8（4.17ms≈wbc_dt 4ms 采样周期）；
   ④--cmd-every>1 S1 硬拦（WBC 直视计划断点，跨行平滑走 ②）。
+  **10-30 发令窗五角闭环定案=工作点钉 R1×fr1【现役最简】**：①单点 tfs=0
+  响/③全零 tfs 响/②R2×fr8 静/④R1×fr2 静/⑤R1×fr1 单点 tfs=33.3ms 静——
+  时间轴存在性=唯一必要条件，窗内点数/窗长/合批全非自变量；fr2~8 样条
+  弧线纹理备档、R2 攒批余量备档。
   **10-30 换块融合 A/B 定案=双层胜单层**：weighted_average crossfade
   （0.3old/0.7new）+ EMA【现役】；latest_only（缝只留 EMA 单层，午间试跑）
   真机用户判「没有之前的好」判退——缝上的旧流惯性项要留。
@@ -65,8 +69,8 @@ policies/pi05.py         pi05 适配器（G1 16/23 维语义；接口留位）
 |---|---|---|
 | `prompt` | System 2 任务提示 | 同名 |
 | `execute_actions_per_chunk` | 水位：0=整块行流完立即重推理；N=消费 N 行即重推理（都逐帧墙钟直发） | 同名同款（现役 0） |
-| `frames_per_row` | 每行帧数（现役 8=4.17ms 点距≈wbc_dt 4ms）：1=不插值直发 | G1 traj 同名旗（cmd_every=1 同语义恒成立） |
-| `rows_per_cmd` | 跨行打包行数 R：命令窗口=R×行周期。R2×fr8=66.7ms 窗×16 点=30Hz 实时配方（10-28 真机窗口律：33.3ms 窗「还好」、66.7ms 窗安静；10-29 起为 traj 版正式键） | S1 扩展键（G1 无） |
+| `frames_per_row` | 每行帧数（现役 1=单点直发带 tfs=T 斜坡，10-30 五角定案；fr2~8=样条弧线纹理备档） | G1 traj 同名旗（cmd_every=1 同语义恒成立） |
+| `rows_per_cmd` | 跨行打包行数 R：命令窗口=R×行周期（现役 1=每拍一包最简，10-30 定案；R2 攒批余量备档）。R>1=攒 R 拍帧并一包、tfs 铺满 R×tick 窗、每 R 拍一发（换块弃半窗/星饿冲账） | S1 扩展键（G1 无） |
 | `max_joint_delta_per_step` | 包络 0.05 rad/步（臂） | 同名同值 |
 | `filter_alpha` | 行目标 EMA，0=关（G1 档 0.3 现役；S1 首跑先 0） | 同名（同事 action_filter.lowpass.alpha） |
 | `subtask_every` | System 2 降频摊销（S1 扩展键） | G1 无此概念 |

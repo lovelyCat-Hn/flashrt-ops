@@ -29,10 +29,10 @@ BUILTIN = {
     "rounds": 200,
     "ctrl_hz": 30.0,          # 行节拍（traj 脚本 dest=fps）
     "execute_actions_per_chunk": 0,   # 0=换块即预取（水位=预取触发阈值）
-    "frames_per_row": 8,      # 8=行内 4.17ms 点距 ≈ wbc_dt 4ms 采样周期（10-29
-                              # 审查③；tfs=0 ASAP=卡卡、时间轴=解药，③定案）
-    "rows_per_cmd": 2,        # 跨行攒批 R：R2×fr8=66.7ms 窗×16 点 30Hz 实时配方
-                              # （10-29 审查②；R1=33.3ms 窗备选对照）
+    "frames_per_row": 1,      # 10-30 五角闭环定案=1 现役：单点也带 tfs=T 时间轴
+                              # 真机静（时间轴存在性=唯一必要条件）；fr2~8=纹理备档
+    "rows_per_cmd": 1,        # 跨行攒批 R：1=每拍一包（最简）；R>1 攒 R 拍一包
+                              # （R1/R2 真机均静，取最简）
     "filter_alpha": 0.1,      # S1 初档（用户定案 2026-10-28；G1 现役 0.3）
     "max_joint_delta_per_step": 0.05,  # rad/步（对原始增量 0.00% 截断=封版）
     "grip_path": "joint",     # traj 标准（关节流；cmd=逃生门）

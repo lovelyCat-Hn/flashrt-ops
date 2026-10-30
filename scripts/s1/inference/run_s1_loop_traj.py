@@ -108,7 +108,9 @@ S1 直接用——本文件 = run_g1_loop_traj.py 整文件复制，只换「机
     R×tick 窗每 R 拍一发）。S1 ③定案（10-29 晚真机）：singorix WBC 按 tfs
     时间轴细插，tfs=0 ASAP=参考跳变→LP 削顶→力矩跳变=卡卡；时间轴是解药
     ——故移植版把「每帧一条单点指令」换成「带时间轴批」（同回放台/适配器
-    执行器真机验证过的下发形状，四角闭环④）。--cmd-every>1 S1 硬拦（审查④：
+    执行器真机验证过的下发形状）。10-30 五角闭环收口：①单点tfs0响/③全零tfs
+    响/②R2×fr8静/④R1×fr2静/⑤R1×fr1单点静——时间轴存在性=唯一必要条件，
+    现役工作点 R1×fr1（单点也带 tfs=T 斜坡）。--cmd-every>1 S1 硬拦（审查④：
     S1 WBC 直视计划断点，G1 伺服吞阶跃语义不成立）
   ④b 取图在 worker：fresh_obs（三相机 ~86ms）随推理搬进工作线程（10-29 审查①，
     主线程同步取图≈2.6 拍=每块预取拍丢拍重锚）；--no-obs-worker 回退主线程
@@ -126,9 +128,13 @@ S1 直接用——本文件 = run_g1_loop_traj.py 整文件复制，只换「机
 【标准版配方】固化在 config/s1.toml（三态 CLI > toml > s1_config.BUILTIN），
 等价 CLI 展开：--rounds 200 --execute-actions-per-chunk 0 --skip-frames
 --aggregate-fn weighted_average --cmd-every 1 --filter-alpha 0.1
---max-joint-delta-per-step 0.05 --burst-reserve-ms 0 --frames-per-row 8
---rows-per-cmd 2 --grip-path joint --grip-velocity 0.05 --grip-effort 10
+--max-joint-delta-per-step 0.05 --burst-reserve-ms 0 --frames-per-row 1
+--rows-per-cmd 1 --grip-path joint --grip-velocity 0.05 --grip-effort 10
 --fps 30
+（发令窗工作点 10-30 用户定案钉 R1×fr1【现役最简】：五角闭环——①单点
+tfs=0 响/③全零 tfs 响/②R2×fr8 静/④R1×fr2 静/⑤R1×fr1 单点 tfs=33.3ms
+静——时间轴存在性=唯一必要条件，窗内点数/窗长/合批全非自变量；fr2~8=
+样条弧线纹理备档、R2 攒批余量备档）
 （换块融合真机 A/B 定案 10-30：双层 crossfade 0.3旧/0.7新 + EMA【现役】胜
 latest_only 缝上单层 EMA——后者午间试跑用户判「没有之前的好」判退；缝上的
 旧流惯性项要留。E：--aggregate-fn latest_only 可复现单层口径对照）
@@ -201,12 +207,13 @@ ap.add_argument("--fps", type=int, default=None,
 ap.add_argument("--frames-per-row", type=int, default=None,
                 help="每行插值帧数：行目标样条插成 N 帧于 row-tick 内成一包"
                      "带时间轴批下发（S1 移植版批形态，见文件头④）。默认见 "
-                     "config（S1 现役 8=4.17ms 点距≈wbc_dt 4ms 采样周期；G1 "
-                     "traj 默认 1=逐帧单点直发——S1 ③定案 tfs=0 ASAP=卡卡，"
-                     "勿抄）")
+                     "config（S1 现役 1=单点直发但带 tfs=T 斜坡时间轴——"
+                     "10-30 五角定案时间轴存在性=唯一必要条件；fr2~8=样条"
+                     "弧线纹理备档。G1 traj 默认 1=tfs=0 单点流，S1 勿抄）")
 ap.add_argument("--rows-per-cmd", type=int, default=None,
                 help="跨行攒批行数 R（10-29 审查②）：R=1=每拍一包（行内 fr 帧，"
-                     "窗口 33.3ms）；R>1=攒 R 拍帧并一包 set_joint_commands_batch，"
+                     "窗口 33.3ms）【现役最简，10-30 定案】；R>1=攒 R 拍帧并一包 "
+                     "set_joint_commands_batch，"
                      "tfs=fdt·(i+1) 铺满 R×tick 窗（R2=66.7ms）、每 R 拍一发——"
                      "命令窗口与行周期解耦，与适配器执行器/回放台真机验证过的 "
                      "R×fr 形状同款。换块=半窗攒帧随旧块弃尾；星饿/收尾=先冲账")
