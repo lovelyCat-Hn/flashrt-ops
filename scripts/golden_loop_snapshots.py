@@ -119,20 +119,75 @@ def base_args(**kw):
     return types.SimpleNamespace(**d)
 
 
-def traj_namespace(func_names, args, **extra):
-    """从 S1 traj 脚本提取函数并装进带桩命名空间。返回 (ns, missing)。"""
-    srcs, missing = extract(S1_TRAJ, func_names)
-    if missing:
-        return None, missing
-    ns = {"np": np, "args": args, "ARM_NAMES": ARM14, "TICK": 1.0 / args.fps,
-          "BASE_ARM": None, "chunk": None, "_EMA_STATE": None,
-          "ENV_LO": None, "ENV_HI": None, "ENV_LO14": None, "ENV_HI14": None,
-          "GRIP": None, "_rp_q": [], "_rp_n": 0,
-          "TrajectoryPoint": _StubPoint, "JointCommand": _StubCmd,
-          "Trajectory": _StubTraj, "robot": _StubRobot(),
-          "create_interpolator": load_interp()}
+class _LiveNS(dict):
+    """部分键动态透传模块属性（common 路径的活状态）。
+
+    脚本提取路径里 exec 后的 ns 就是函数 globals——`global _EMA_STATE` 直写
+    ns，case 读 ns["_EMA_STATE"] 天然新鲜；common 路径活状态住在 FU 模块，
+    读键时透传 getattr 才等价。
+    """
+
+    def __init__(self, live):
+        super().__init__()
+        self._live = live   # {键: 模块}；读 ns[k] ≡ getattr(mod, k)
+
+    def __getitem__(self, k):
+        if k in self._live:
+            return getattr(self._live[k], k)
+        return super().__getitem__(k)
+
+
+def common_namespace(func_names, args, **extra):
+    """函数已搬进 common/（步2b-1 起脚本不再含 def）：import + 模块属性回填。
+
+    返回与 traj_namespace 等形的 ns；找不到映射的函数名返回 None。
+    """
+    from common.control import fusion as FU
+    from common.control import guards as GD
+    home = {"build_rows": FU, "build_block_stream": FU,
+            "chunk_abs_block": GD, "env_first_violation": GD}
+    try:
+        mods = {n: home[n] for n in func_names}
+    except KeyError:
+        return None
+    ns = _LiveNS({"_EMA_STATE": FU})
+    ns.update({"np": np, "args": args, "ARM_NAMES": ARM14,
+               "TICK": 1.0 / args.fps, "robot": _StubRobot(),
+               "_rp_q": [], "_rp_n": 0})
     ns.update(extra)
-    exec_into(ns, srcs)
+    for n, m in mods.items():
+        ns[n] = getattr(m, n)
+    FU.args = args
+    for k in ("chunk", "BASE_ARM", "INTERP", "GRIP", "GRIP_INTERP",
+              "ENV_LO", "ENV_LO14", "ENV_HI14"):
+        setattr(FU, k, extra.get(k))
+    FU._EMA_STATE = extra.get("_EMA_STATE")
+    GD.BASE_ARM = extra.get("BASE_ARM")
+    GD.ENV_LO = extra.get("ENV_LO")
+    GD.ENV_HI = extra.get("ENV_HI")
+    return ns
+
+
+def traj_namespace(func_names, args, **extra):
+    """双后端取名：脚本仍含 def=ast 提取（legacy 仓库态）；已搬 common/=import。
+
+    返回 (ns, missing)——两边都取不到才 missing 非空（case 丢失=FAIL）。
+    """
+    srcs, missing = extract(S1_TRAJ, func_names)
+    if not missing:
+        ns = {"np": np, "args": args, "ARM_NAMES": ARM14, "TICK": 1.0 / args.fps,
+              "BASE_ARM": None, "chunk": None, "_EMA_STATE": None,
+              "ENV_LO": None, "ENV_HI": None, "ENV_LO14": None, "ENV_HI14": None,
+              "GRIP": None, "_rp_q": [], "_rp_n": 0,
+              "TrajectoryPoint": _StubPoint, "JointCommand": _StubCmd,
+              "Trajectory": _StubTraj, "robot": _StubRobot(),
+              "create_interpolator": load_interp()}
+        ns.update(extra)
+        exec_into(ns, srcs)
+        return ns, []
+    ns = common_namespace(func_names, args, **extra)
+    if ns is None:
+        return None, missing
     return ns, []
 
 
@@ -421,6 +476,8 @@ def _sha(path):
 def capture(out):
     GOLDEN_DIR.mkdir(parents=True, exist_ok=True)
     sys.path.insert(0, str(INF))
+    if str(HOLY) not in sys.path:
+        sys.path.insert(1, str(HOLY))   # common/ 回退路径可达（2a 埋病此处补）
     cases = {}
     for cid in CASES:
         cases[cid] = run_case(cid)
@@ -468,6 +525,8 @@ def _eq(a, b, path=""):
 
 def check(golden):
     sys.path.insert(0, str(INF))
+    if str(HOLY) not in sys.path:
+        sys.path.insert(1, str(HOLY))   # common/ 回退路径可达（2a 埋病此处补）
     doc = json.loads(golden.read_text())
     base = doc["cases"]
     bad = 0
