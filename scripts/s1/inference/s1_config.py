@@ -40,7 +40,7 @@ BUILTIN = {
     "grip_effort": 10,        # 爪 effort（同事同款；pyi：爪维生效）
     # ── traj 标准配方键（S1 toml 未列时回落；值=G1 traj [lerobot] 定档）──
     "skip_frames": True,      # 换块跳帧安装（水位 0 的官配对，见 traj --help）
-    "aggregate_fn": "weighted_average",  # 换块融合 α=0.7 新（官方默认）
+    "aggregate_fn": "latest_only",  # 换块过渡=EMA 单层（10-30 用户定案）；weighted_average=混接 crossfade α新 0.7 的召回门
     "cmd_every": 1,           # 纯流式直发
     "grip_state_cmd": False,  # S1 判读：state 爪维喂实时回读（SDK 爪回读滞后
                               # 未测，真机首跑专项核查；G1 定档 true 不照抄）

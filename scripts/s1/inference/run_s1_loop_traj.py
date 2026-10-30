@@ -125,10 +125,13 @@ S1 直接用——本文件 = run_g1_loop_traj.py 整文件复制，只换「机
 
 【标准版配方】固化在 config/s1.toml（三态 CLI > toml > s1_config.BUILTIN），
 等价 CLI 展开：--rounds 200 --execute-actions-per-chunk 0 --skip-frames
---aggregate-fn weighted_average --cmd-every 1 --filter-alpha 0.1
+--aggregate-fn latest_only --cmd-every 1 --filter-alpha 0.1
 --max-joint-delta-per-step 0.05 --burst-reserve-ms 0 --frames-per-row 8
 --rows-per-cmd 2 --grip-path joint --grip-velocity 0.05 --grip-effort 10
 --fps 30
+（换块过渡=EMA 单层，10-30 用户定案：latest_only=新计划直通，缝平滑只留
+EMA 跨块连续〔α=filter_alpha，从 last_tgt 重播起链〕；混接 crossfade 退役
+为 A/B 项，--aggregate-fn weighted_average 或 --fusion-alpha 0.7 召回）
 （真机跑必带 --exec；10-29 首跑教训：S1 版无合成图路径，取图即真实相机，
 无 --live-frames 概念——相机冻结守卫 _FREEZE_STREAK 常开）
 
@@ -921,7 +924,7 @@ print(f"[loop-traj] tick {TICK * 1000:.1f} ms（{args.fps} Hz）| 轨迹流 "
       + (f" | 接缝助推α{args.seam_boost_alpha}→{args.ema_alpha}/{args.seam_boost_beats}拍"
          if args.seam_boost_alpha > 0 and args.ema_alpha > 0 else "")
       + (f" | 重叠混接 旧{1 - args.seam_overlap_alpha:g}/新{args.seam_overlap_alpha:g}"
-         if args.seam_overlap_alpha > 0 else "")
+         if 0 < args.seam_overlap_alpha < 1 else "")
       + (" | 偏移平移" if args.ref_offset else "")
       + (f" | RTC 引导 horizon {args.rtc_horizon}（max_w {args.rtc_max_w}）"
          if args.rtc_horizon > 0 else " | RTC 关")
@@ -2374,7 +2377,11 @@ while not aborted:
         seam_flush()
         # 重叠混接门与偏移（须在跳帧安装消费 _obs_k 前捕获）：偏移=取图→落地
         # 流逝拍数=跳帧安装的 skip 数，同一把墙钟对齐键（同事栈 timestep 语义）
-        _ovp = (args.seam_overlap_alpha > 0 and args.merge <= 1
+        # 门=开区间 0<α<1（10-30 用户定案「换块过渡=EMA 单层」：S1 在役
+        # aggregate_fn=latest_only（α=1.0=旧流 0 权重=恒等）——恒等混接免重建
+        # 帧免打印；缝平滑只留 EMA 跨块连续（α=filter_alpha，从 last_tgt 重播）。
+        # 召回 crossfade：--aggregate-fn weighted_average 或 --fusion-alpha 0.7
+        _ovp = (0 < args.seam_overlap_alpha < 1 and args.merge <= 1
                 and n_swapped > 1
                 and last_tgt is not None and _old_rows_abs is not None)
         # ⚠ merge 模式必须旁路：_ovp 块内按行网格 INTERP.interpolate 重建
