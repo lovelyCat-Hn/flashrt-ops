@@ -659,21 +659,7 @@ def _dump_chunk(chunk_arr, base_arm, idx, infer_ms_val):
              fps=np.int64(args.fps))
 
 
-class _Tee:
-    """stdout/stderr 双写：硬拷贝到日志文件（crash traceback 也收）。"""
-
-    def __init__(self, *streams):
-        self.streams = streams
-
-    def write(self, s):
-        for st in self.streams:
-            st.write(s)
-            st.flush()
-
-    def flush(self):
-        for st in self.streams:
-            st.flush()
-
+from common.loop.runtime import _Tee   # common 收编步2a（原文=旧内联版逐位一致）
 
 _log_fh = open(_log_path, "a", buffering=1, encoding="utf-8")
 sys.stdout = _Tee(sys.stdout, _log_fh)
@@ -944,92 +930,12 @@ print(f"[loop-traj] tick {TICK * 1000:.1f} ms（{args.fps} Hz）| 轨迹流 "
 NAV = None   # G1 版此处指向 NavSuspend 实例；S1 恒 None，各退出路径 None 守卫照旧
 
 
-class QuitWatcher:
-    """后台线程监听键盘 q：任何阶段即时退出（SDK 阻塞 C++ 调用吞 Ctrl-C）。"""
-
-    def __init__(self):
-        self.fd = sys.stdin.fileno()
-        self._old = None
-        self._wake_r = None
-        self.active = threading.Event()
-        if os.isatty(self.fd):
-            self._old = termios.tcgetattr(self.fd)
-            tty.setcbreak(self.fd)
-            atexit.register(self.restore)
-            r, w = os.pipe()                # 信号直通管道：C 层收信号即写字节，
-            os.set_blocking(w, False)       # 主线程卡死在 SDK C++ 调用也能退出
-            signal.set_wakeup_fd(w)
-            signal.signal(signal.SIGINT, lambda *_: None)     # 退出走管道，别靠
-            signal.signal(signal.SIGTERM, lambda *_: None)    # 会被推迟的异常
-            self._wake_r = r
-            self.active.set()
-            threading.Thread(target=self._loop, daemon=True).start()
-            print("（循环期间随时按 q 或 Ctrl-C 退出；确认提示符处用回车；急停第一优先级）")
-
-    def restore(self):
-        if self._old is not None:
-            try:
-                termios.tcsetattr(self.fd, termios.TCSADRAIN, self._old)
-            except Exception:
-                pass
-            self._old = None
-
-    def pause(self):
-        self.active.clear()
-
-    def resume(self):
-        self.active.set()
-
-    def _loop(self):
-        while True:
-            try:
-                fds = [self._wake_r] if self._wake_r is not None else []
-                if self.active.is_set():
-                    fds.append(sys.stdin)
-                if not fds or not select.select(fds, [], [], 0.2)[0]:
-                    continue
-                if (self._wake_r is not None
-                        and select.select([self._wake_r], [], [], 0)[0]):
-                    os.read(self._wake_r, 1)
-                    print("\n⛔ 收到中断信号 —— 立即退出"
-                          "（已下发目标可能仍在限速执行）")
-                    self.restore()
-                    if NAV is not None:
-                        NAV.resume()
-                    os._exit(130)
-                if sys.stdin.read(1) in ("q", "Q"):
-                    print("\n⛔ 按下 q —— 立即退出（已下发目标可能仍在限速执行）")
-                    self.restore()
-                    if NAV is not None:
-                        NAV.resume()
-                    os._exit(2)
-            except Exception:
-                self.restore()
-                if NAV is not None:
-                    NAV.resume()
-                os._exit(3)   # 监听线程死了比静默更危险：宁可误退不可失控
-
+import common.loop.runtime as RT   # common 收编步2a：QuitWatcher/_fatal_hook/NAV 回填
+from common.loop.runtime import QuitWatcher, _fatal_hook
 
 WATCH = QuitWatcher()
-
-
-def _fatal_hook(t, v, tb):
-    """任何未捕获异常：关 SDK + 还原终端 + 硬退。
-
-    裸退会让 SDK 残留线程在解释器关闭时段错误（fleet 已知坑）。
-    """
-    print(f"\n⛔ 异常退出: {t.__name__}: {v}")
-    rob = globals().get("robot")
-    if rob is not None:
-        try:
-            rob.request_shutdown(); rob.wait_for_shutdown(); rob.destroy()
-        except Exception:
-            pass
-    WATCH.restore()
-    if NAV is not None:
-        NAV.resume()
-    os._exit(1)
-
+RT.WATCH = WATCH
+RT.NAV = NAV   # S1 恒 None（G1=NavSuspend 实例；runtime 各退出路径 None 守卫照旧）
 
 sys.excepthook = _fatal_hook
 
@@ -1310,54 +1216,14 @@ _LAST_FRAMES = {}     # 相机冻结守卫：逐轮像素级对比（2026-09-24 
 _FREEZE_STREAK = {}
 
 
-def letterbox224(img):
-    """等比缩放长边到 224 + 上下纯黑条填充——精确复现训练数据集的图像变换。
-
-    2026-10-12 实锤（本机 pick_place_balence 抽帧判读）：三视角训练帧全部为
-    letterbox——224×224、上下各 28px 纯黑条、内容带 168px=224×960/1280（源帧
-    1280×960 等比缩放，非拉伸非裁剪）。此前 grab_views 直拉 resize 满幅无条
-    = train/serve 图像分布失配（10-10 视觉-臂接地微弱的第一嫌疑，推翻当日
-    "喂图净"结论——该验证未覆盖预处理变换维度）。
-    """
-    h, w = img.shape[:2]
-    _s = 224.0 / max(h, w)
-    _nh, _nw = round(h * _s), round(w * _s)
-    _cv = np.zeros((224, 224, 3), dtype=np.uint8)
-    _y, _x = (224 - _nh) // 2, (224 - _nw) // 2
-    _cv[_y:_y + _nh, _x:_x + _nw] = cv2.resize(img, (_nw, _nh))
-    return _cv
-
-
-# ── 头图训练裁剪放大（--head-crop，2026-10-19 trained-RTC 权重试跑）────────
-# 复现同事数据管线对头相机的处理：/home/galbot/image_preprocessor.py
-# ImagePreprocessor._apply_head_training_crop 原样内联（其顶层 import
-# emulate_data_collection 在 /home/galbot/infer_policy/，跨目录 import 脆弱，
-# 故不 import 只内联，常量逐一对齐源文件；与 ab_test/1015 B 线内联逐位一致）。
-# 训练视频头图 = letterbox224 帧上裁 [126:214, 52:172] → Lanczos4 拉回
-# 164×224（≈1.87× 放大）→ 上下各补 30px 黑条回 224。仅作用头相机键 "image"
-# （双腕图训练无此处理）；裁剪/缩放/补边均为逐通道空间算子，BGR/RGB 通道序无关。
-HEAD_TRAINING_CROP_YX = (126, 214, 52, 172)   # y0, y1, x0, x1（224×224 输入上）
-HEAD_TRAINING_CONTENT_HW = (164, 224)         # 裁剪内容拉回的目标 (H, W)
-HEAD_TRAINING_PAD_TBLR = (30, 30, 0, 0)       # 上/下/左/右黑边 px
-
-
-def head_training_crop(img):
-    """letterbox224 后的头图 → 训练同款裁剪放大回 224×224。"""
-    if img.ndim != 3 or img.shape[:2] != (224, 224):
-        raise ValueError(f"head_training_crop 期望 224x224 HWC 输入，"
-                         f"got shape={img.shape}")
-    y0, y1, x0, x1 = HEAD_TRAINING_CROP_YX
-    if not (0 <= y0 < y1 <= img.shape[0] and 0 <= x0 < x1 <= img.shape[1]):
-        raise ValueError(f"head_training_crop 窗口 [{y0}:{y1}, {x0}:{x1}] 越界")
-    ch, cw = HEAD_TRAINING_CONTENT_HW
-    content = cv2.resize(img[y0:y1, x0:x1], (cw, ch),
-                         interpolation=cv2.INTER_LANCZOS4)
-    pt, pb, pl, pr = HEAD_TRAINING_PAD_TBLR
-    out = cv2.copyMakeBorder(content, pt, pb, pl, pr,
-                             cv2.BORDER_CONSTANT, value=(0, 0, 0))
-    if out.shape[:2] != (224, 224):
-        raise ValueError(f"head_training_crop 输出形状异常: {out.shape[:2]}")
-    return out
+# ── 帧口径纯件已收编 common/bodies/vision.py（步2a，原文逐位一致）──
+from common.bodies.vision import (  # noqa: E402
+    HEAD_TRAINING_CONTENT_HW,
+    HEAD_TRAINING_CROP_YX,
+    HEAD_TRAINING_PAD_TBLR,
+    head_training_crop,
+    letterbox224,
+)
 
 
 def grab_views(robot) -> dict:
@@ -1387,39 +1253,8 @@ def grab_views(robot) -> dict:
     return out
 
 
-class LatencyTracker:
-    """时延样本收集器。结构参照 lerobot policies/rtc/latency_tracker.py
-    （Apache-2.0），两处有意偏离（docs/lerobot-alignment.md §七）：
-    maxlen 无界（lerobot 默认 100 会截断 200 轮跑的统计窗口）、保持 float64
-    （lerobot 的 float32 cast 可能让 .1f 打印差 0.1ms——本类与旧
-    np.percentile 路径逐字节等价：np.quantile(x, 0.95)≡np.percentile(x, 95)）。"""
-
-    def __init__(self):
-        self._buf = deque()   # 无界；perf_counter 差恒正，负值丢弃只是护栏
-
-    def add(self, value_ms):
-        if value_ms >= 0.0:
-            self._buf.append(value_ms)
-
-    def __len__(self):
-        return len(self._buf)
-
-    def max(self):
-        return max(self._buf) if self._buf else float("nan")
-
-    def percentile(self, q):
-        if not self._buf:
-            return float("nan")
-        return float(np.quantile(np.asarray(self._buf), q))
-
-    def p95(self):
-        return self.percentile(0.95)
-
-
-def pstats(tr):
-    """p50/p95/max 毫秒，一行（tr: LatencyTracker）。"""
-    return (f"p50 {tr.percentile(0.5):.1f} | p95 {tr.percentile(0.95):.1f} | "
-            f"max {tr.max():.1f} ms")
+# ── 遥测件已收编 common/loop/telemetry.py（步2a，原文逐位一致）──
+from common.loop.telemetry import LatencyTracker, pstats  # noqa: E402
 
 
 def chunk_abs_block(chunk):
@@ -1770,6 +1605,7 @@ def send_grip_joint(robot, chunk_row, tfs_s, frame=None):
 # ── ① SDK 初始化 + 模型 ──
 print("== ① SDK 初始化（确认急停可及！）==")
 robot = GalbotRobot()
+RT.robot = robot   # _fatal_hook 的 SDK 优雅三连用（common/loop/runtime）
 sensors = {getattr(SensorType, c) for c in list(CAM_MAP.values())[:VIEWS]}
 if not robot.init(sensors):
     raise SystemExit("robot.init 失败")

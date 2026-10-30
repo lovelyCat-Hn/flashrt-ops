@@ -261,7 +261,7 @@ def run_case(cid):
                 "q_left": len(ns["_rp_q"]), "rp_n_left": ns["_rp_n"],
                 "vel0": sent[0]["points"][0]["vel"] if sent else None}
 
-    # 图像件
+    # 图像件（步2a 起住 common/bodies/vision；仍回退脚本提取以兼容未迁移仓库态）
     if cid in ("img/letterbox224", "img/head_crop"):
         try:
             import cv2
@@ -271,10 +271,21 @@ def run_case(cid):
         img = rng.integers(0, 255, (480, 640, 3), dtype=np.uint8)
         which = "letterbox224" if cid == "img/letterbox224" \
             else "head_training_crop"
-        ns, _ = traj_namespace(["letterbox224", which], base_args(), cv2=cv2,
-                               HEAD_TRAINING_CROP_YX=(126, 214, 52, 172),
-                               HEAD_TRAINING_CONTENT_HW=(164, 224),
-                               HEAD_TRAINING_PAD_TBLR=(30, 30, 0, 0))
+        srcs, missing = extract(S1_TRAJ, ["letterbox224", which])
+        if len(srcs) == 2:
+            ns = {"np": np, "cv2": cv2,
+                  "HEAD_TRAINING_CROP_YX": (126, 214, 52, 172),
+                  "HEAD_TRAINING_CONTENT_HW": (164, 224),
+                  "HEAD_TRAINING_PAD_TBLR": (30, 30, 0, 0)}
+            exec_into(ns, srcs)
+        else:
+            from common.bodies import vision as V
+            ns = {"np": np, "cv2": cv2,
+                  "letterbox224": V.letterbox224,
+                  "head_training_crop": V.head_training_crop,
+                  "HEAD_TRAINING_CROP_YX": V.HEAD_TRAINING_CROP_YX,
+                  "HEAD_TRAINING_CONTENT_HW": V.HEAD_TRAINING_CONTENT_HW,
+                  "HEAD_TRAINING_PAD_TBLR": V.HEAD_TRAINING_PAD_TBLR}
         if cid == "img/head_crop":
             img = ns["letterbox224"](img)   # crop 期望 224² letterbox 输出
         out = ns[which](img)
@@ -292,11 +303,16 @@ def run_case(cid):
         viol = ns["env_first_violation"](absb)
         return {"abs_head": _j(absb[0]), "viol": _j(viol)}
 
-    # 遥测
+    # 遥测（步2a 起住 common/loop/telemetry；回退脚本提取兼容未迁移仓库态）
     if cid == "tele/pstats":
-        from collections import deque
-        ns, _ = traj_namespace(["LatencyTracker", "pstats"], base_args(),
-                               deque=deque)
+        srcs, _missing = extract(S1_TRAJ, ["LatencyTracker", "pstats"])
+        if len(srcs) == 2:
+            from collections import deque
+            ns = {"np": np, "deque": deque}
+            exec_into(ns, srcs)
+        else:
+            from common.loop import telemetry as T
+            ns = {"LatencyTracker": T.LatencyTracker, "pstats": T.pstats}
         tr = ns["LatencyTracker"]()
         for v in (10.0, 12.0, 11.5, 40.0, 9.0, 13.0, 12.5, 11.0):
             tr.add(v)
