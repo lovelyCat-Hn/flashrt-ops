@@ -14,10 +14,9 @@
   SDK 双线程并发待真机确认）；②--rows-per-cmd R 跨行攒批（R2×fr8=66.7ms
   窗×16 点，换块弃半窗/星饿冲账）；③fr 12→8（4.17ms≈wbc_dt 4ms 采样周期）；
   ④--cmd-every>1 S1 硬拦（WBC 直视计划断点，跨行平滑走 ②）。
-  **10-30 换块过渡=EMA 单层**（用户定案「把换块那个也改成我们的 ema」）：
-  aggregate_fn=latest_only（新计划直通），重叠混接 crossfade（0.3old/0.7new，
-  同事栈 aggregation）退役为 A/B 项——缝平滑只留 EMA 跨块连续
-  （α=filter_alpha，换块从 last_tgt 重播起链），一个旋钮一个机制。
+  **10-30 换块融合 A/B 定案=双层胜单层**：weighted_average crossfade
+  （0.3old/0.7new）+ EMA【现役】；latest_only（缝只留 EMA 单层，午间试跑）
+  真机用户判「没有之前的好」判退——缝上的旧流惯性项要留。
   配置=同目录 `s1_config.py` 读 `config/s1.toml`（CLI > toml > BUILTIN 三态）。
 - **`run_s1_loop.py` = 适配器版**：policy 解耦多policy 入口（fineart 线用），
   回放台/冒烟仍 import 它（`rsl`）。与新主线并行为 A/B 备胎，日常闭环走

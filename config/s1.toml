@@ -38,11 +38,10 @@ grip_chg = 2.0                           # 仅 cmd 逃生门消费（joint 路�
 
 # ── traj 标准配方键（G1 [lerobot] 定档；run_s1_loop.py 不消费，忽略即可）──
 skip_frames = true                       # 换块跳帧安装（水位 0 的官配对）
-# 换块过渡=EMA 单层（用户定案 10-30「把换块那个也改成我们的 ema」）：
-# latest_only=α新 1.0=新计划直通（混接 crossfade 退役）——缝平滑只留 EMA
-# 跨块连续（α=filter_alpha 0.1，从 last_tgt 重播起链），一个旋钮一个机制。
-# 召回同事栈 crossfade：--aggregate-fn weighted_average（α新 0.7）
-aggregate_fn = "latest_only"
+# 换块融合（真机 A/B 定案 10-30）：weighted_average=混接 crossfade 0.3旧/0.7新
+# + EMA 双层【现役】——latest_only（缝只留 EMA 单层，10-30 午间试过）真机用户
+# 判「没有之前的好」，判退；双层胜单层，缝上的旧流惯性项要留
+aggregate_fn = "weighted_average"
 cmd_every = 1                            # 纯流式直发
 burst_reserve_ms = 0.0
 cache_frames = 1                         # 2 已判死（G1 9/30 实录）

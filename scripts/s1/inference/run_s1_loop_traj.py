@@ -125,13 +125,13 @@ S1 直接用——本文件 = run_g1_loop_traj.py 整文件复制，只换「机
 
 【标准版配方】固化在 config/s1.toml（三态 CLI > toml > s1_config.BUILTIN），
 等价 CLI 展开：--rounds 200 --execute-actions-per-chunk 0 --skip-frames
---aggregate-fn latest_only --cmd-every 1 --filter-alpha 0.1
+--aggregate-fn weighted_average --cmd-every 1 --filter-alpha 0.1
 --max-joint-delta-per-step 0.05 --burst-reserve-ms 0 --frames-per-row 8
 --rows-per-cmd 2 --grip-path joint --grip-velocity 0.05 --grip-effort 10
 --fps 30
-（换块过渡=EMA 单层，10-30 用户定案：latest_only=新计划直通，缝平滑只留
-EMA 跨块连续〔α=filter_alpha，从 last_tgt 重播起链〕；混接 crossfade 退役
-为 A/B 项，--aggregate-fn weighted_average 或 --fusion-alpha 0.7 召回）
+（换块融合真机 A/B 定案 10-30：双层 crossfade 0.3旧/0.7新 + EMA【现役】胜
+latest_only 缝上单层 EMA——后者午间试跑用户判「没有之前的好」判退；缝上的
+旧流惯性项要留。E：--aggregate-fn latest_only 可复现单层口径对照）
 （真机跑必带 --exec；10-29 首跑教训：S1 版无合成图路径，取图即真实相机，
 无 --live-frames 概念——相机冻结守卫 _FREEZE_STREAK 常开）
 
