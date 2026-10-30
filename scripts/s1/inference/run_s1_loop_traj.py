@@ -2785,7 +2785,9 @@ while not aborted:
                   f" | 残差 {err:4.1f} mrad"
                   + (f" | 合步[{tgi}]×{_grp_n}" if _is_merged else "")
                   + _bw_s
-                  + f" | {gp if gp else st}")
+                  + f" | {gp if gp else st}"
+                  + (f" 〈攒批 {_rp_n}/{args.rows_per_cmd}〉"
+                     if args.do_exec and 0 < _rp_n < args.rows_per_cmd else ""))
 
     # ── 出口：最后一块消费到水位（或包络截短后耗尽）──
     _w = min(WMARK, len(chunk))
