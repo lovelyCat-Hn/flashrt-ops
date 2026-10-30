@@ -1,5 +1,9 @@
 """G1 运行脚本共享配置：config/g1.toml，优先级 CLI 显式 > config > 内置默认。
 
+通用机制已收编 common/config/chain.py（common 整理步1，2026-10-30）——
+本文件只剩 G1 政策件：BUILTIN 档案镜像、各节键名正规化表（改名硬报错/
+未认键告警）、mapping 的 (小节, 键) 二元组形态与 include 继承的接线。
+
 约定（四个 run/warmup 脚本统一遵守）：
   - config 支持的 add_argument 一律 default=None（store_true 同样 default=None，
     未传时 argparse 给 None 而非 False），随后 apply() 按三态解析回填。
@@ -8,7 +12,13 @@
   - 布尔想显式关：脚本提供 --no-grip 这类覆盖旗标（config 写 false 也行）。
 """
 import pathlib
-import tomllib
+import sys
+
+_HOLY_ROOT = str(pathlib.Path(__file__).resolve().parents[3])
+if _HOLY_ROOT not in sys.path:
+    sys.path.append(_HOLY_ROOT)   # 尾部追加：勿遮蔽脚本目录同名包（holy/policies 前科 10-30）
+
+from common.config import chain  # noqa: E402
 
 DEFAULT_PATH = "/home/galbot/holy/config/g1.toml"
 
@@ -159,43 +169,18 @@ _RENAMED_LEROBOT_KEYS = {
 }
 
 
-def _load_toml_resolved(p):
-    """读 toml 并递归解析 include 继承（机型文件覆盖 base 同名键，按节深合并）。
-
-    include 相对当前文件目录解析；基座文件缺失 = 硬报错（红线/语义默认静默
-    丢失不可接受，同旧键硬报错哲学）。机型文件未写 include = 无继承、原样读。
-    """
-    with open(p, "rb") as f:
-        data = tomllib.load(f)
-    include = data.pop("include", None)
-    if include:
-        base_p = (p.parent / include).resolve()
-        if not base_p.exists():
-            raise FileNotFoundError(
-                f"[config] {p} include 的基座文件不存在: {base_p}"
-                f"——继承链断了（cache_frames/tier 等红线会静默丢失），先补文件")
-        merged = _load_toml_resolved(base_p)
-        for key, val in data.items():
-            if isinstance(val, dict) and isinstance(merged.get(key), dict):
-                merged[key] = {**merged[key], **val}
-            else:
-                merged[key] = val
-        data = merged
-    return data
-
-
 def load(path=DEFAULT_PATH):
     """读 toml；文件缺失返回 {}（apply 逐键回落 BUILTIN）。
 
-    文件头 `include = "base.toml"` 触发继承（见 _load_toml_resolved）：
+    文件头 `include = "base.toml"` 触发继承（common chain.load_toml_resolved）：
     优先级 CLI > 机型文件 > base.toml > BUILTIN。
-    [loop] 内旧键名（steps_per_round/steps_per_cmd）命中即 SystemExit 并提示
-    新键名；未认键打印告警（tomllib 本身静默忽略未知键，见 config/README §7）。
+    [loop]/[lerobot] 旧键名命中即 SystemExit 并提示新键名；未认键打印告警
+    （tomllib 本身静默忽略未知键，见 config/README §7）。
     """
     p = pathlib.Path(path)
     if not p.exists():
         return {}, p
-    data = _load_toml_resolved(p)
+    data = chain.load_toml_resolved(p)
     loop = data.get("loop")
     if isinstance(loop, dict):
         for old, new in _RENAMED_LOOP_KEYS.items():
@@ -226,25 +211,11 @@ def load(path=DEFAULT_PATH):
 def apply(args, mapping, path=DEFAULT_PATH):
     """按 mapping 把 config 值回填进 args 中 CLI 未显式指定的项。
 
-    mapping: {args 的 dest: (toml 小节, 键)}。
+    mapping: {args 的 dest: (toml 小节, 键)}。通用机制见
+    common/config/chain.py；G1 小节档带 include 继承（loader 注入）。
     返回从 config 文件实际覆盖的 (dest, 值) 列表（内置默认兜底的不算）。
     [loop] 旧键名在 load() 即硬报错（防静默回落），见 _RENAMED_LOOP_KEYS。
     """
-    cfg, p = load(path)
-    from_file = []
-    for dest, (sec, key) in mapping.items():
-        if getattr(args, dest) is not None:
-            continue                          # CLI 显式传参，最高优先级
-        val = cfg.get(sec, {}).get(key, BUILTIN.get(sec, {}).get(key))
-        if val is None:
-            raise SystemExit(f"[config] {dest} 无 CLI 值、config 无该项、内置默认缺失")
-        setattr(args, dest, val)
-        if p.exists() and key in cfg.get(sec, {}):
-            from_file.append((dest, val))
-    if p.exists():
-        cover = ", ".join(f"{d}={v!r}" if not isinstance(v, str) or len(v) < 40
-                          else d for d, v in from_file)
-        print(f"[config] {p}（优先级 CLI>config>内置）覆盖: {cover or '无，全内置默认'}")
-    else:
-        print(f"[config] {path} 不存在，全内置默认（--config 可指定别处）")
-    return from_file
+    load(path)   # 改名键硬报错/未认键告警（政策件；缺失文件在此 no-op）
+    return chain.apply(args, mapping, path, BUILTIN,
+                       loader=chain.load_toml_resolved)

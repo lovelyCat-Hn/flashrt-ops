@@ -1,10 +1,10 @@
 """S1 运行脚本共享配置：config/s1.toml，优先级 CLI 显式 > config > 内置默认。
 
 结构与 scripts/g1/inference/g1_config.py 同构（apply 三态回填/未认键告警/
-旧键硬报错），差异只有两处：
+旧键硬报错），通用机制已收编 common/config/chain.py（common 整理步1，
+2026-10-30）——本文件只剩 S1 政策件：
   - S1 档为【扁平顶层键 = CLI dest 名】（config/s1.toml 即此形态，
-    run_s1_loop.py 内联预扫描同读这份文件），mapping 值是键名字符串
-    而非 (小节, 键) 二元组。
+    run_s1_loop.py 内联预扫描同读这份文件），mapping 值是键名字符串。
   - BUILTIN 是 config/s1.toml 的镜像兜底 + traj 标准配方键（S1 toml
     未列的键回落 G1 traj [lerobot] 定档值，见各键注释）。
 
@@ -14,7 +14,14 @@
   - 布尔想显式关：--no-X 反关旗标（config 写 false 也行）。
 """
 import pathlib
+import sys
 import tomllib
+
+_HOLY_ROOT = str(pathlib.Path(__file__).resolve().parents[3])
+if _HOLY_ROOT not in sys.path:
+    sys.path.append(_HOLY_ROOT)   # 尾部追加：勿遮蔽脚本目录同名包（holy/policies 前科 10-30）
+
+from common.config import chain  # noqa: E402
 
 DEFAULT_PATH = "/home/galbot/holy/config/s1.toml"
 
@@ -93,24 +100,9 @@ def load(path=DEFAULT_PATH):
 def apply(args, mapping, path=DEFAULT_PATH):
     """按 mapping 把 config 值回填进 args 中 CLI 未显式指定的项。
 
-    mapping: {args 的 dest: toml 顶层键}（扁平档；G1 版是 (小节, 键) 元组）。
+    mapping: {args 的 dest: toml 顶层键}（扁平档）。通用机制见
+    common/config/chain.py；S1 扁平档无 include 继承（裸 tomllib 原语义）。
     返回从 config 文件实际覆盖的 (dest, 值) 列表（内置默认兜底的不算）。
     """
-    cfg, p = load(path)
-    from_file = []
-    for dest, key in mapping.items():
-        if getattr(args, dest, None) is not None:
-            continue                          # CLI 显式传参，最高优先级
-        val = cfg.get(key, BUILTIN.get(key))
-        if val is None:
-            raise SystemExit(f"[config] {dest} 无 CLI 值、config 无该项、内置默认缺失")
-        setattr(args, dest, val)
-        if p.exists() and key in cfg:
-            from_file.append((dest, val))
-    if p.exists():
-        cover = ", ".join(f"{d}={v!r}" if not isinstance(v, str) or len(v) < 40
-                          else d for d, v in from_file)
-        print(f"[config] {p}（优先级 CLI>config>内置）覆盖: {cover or '无，全内置默认'}")
-    else:
-        print(f"[config] {path} 不存在，全内置默认（--config 可指定别处）")
-    return from_file
+    load(path)   # 改名键硬报错/未认键告警（政策件；缺失文件在此 no-op）
+    return chain.apply(args, mapping, path, BUILTIN)
