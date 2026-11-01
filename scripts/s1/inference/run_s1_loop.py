@@ -170,6 +170,23 @@ if _cfg_path:
         import tomllib
         _cfg = tomllib.loads(pathlib.Path(_cfg_path).read_text())
         _known = {a.dest for a in AP._actions}
+        # 任务语义键（ckpt/prompt）只在本档 policy 与所选适配器一致时采纳：
+        # s1.toml 是 pi05 档（ckpt=S1 权重/prompt=test），fineart 线不吃——
+        # 10-29 起两族权重形状/语义分家，喂错=load 形状炸（fineart_vla.py:51
+        # 14 vs 27 维实录）；机械键（rounds/ctrl_hz/grip…）照常共享。
+        _sel = None
+        for _i, _a in enumerate(sys.argv):
+            if _a == "--policy" and _i + 1 < len(sys.argv):
+                _sel = sys.argv[_i + 1]
+                break
+            if _a.startswith("--policy="):
+                _sel = _a.split("=", 1)[1]
+                break
+        if _sel is None:
+            _sel = AP.get_default("policy")
+        _tp = _cfg.get("policy")
+        if _tp and _sel != _tp:
+            _known -= {"ckpt", "prompt"}
         AP.set_defaults(**{k: v for k, v in _cfg.items() if k in _known})
 args = AP.parse_args()
 
