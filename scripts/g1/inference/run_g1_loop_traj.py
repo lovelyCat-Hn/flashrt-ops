@@ -92,6 +92,20 @@ RTC：--execution-horizon N > 0 时启用推理侧前缀引导（同 native，Fl
       [--rounds 60] [--execution-horizon 10]
   # 240Hz 微流（--frames-per-row 8）已于 10-10 退役，默认 1=纯 30Hz 直发
 """
+# ── holy 根引导（步2c ④：common 包 import 用；脚本目录恒 sys.path[0]）──
+# policies 同名包在 S1 侧（scripts/s1/inference，含 base.py；holy 根下的
+# policies 无 base）——须先于 holy 根命中，故先 append 之。
+import pathlib as _pathlib
+import sys as _sys
+_HOLY_ROOT = str(_pathlib.Path(__file__).resolve().parents[3])
+_S1_INF = _HOLY_ROOT + "/scripts/s1/inference"
+if _S1_INF not in _sys.path:
+    _sys.path.append(_S1_INF)
+if _HOLY_ROOT not in _sys.path:
+    _sys.path.append(_HOLY_ROOT)
+del _pathlib, _sys, _HOLY_ROOT, _S1_INF
+
+
 import argparse
 import atexit
 from collections import deque
@@ -549,53 +563,15 @@ if args.dump_frames:
 _frame_seq = 0
 
 
-def _dump_frames(obs):
-    """三路模型输入图落盘（letterbox224 后 RGB）。在推理 worker 里调，
-    done.set() 之后写=不推迟结果交接、不进 dur_ms；写失败静默（诊断用不阻塞）。"""
-    global _frame_seq
-    _frame_seq += 1
-    for k, im in obs.items():
-        try:
-            cv2.imwrite(str(_frames_dir / f"{_frame_seq:04d}_{k}.png"),
-                        cv2.cvtColor(im, cv2.COLOR_RGB2BGR))
-        except Exception:
-            pass
+# ── 逐推理帧/chunk 落盘已收编 common/loop/traj_engine.py（步2c，_dump_frames/
+#    _dump_chunk 原文随引擎走；目录计算在上方，实例经 TE._frames_dir/_dump_dir
+#    回填）──
 
 
-def _dump_chunk(chunk_arr, base_arm, idx, infer_ms_val):
-    """原始模型输出落盘（包络截断前）：chunk(50,16)+BASE_ARM(14)+元数据。"""
-    if _dump_dir is None:
-        return
-    # 任务指纹（每目录一次）：npz 里没有 ckpt 信息，离线回放台按它配对同任务
-    # 包络盒（pick/place 盒高度重叠，轨迹反推判别力为零——2026-10-12 实测）
-    _meta = _dump_dir / "task.json"
-    if not _meta.exists():
-        _meta.write_text(json.dumps(
-            {"ckpt": str(CKPT), "prompt": args.prompt,
-             "envelope": str(_env_file) if _env_file.exists() else None,
-             "delta_max": args.delta_max, "fps": args.fps},
-            ensure_ascii=False, indent=1), encoding="utf-8")
-    np.savez(str(_dump_dir / f"chunk_{idx:03d}.npz"),
-             chunk=np.asarray(chunk_arr, dtype=np.float32),
-             base_arm=np.asarray(base_arm, dtype=np.float32),
-             block=idx, infer_ms=np.float64(infer_ms_val),
-             fps=np.int64(args.fps))
+
+from common.loop.runtime import _Tee   # common 收编步2a（原文=旧内联版逐位一致）
 
 
-class _Tee:
-    """stdout/stderr 双写：硬拷贝到日志文件（crash traceback 也收）。"""
-
-    def __init__(self, *streams):
-        self.streams = streams
-
-    def write(self, s):
-        for st in self.streams:
-            st.write(s)
-            st.flush()
-
-    def flush(self):
-        for st in self.streams:
-            st.flush()
 
 
 _log_fh = open(_log_path, "a", buffering=1, encoding="utf-8")
@@ -844,191 +820,24 @@ print(f"[loop-traj] tick {TICK * 1000:.1f} ms（{args.fps} Hz）| 轨迹流 "
       + (f" | 帧到达时限 {args.tfs_ms:g} ms" if args.tfs_ms > 0 else ""))
 
 
-# ── 导航栈 SIGSTOP 搁置（--nav-suspend 开启，默认关）──
-# 机制：kill -STOP 进程原地冻结——无 exit 事件，launcher 的退出拉起逻辑不触发
-# （2026-10-07 vtn 8s 探针实证：冻结期 launcher 日志零增量、兄弟全活），
-# CONT 原地复活，不重初始化不重载图。约束：只用于「臂上任务+底盘不动」窗口。
-# 恢复多重保险：① 各退出路径显式 resume（q/Ctrl-C/异常/正常完成）；
-# ② 独立守护进程盯父进程，父进程任何死法（含 kill -9/段错误）即 CONT 全部。
-NAV_SUSPEND_NAMES = (
-    "localization_server", "galbot_fusion_main", "service_navigation_plan",
-    "galbot_vtn", "surround_cameras_capture", "swallows", "service_lidar_capture",
-)
-_NAV_GUARD_SRC = """
-import os, sys, time, signal
-signal.signal(signal.SIGINT, signal.SIG_IGN)
-signal.signal(signal.SIGTERM, signal.SIG_IGN)
-ppid = os.getppid()
-pids = [int(x) for x in sys.argv[1].split(',') if x]
-while True:                      # 父进程（本脚本）消失才往下走
-    time.sleep(0.3)
-    try:
-        os.kill(ppid, 0)
-    except OSError:
-        break
-for p in pids:
-    try:
-        os.kill(p, signal.SIGCONT)   # 最后一道网：主进程任何死法都恢复导航栈
-    except OSError:
-        pass
-"""
+# ── 导航栈 SIGSTOP 搁置已收编 common/bodies/g1.py（步2c，NavSuspend 原文
+#    逐位一致；入口经下方 bodies.g1 import 取用）──
 
 
-class NavSuspend:
-    """导航栈搁置器：只停 NAV_SUSPEND_NAMES 内、且当前不在冻结态的进程。
-
-    只认领自己 STOP 的 pid（resume 时只 CONT 这些），对别人冻结的进程不碰。
-    """
-
-    def __init__(self):
-        self.stopped = {}                     # pid -> name
-        self._guard = None
-
-    def _find_pids(self):
-        found = {}
-        for pid in os.listdir("/proc"):
-            if not pid.isdigit():
-                continue
-            try:
-                with open(f"/proc/{pid}/cmdline", "rb") as f:
-                    arg0 = f.read().split(b"\x00")[0].decode("utf-8", "replace")
-            except OSError:
-                continue
-            base = os.path.basename(arg0)
-            if base in NAV_SUSPEND_NAMES:
-                found[int(pid)] = base
-        return found
-
-    def suspend(self):
-        cands = self._find_pids()
-        missing = [n for n in NAV_SUSPEND_NAMES if n not in cands.values()]
-        if missing:
-            print(f"[nav-suspend] ⚠ 未找到（跳过）: {missing}")
-        # 守护网先起（继承 pid 表），再下发 STOP——任何死法都有人收尾
-        self._guard = subprocess.Popen(
-            [sys.executable, "-c", _NAV_GUARD_SRC,
-             ",".join(str(p) for p in sorted(cands))],
-            start_new_session=True,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        for pid, name in sorted(cands.items()):
-            try:
-                with open(f"/proc/{pid}/stat") as f:
-                    if f.read().split()[2] == "T":   # 已冻结（非我们所停）：不碰
-                        continue
-            except (OSError, IndexError):
-                continue
-            try:
-                os.kill(pid, signal.SIGSTOP)
-                self.stopped[pid] = name
-            except OSError as e:
-                print(f"[nav-suspend] ⚠ STOP {name}({pid}) 失败: {e}")
-        print(f"[nav-suspend] 已冻结 {len(self.stopped)} 进程: "
-              + ", ".join(f"{n}({p})" for p, n in sorted(self.stopped.items()))
-              + f" | 守护网 pid={self._guard.pid}")
-        print("[nav-suspend] ⚠ 冻结期底盘勿动（localization 位姿停更）；"
-              "相机 capture 不在冻结集，取图不受影响")
-
-    def resume(self):
-        if not self.stopped:
-            return
-        for pid in sorted(self.stopped):
-            try:
-                os.kill(pid, signal.SIGCONT)
-            except OSError:
-                pass
-        print(f"[nav-suspend] 已恢复 {len(self.stopped)} 进程"
-              "（CONT 幂等；守护网发现主进程退出后自退）")
-        self.stopped.clear()
 
 
 NAV = None   # suspend 后指向 NavSuspend 实例；各退出路径 None 守卫调用 resume
+RT.NAV = NAV   # 退出路径导航恢复用（None 守卫照旧）
 
 
-class QuitWatcher:
-    """后台线程监听键盘 q：任何阶段即时退出（SDK 阻塞 C++ 调用吞 Ctrl-C）。"""
-
-    def __init__(self):
-        self.fd = sys.stdin.fileno()
-        self._old = None
-        self._wake_r = None
-        self.active = threading.Event()
-        if os.isatty(self.fd):
-            self._old = termios.tcgetattr(self.fd)
-            tty.setcbreak(self.fd)
-            atexit.register(self.restore)
-            r, w = os.pipe()                # 信号直通管道：C 层收信号即写字节，
-            os.set_blocking(w, False)       # 主线程卡死在 SDK C++ 调用也能退出
-            signal.set_wakeup_fd(w)
-            signal.signal(signal.SIGINT, lambda *_: None)     # 退出走管道，别靠
-            signal.signal(signal.SIGTERM, lambda *_: None)    # 会被推迟的异常
-            self._wake_r = r
-            self.active.set()
-            threading.Thread(target=self._loop, daemon=True).start()
-            print("（循环期间随时按 q 或 Ctrl-C 退出；确认提示符处用回车；急停第一优先级）")
-
-    def restore(self):
-        if self._old is not None:
-            try:
-                termios.tcsetattr(self.fd, termios.TCSADRAIN, self._old)
-            except Exception:
-                pass
-            self._old = None
-
-    def pause(self):
-        self.active.clear()
-
-    def resume(self):
-        self.active.set()
-
-    def _loop(self):
-        while True:
-            try:
-                fds = [self._wake_r] if self._wake_r is not None else []
-                if self.active.is_set():
-                    fds.append(sys.stdin)
-                if not fds or not select.select(fds, [], [], 0.2)[0]:
-                    continue
-                if (self._wake_r is not None
-                        and select.select([self._wake_r], [], [], 0)[0]):
-                    os.read(self._wake_r, 1)
-                    print("\n⛔ 收到中断信号 —— 立即退出"
-                          "（已下发目标可能仍在限速执行）")
-                    self.restore()
-                    if NAV is not None:
-                        NAV.resume()
-                    os._exit(130)
-                if sys.stdin.read(1) in ("q", "Q"):
-                    print("\n⛔ 按下 q —— 立即退出（已下发目标可能仍在限速执行）")
-                    self.restore()
-                    if NAV is not None:
-                        NAV.resume()
-                    os._exit(2)
-            except Exception:
-                self.restore()
-                if NAV is not None:
-                    NAV.resume()
-                os._exit(3)   # 监听线程死了比静默更危险：宁可误退不可失控
+# ── q 键退出监听/未捕获异常钩子已收编 common/loop/runtime.py（步2a，
+#    QuitWatcher/_fatal_hook 原文逐位一致；robot/WATCH/NAV 经 RT.* 回填）──
+import common.loop.runtime as RT
+from common.loop.runtime import QuitWatcher, _fatal_hook
 
 
 WATCH = QuitWatcher()
-
-
-def _fatal_hook(t, v, tb):
-    """任何未捕获异常：关 SDK + 还原终端 + 硬退。
-
-    裸退会让 SDK 残留线程在解释器关闭时段错误（fleet 已知坑）。
-    """
-    print(f"\n⛔ 异常退出: {t.__name__}: {v}")
-    rob = globals().get("robot")
-    if rob is not None:
-        try:
-            rob.request_shutdown(); rob.wait_for_shutdown(); rob.destroy()
-        except Exception:
-            pass
-    WATCH.restore()
-    if NAV is not None:
-        NAV.resume()
-    os._exit(1)
+RT.WATCH = WATCH
 
 
 sys.excepthook = _fatal_hook
@@ -1160,6 +969,8 @@ import numpy as np  # noqa: E402
 import cv2  # noqa: E402
 
 # 包络护栏数组化+余量（解析在上方 import 之前完成；margin 语义同 10-06 原版）
+ENV_LO14 = ENV_HI14 = None   # 无条件先置 None（帧级钳位只看 ENV_LO 门；
+                             # 无包络 ckpt 时回填读名需已绑定）
 if ENV_LO is not None:
     _m = args.envelope_margin
     ENV_LO = np.array(ENV_LO, dtype=np.float32)
@@ -1190,547 +1001,59 @@ from flash_rt.core.utils.actions import normalize_state  # noqa: E402
 from galbot_sdk.g1 import GalbotRobot, SensorType, G1JointGroup, JointCommand  # noqa: E402
 from g1_traj_interp import create_interpolator  # noqa: E402  同目录（轨迹流插值）
 
-# ── 关节表（数据集维序：右臂在前）──
-LEFT = [f"left_arm_joint{i}" for i in range(1, 8)]
-RIGHT = [f"right_arm_joint{i}" for i in range(1, 8)]
-ARM_NAMES = RIGHT + LEFT            # 与 chunk[0:7]+chunk[8:15] 逐位配对
-STATE_NAMES = (RIGHT + ["right_gripper_joint1"]
-               + LEFT + ["left_gripper_joint1"]
-               + [f"leg_joint{i}" for i in range(1, 6)]
-               + ["head_joint1", "head_joint2"])
-GRIP_IDX = (7, 15)                  # state 里的夹爪维：SDK 米 → 数据集 0~100%
-ARM_SLICE = list(range(0, 7)) + list(range(8, 15))   # state 里的臂维（0-6 右 / 8-14 左）
+# ── 关节表/state 拼装/爪读改已收编 common/bodies/g1.py（步2c，原文逐位
+#    一致；args/爪标定/相机表经 B.* 回填，见下）──
+import common.bodies.g1 as B
+from common.bodies.g1 import (   # noqa: E402
+    ARM_NAMES,
+    ARM_SLICE,
+    STATE_NAMES,
+    _GRIPJ_HOLD,   # 汇总区 hold 统计读（同 dict 对象原地改写）
+    NavSuspend,
+    grab_views,
+    grip_state_cmd_override,
+    read_joints,
+    send_grip,
+    send_grip_joint,
+    state_from_joints,
+)
+
 # 当前 chunk 的预测时刻臂位——chunk 臂维是 delta（见 build_rows），换块时更新
 BASE_ARM = None
 _gcal = mf.get("gripper", {})
 GRIP_WMIN, GRIP_WMAX = _gcal.get("width_min"), _gcal.get("width_max")
 
-
-def state_from_joints(vals) -> np.ndarray:
-    """原始关节读数 → 模型 state：夹爪两维按 manifest 标定换算 0~100%。
-
-    数据集 state dim7/15 是百分比；SDK 读数是米——直接喂会被归一化成
-    恒 ≈闭合（0.12m 当 0.12% 算），模型看到的夹爪状态永远错。
-    """
-    st = np.array(vals, dtype=np.float32)
-    if GRIP_WMIN is None or GRIP_WMAX is None:
-        print("⚠ 夹爪未标定：SDK 宽度(米)原样进 state，与数据集 0~100% 单位不符!")
-        return st
-    for i in GRIP_IDX:
-        st[i] = float(np.clip((st[i] - GRIP_WMIN)
-                              / (GRIP_WMAX - GRIP_WMIN + 1e-9) * 100.0,
-                              0.0, 100.0))
-    return st
+B.args = args
+B.GRIP, B.GRIP_SS = GRIP, GRIP_SS   # dict 引用回填（send_grip* 原地改写共享）
+B.GRIP_WMIN, B.GRIP_WMAX = GRIP_WMIN, GRIP_WMAX
+B.CAM_MAP, B.VIEWS = CAM_MAP, VIEWS
 
 
-def grip_state_cmd_override(st_raw):
-    """--grip-state-cmd：state 夹爪维(7/15)改喂指令值，持物段例外（10-12 修正）。
 
-    数据集 state 爪维语义=跟随段记指令值——喂物理回读=分布漂移（模型全程
-    看到滞后/爬坡中的爪宽）。⚠「SDK 回读滞后 6.3-8s」旧说已被 10-13 标定
-    翻案（grip_speed_bench 四程：回读时戳新鲜 p50 10ms，伺服守 0.15 m/s）；
-    本旗标的行为必要性（10-05/10-08 四跑实证）不受影响。
-
-    ⚠ 持物签名修正（2026-10-12 帧级实锤）：数据集「抓到物体」语义=指令 0%
-    + state 被物体撑在 ~33.5%（ep0 t5.1s 起；40 集持物段 state 中位 33.5、
-    p10-p90=33.0-33.5 恒定）——模型靠该组合识别「已持物→后撤→交接」。
-    闭合后若照喂指令 0% = 把签名抹成「空爪闭紧」（预抓取/释放后分布），
-    交接序列永不触发（loop_20261012_165104 实录：L t+5.3s 抓住、模型不后撤、
-    R 爪全程 0%·hold）。故分三段：
-      开爪/跟随段（指令 >10%）：喂指令值（含回读不可信的整个滞后窗）；
-      持物段（指令 <10% 且该爪历史指令峰值 >50% = 开→合全程走完）：
-        喂持物签名 33.5（数据集恒定值；SDK 回读在交接关键窗内仍处滞后，弃用）；
-      未开过爪的闭合（峰值 ≤50%，如起步双爪 0%）：喂指令值（=空爪闭合，正确）。
-    已知限制：释放后（指令仍 0）滞留持物签名——pick 线释放后任务即转 R 臂，
-    state 不再参与关键决策，首版接受；空抓（夹空）时也会误报持物，行为=
-    提前交接 R，属可接受恢复路径。
-    """
-    if GRIP is None or not args.grip_state_cmd:
-        return st_raw
-    st = np.array(st_raw, dtype=np.float32)
-    for name, dim in GRIP["names"]:
-        sent = GRIP["sent"].get(name)
-        if sent is None:
-            continue
-        peak = GRIP["sent_peak"].get(name, 0.0)
-        GRIP["sent_peak"][name] = max(peak, sent)
-        if sent < 10.0 and GRIP["sent_peak"][name] > 50.0:
-            st[dim] = 33.5
-        else:
-            st[dim] = sent
-    return st
+# ── state 拼装/夹爪换算读改/关节读取/相机守卫/letterbox224/头图裁剪/取图
+#    已收编 common/bodies/g1.py 与 common/bodies/vision.py（步2c，原文逐位
+#    一致；import 见上方关节表区）──
 
 
-def read_joints(robot, names) -> np.ndarray:
-    vals = robot.get_joint_positions([], names)
-    if not vals or len(vals) != len(names):
-        raise SystemExit(f"关节读取失败（返回 {len(vals) if vals else 0} 维）")
-    return np.array(vals, dtype=np.float32)
 
 
-_LAST_FRAMES = {}     # 相机冻结守卫：逐轮像素级对比（2026-09-24 右臂下压排查引入）
-_FREEZE_STREAK = {}
+# ── 遥测件已收编 common/loop/telemetry.py、安全护栏纯件已收编
+#    common/control/guards.py（步2a/2b-1，原文逐位一致）──
+from common.control.guards import chunk_abs_block, env_first_violation  # noqa: E402
+from common.loop.telemetry import LatencyTracker, pstats  # noqa: E402
 
 
-def letterbox224(img):
-    """等比缩放长边到 224 + 上下纯黑条填充——精确复现训练数据集的图像变换。
 
-    2026-10-12 实锤（本机 pick_place_balence 抽帧判读）：三视角训练帧全部为
-    letterbox——224×224、上下各 28px 纯黑条、内容带 168px=224×960/1280（源帧
-    1280×960 等比缩放，非拉伸非裁剪）。此前 grab_views 直拉 resize 满幅无条
-    = train/serve 图像分布失配（10-10 视觉-臂接地微弱的第一嫌疑，推翻当日
-    "喂图净"结论——该验证未覆盖预处理变换维度）。
-    """
-    h, w = img.shape[:2]
-    _s = 224.0 / max(h, w)
-    _nh, _nw = round(h * _s), round(w * _s)
-    _cv = np.zeros((224, 224, 3), dtype=np.uint8)
-    _y, _x = (224 - _nh) // 2, (224 - _nw) // 2
-    _cv[_y:_y + _nh, _x:_x + _nw] = cv2.resize(img, (_nw, _nh))
-    return _cv
+# ── 爪下发两路（宽度/关节）已收编 common/bodies/g1.py（步2c，原文逐位一致；
+#    _GRIPJ_*/_GRIP_* 状态 dict/计数器以机体模块为唯一持有地）──
 
 
-# ── 头图训练裁剪放大（--head-crop，2026-10-19 trained-RTC 权重试跑）────────
-# 复现同事数据管线对头相机的处理：/home/galbot/image_preprocessor.py
-# ImagePreprocessor._apply_head_training_crop 原样内联（其顶层 import
-# emulate_data_collection 在 /home/galbot/infer_policy/，跨目录 import 脆弱，
-# 故不 import 只内联，常量逐一对齐源文件；与 ab_test/1015 B 线内联逐位一致）。
-# 训练视频头图 = letterbox224 帧上裁 [126:214, 52:172] → Lanczos4 拉回
-# 164×224（≈1.87× 放大）→ 上下各补 30px 黑条回 224。仅作用头相机键 "image"
-# （双腕图训练无此处理）；裁剪/缩放/补边均为逐通道空间算子，BGR/RGB 通道序无关。
-HEAD_TRAINING_CROP_YX = (126, 214, 52, 172)   # y0, y1, x0, x1（224×224 输入上）
-HEAD_TRAINING_CONTENT_HW = (164, 224)         # 裁剪内容拉回的目标 (H, W)
-HEAD_TRAINING_PAD_TBLR = (30, 30, 0, 0)       # 上/下/左/右黑边 px
-
-
-def head_training_crop(img):
-    """letterbox224 后的头图 → 训练同款裁剪放大回 224×224。"""
-    if img.ndim != 3 or img.shape[:2] != (224, 224):
-        raise ValueError(f"head_training_crop 期望 224x224 HWC 输入，"
-                         f"got shape={img.shape}")
-    y0, y1, x0, x1 = HEAD_TRAINING_CROP_YX
-    if not (0 <= y0 < y1 <= img.shape[0] and 0 <= x0 < x1 <= img.shape[1]):
-        raise ValueError(f"head_training_crop 窗口 [{y0}:{y1}, {x0}:{x1}] 越界")
-    ch, cw = HEAD_TRAINING_CONTENT_HW
-    content = cv2.resize(img[y0:y1, x0:x1], (cw, ch),
-                         interpolation=cv2.INTER_LANCZOS4)
-    pt, pb, pl, pr = HEAD_TRAINING_PAD_TBLR
-    out = cv2.copyMakeBorder(content, pt, pb, pl, pr,
-                             cv2.BORDER_CONSTANT, value=(0, 0, 0))
-    if out.shape[:2] != (224, 224):
-        raise ValueError(f"head_training_crop 输出形状异常: {out.shape[:2]}")
-    return out
-
-
-def grab_views(robot) -> dict:
-    out = {}
-    for key, cam in list(CAM_MAP.items())[:VIEWS]:
-        d = robot.get_rgb_data(getattr(SensorType, cam))
-        if not d or not d.get("data"):
-            raise SystemExit(f"取图失败: {cam}")
-        img = cv2.imdecode(np.frombuffer(d["data"], np.uint8), cv2.IMREAD_COLOR)
-        if img is None:
-            raise SystemExit(f"解码失败: {cam}")
-        last = _LAST_FRAMES.get(cam)
-        _LAST_FRAMES[cam] = img
-        if last is not None and np.array_equal(last, img):
-            _FREEZE_STREAK[cam] = _FREEZE_STREAK.get(cam, 0) + 1
-        else:
-            _FREEZE_STREAK[cam] = 0
-        if _FREEZE_STREAK[cam] >= 3:
-            raise SystemExit(f"⛔ 相机流疑似冻结：{cam} 连续 3 轮逐字节相同"
-                             f"（实时流有传感器噪声不可能全等）——观测已失真，"
-                             f"停止循环。排查 RT 相机服务")
-        _lb = letterbox224(img)
-        if args.head_crop and key == "image":
-            _lb = head_training_crop(_lb)   # 头图训练裁剪放大（仅头相机）
-        out[key] = np.ascontiguousarray(cv2.cvtColor(_lb, cv2.COLOR_BGR2RGB))
-    return out
-
-
-class LatencyTracker:
-    """时延样本收集器。结构参照 lerobot policies/rtc/latency_tracker.py
-    （Apache-2.0），两处有意偏离（docs/lerobot-alignment.md §七）：
-    maxlen 无界（lerobot 默认 100 会截断 200 轮跑的统计窗口）、保持 float64
-    （lerobot 的 float32 cast 可能让 .1f 打印差 0.1ms——本类与旧
-    np.percentile 路径逐字节等价：np.quantile(x, 0.95)≡np.percentile(x, 95)）。"""
-
-    def __init__(self):
-        self._buf = deque()   # 无界；perf_counter 差恒正，负值丢弃只是护栏
-
-    def add(self, value_ms):
-        if value_ms >= 0.0:
-            self._buf.append(value_ms)
-
-    def __len__(self):
-        return len(self._buf)
-
-    def max(self):
-        return max(self._buf) if self._buf else float("nan")
-
-    def percentile(self, q):
-        if not self._buf:
-            return float("nan")
-        return float(np.quantile(np.asarray(self._buf), q))
-
-    def p95(self):
-        return self.percentile(0.95)
-
-
-def pstats(tr):
-    """p50/p95/max 毫秒，一行（tr: LatencyTracker）。"""
-    return (f"p50 {tr.percentile(0.5):.1f} | p95 {tr.percentile(0.95):.1f} | "
-            f"max {tr.max():.1f} ms")
-
-
-def chunk_abs_block(chunk):
-    """chunk delta 块 → 绝对构型块（包络护栏的比对对象，2026-10-07 修范畴错误）。
-
-    训练管线 relative_actions_processor：臂维=delta（相对本块预测时刻臂位
-    BASE_ARM）、夹爪维=绝对 0-100。
-    包络盒来自数据集 action 列逐维 [min,max]=绝对构型——必须用 BASE_ARM+delta
-    比对；直接拿 delta 比对=必拦停（delta≈0 恒不在盒内，10-07 首跑实录）。
-    """
-    a = np.empty_like(chunk)
-    a[:, :7] = chunk[:, :7] + BASE_ARM[None, :7]
-    a[:, 7] = chunk[:, 7]            # 夹爪界=±inf，原值恒过
-    a[:, 8:15] = chunk[:, 8:15] + BASE_ARM[None, 7:14]
-    a[:, 15] = chunk[:, 15]
-    return a
-
-
-def env_first_violation(ch):
-    """关节包络检查：返回首个越界行 (行号, 维, 值, 界)；全干净返回 None。
-
-    ch: (n,16) 数据集维序动作块。臂维 0-6=右臂、8-15=左臂（ENV 已含余量），
-    夹爪维界=±inf 恒过。逐行向量化，n≤chunk_size(50)，微秒级。
-    """
-    bad = (ch > ENV_HI[None, :]) | (ch < ENV_LO[None, :])
-    rows = np.flatnonzero(bad.any(axis=1))
-    if rows.size == 0:
-        return None
-    r = int(rows[0])
-    j = int(np.flatnonzero(bad[r])[0])
-    upper = bool(ch[r, j] > ENV_HI[j])
-    return r, j, float(ch[r, j]), float(ENV_HI[j] if upper else ENV_LO[j])
-
-
-def send_grip(robot, chunk_row):
-    """chunk 行 dim7/dim15（0~100%）→ 标定宽度下发（超阈值才发，非阻塞）。
-
-    ⚠ 10-21 起默认路径是 send_grip_joint（--grip-path joint=lerobot 采集
-    语义）；本函数=set_gripper_command 行程控制器路【逃生门/复现对照】，
-    下列各门只在此路适用（该路 onset=0.12s+行程/速度+吞令=训练外注入行为，
-    P6 三格破案在案）。
-
-    只发不查不等待（拖死控制环）；终态核对放循环结束后。回读新鲜（10-13
-    标定 p50 10ms），实际下发拍顺带采样一次物理实宽进日志（[实 X.Xmm]），
-    爪的物理时序证据逐 send 可见。已知物理动态（同标定）：起步死区 ~0.9s +
-    0.15 m/s 帽（满程 ~0.8s）。
-    ⚠ 111901 终审：每条新指令把行程从头重启（死区重吃）——逐拍补发的指令流
-    p50 间隙 2-3 拍，死区永不耗尽 → 110 send 全 SUCCESS 实宽全程 0.5mm 冻结；
-    q 停流静→最后一条 1.5s 走满（「q 后突然张开」全案闭合）。故
-    --grip-ss 状态机=少发（每相 1-2 条、每条 ≥2s 静默窗）；无 ss 时退回旧
-    chg 门（2% 变化即发，111901 证明该模式爪会冻结——保留只为对照）。
-    --grip-send-every N=定时静默制（2026-10-20 定稿）：chg 死区门整体旁路，
-    每 N 个机会拍无条件发当前 EMA 值一条、其余拍纯静默 → 爪在静默窗内跑完
-    行程；N=4→≈7.5Hz/静默 75%。纯去掉死区（≡chg=0）=143831 实证完全冻结，
-    勿用。⚠ 10-20 晚定律终版（174428）补判决：拍隙 <0.9s 死区的周期拍从静止
-    永起步不了（合步2 N=4→0.27s=永冻），此路要真静默须 N≥18。
-    --grip-min-interval N=事件门（2026-10-20 定律终版，三选一门之一）：距上次
-    实发 ≥N 秒才发（固件 onset=0.12s+行程/速度，0.15 全行程 0.91s < N=1.2 →
-    下一条来时上一条必已在途，吞令结构性不可能）；间隔未满仅「在途(|v|>0.02)
-    且意图差≥3%」豁免——在途同向/反向均平滑零罚（P2 174428 满速零凹陷滑到底；
-    P4 183232 反向掉头 ~0.2s 不碰零；10-16「反转重启律」随之改写：杀手=死区
-    密发，方向只是伴随特征）。
-    --grip-preclose V=预合爪爬行【185317 极限梯判死勿启用】：固件速度下限
-    0.03 m/s（0.01 指令实测执行 0.03）且 onset=0.12s+行程/速度——爬速 0.03
-    全行程起步要 ~4.1s，慢速反把起步拖晚，「低速吸收死区」前提不成立。
-    """
-    if GRIP is None:
-        return None
-    if not args.do_exec:
-        return "dry（不下发）"
-    parts = []
-    now = time.monotonic()
-    # --grip-send-every：节流判定每调用一次（=一个机会拍），R/L 共用同一判定
-    # 保持同拍配对；合步模式只组末拍调用，节奏自然跟随。chg 门在节流模式下
-    # 整体旁路（死区逻辑去掉，见函数 docstring 的剂量-响应证据）。
-    global _GRIP_BEAT
-    _pace = int(args.grip_send_every) > 0
-    _send_beat = False
-    if _pace:
-        _send_beat = (_GRIP_BEAT % int(args.grip_send_every)) == 0
-        _GRIP_BEAT += 1
-    _minint = float(args.grip_min_interval or 0.0)
-    _pre = float(args.grip_preclose or 0.0)
-    for name, dim in GRIP["names"]:
-        p = float(np.clip(chunk_row[dim], 0.0, 100.0))
-        if args.grip_ema_alpha > 0:
-            prev = _GRIP_EMA.get(name)
-            p = p if prev is None else \
-                args.grip_ema_alpha * p + (1.0 - args.grip_ema_alpha) * prev
-            _GRIP_EMA[name] = p
-        last = GRIP["sent"].get(name)
-        why = ""
-        if GRIP_SS is not None:
-            st0 = _GRIP_SS_STATE.get(name)
-            t0, v0 = _GRIP_SS_SENT.get(name, (None, None))
-            if st0 is None:                      # 首拍定态并发一次
-                st0 = "hi" if p >= GRIP_SS[0] else "lo"
-                _GRIP_SS_STATE[name] = st0
-                why = "首拍"
-            elif p >= GRIP_SS[0] and st0 != "hi":
-                _GRIP_SS_STATE[name] = "hi"
-                why = "开阈"
-            elif p <= GRIP_SS[1] and st0 != "lo":
-                _GRIP_SS_STATE[name] = "lo"
-                why = "合阈"
-            elif (t0 is not None and abs(p - v0) >= 15.0
-                  and now - t0 >= 2.0):
-                why = "漂移补发"                 # 中间宽度意图，限频 0.5Hz
-            if not why:                          # 无翻转未到补发条件=一律不发
-                parts.append(f"{name[0].upper()} {p:.1f}%·hold")
-                continue
-        elif _minint > 0:
-            # 事件门（定律终版）：间隔窗=静默保证起步；在途同向豁免=免费微调。
-            # 意图没动（<max(chg,3%)）连间隔窗也不发——零travel重发只会白白
-            # 重置静默钟、推迟下一条真令。
-            lt = _GRIP_SENT_AT.get(name)
-            moved = last is not None and \
-                abs(p - last) >= max(float(GRIP["chg"] or 2.0), 3.0)
-            if lt is None:
-                why = "首拍"
-            elif not moved:
-                parts.append(f"{name[0].upper()} {p:.1f}%·hold")
-                continue
-            elif now - lt >= _minint:
-                why = "间隔窗"
-            else:
-                _gs = robot.get_gripper_state(getattr(G1JointGroup, name))
-                if _gs is not None and abs(_gs.velocity) > 0.02:
-                    why = "在途"                # P2/P4 双实锤：在途同向/反向均
-                                                # 平滑零罚（183232 掉头仅 ~0.2s
-                                                # 减速-再加速，不碰零）
-            if not why:
-                parts.append(f"{name[0].upper()} {p:.1f}%·hold")
-                continue
-        elif not _pace and last is not None and abs(p - last) < GRIP["chg"]:
-            parts.append(f"{name[0].upper()} {p:.1f}%·hold")
-            continue
-        if _pace and not _send_beat:         # 节流窗内的拍一律不发（ss 放行也压住）
-            parts.append(f"{name[0].upper()} {p:.1f}%·hold")
-            continue
-        # --grip-preclose：意图下行（合爪）且未平稳 → 爬速下发；平稳回正常速收敛
-        spd = GRIP["speed"]
-        _tag = ""
-        if _pre > 0:
-            h = _GRIP_PRE_HIST.setdefault(name, [])
-            h.append((now, p))
-            while h and now - h[0][0] > 0.75:
-                h.pop(0)
-            if len(h) >= 2 and p < h[0][1] - 3.0:   # 净降 >3 点=真下行（±2 平台
-                spd = _pre                           # 摆动不重燃爬速，EMA 流常见）
-                _tag = " 爬"
-        w = GRIP["wmin"] + p / 100.0 * (GRIP["wmax"] - GRIP["wmin"])
-        st = robot.set_gripper_command(getattr(G1JointGroup, name),
-                                       w, spd, GRIP["effort"], False)
-        GRIP["sent"][name] = p
-        _GRIP_SENT_AT[name] = now
-        if GRIP_SS is not None:
-            _GRIP_SS_SENT[name] = (now, p)
-        _gs = robot.get_gripper_state(getattr(G1JointGroup, name))
-        # eff 回读单位未知（144325 实证：饱和轨 100、全开 114mm 也 100，
-        # 头文件 "Newtons" 被推翻）——只当负载/堵转指示，勿按牛顿判读
-        _phys = (f" 实{_gs.width * 1000:.1f}mm eff{_gs.effort:.1f}"
-                 if _gs is not None else " 实?")
-        parts.append(f"{name[0].upper()} {p:.1f}%→{w * 1000:.0f}mm@{spd:.2f}{_tag}"
-                     f"{_phys} {str(st).replace('ControlStatus.', '')}"
-                     + (f"({why})" if why else ""))
-    return "  ".join(parts)
-
-
-# --grip-path joint：爪维走关节固件路径的独立 EMA 状态（与 cmd 路径 _GRIP_EMA
-# 分开，A/B 切路径不串状态）
-_GRIPJ_EMA = {}
-# --grip-hold-on-stall 憋死保持状态（每爪独立）：on=保持中；hist=实宽平台窗；
-# enters=累计进入次数（汇总打印）；tgt=冻结目标；floor=进入时实宽（外松上限）；
-# rail=eff 贴轨连续拍数（自动外松节拍器）；relax_n=累计外松步数（汇总打印）；
-# quiet=距上次武装的已发拍数（静默制节拍器）；silent_n=累计静默拍数（汇总打印）
-_GRIPJ_HOLD = {}
-# --gripj-every 爪通道节拍器（全局连续拍，不随换块复位）
-_GRIPJ_TX = 0
-
-
-def send_grip_joint(robot, chunk_row, tfs_s, frame=None):
-    """--grip-path joint：夹爪 dim7/15 并回 set_joint_commands 流（10-21 P6 破案）。
-
-    同事 infer_policy / lerobot 采集语义原样：position=width_m、
-    velocity=速度帽（P6j 实测 0.15→0.1500 被尊重，非 pursuit 追踪）、
-    effort=10（同事默认；非 set_gripper_command 路的 30）、tfs 与臂同参。
-    「onset=0.12s+行程/速度＋吞令」整条定律属 set_gripper_command 端点
-    （P6 三格实证：关节路径 onset≈0.14s 纯 L 与行程无关、密流照跟不冻），
-    故 chg/min-interval/send-every/ss/preclose 各门在此全部旁路——每发送拍
-    无条件发当前 EMA 值（密流在该路径免费，P6j_dense 实证）。EMA 照带
-    （独立状态 _GRIPJ_EMA）。双爪一包：groups=[right_gripper,left_gripper]
-    顺序=命令序（P6 单组已验组写安全；group 模式读的顺序坑不适用于写）。
-
-    GRIP["sent"] 照常更新 → --grip-state-cmd / 遥测 / sent_peak 持物签名
-    无感知路径切换。
-
-    --grip-hold-on-stall（2026-10-21 力矩碰撞案）：模型按训练语义持物段持续
-    发全闭指令，位置伺服每拍重发=斜坡重启反复撞进物体。检测「指令≤实宽−gap
-    且实宽平台」→ 改发 进入时实宽−margin 冻结目标@effort_hold（钳位保持；
-    ⚠勿逐拍跟随实宽=棘轮碾进，144325 首跑实证）；指令上穿实宽+exit
-    （想开爪）→ 恢复流式并清平台史。只改物理下发，不改指令记账。
-    自动外松（--grip-hold-relax-mm，095207 定案）：钳位后稳态误差=margin 仍
-    使伺服满驱（eff 恒贴饱和轨 100，「有差就追」=位置伺服天性，收 margin 无效
-    ——1mm 时 156/159 拍仍贴轨可闻声）。SDK 无阻抗模式，执行侧导纳仿真：eff
-    贴轨持续 6 拍→目标外松一步，直到 eff 掉头或目标=进入时实宽（零误差停追）。
-    单向只松不紧=无棘轮。
-    真静默制（--grip-hold-quiet-n，101418 定案）：外松到零误差后 eff 仍恒贴轨
-    100+响（112 拍无衰减）——每拍重发冻结目标虽逐位相同，但 10-20 爪定律=每条
-    新令打断在途从头重来，密发把爪永远钉在起步段 settle 不了。进 hold/外松步后
-    只发 N 拍即停发该爪（固件执行最后一条收工），读回/退出/外松评估照常。
-    --gripj-every 爪通道节流（10-22 合步 A/B 判读）：仅物理下发被节流，
-    状态机照常每拍跑（窗口墙钟不变）。
-    """
-    if GRIP is None:
-        return None
-    if not args.do_exec:
-        return "dry（不下发）"
-    global _GRIPJ_TX
-    _tx = True
-    if args.gripj_every > 1:
-        _tx = _GRIPJ_TX % args.gripj_every == 0
-        _GRIPJ_TX += 1
-    parts = []
-    cmds, groups = [], []
-    for _ni, (name, dim) in enumerate(GRIP["names"]):
-        if frame is not None:
-            # 爪随臂宏步管线（2026-10-26）：帧值已在上游行准备中 EMA+插帧，
-            # 此处只钳位——二次 EMA 会双滤波
-            p = float(np.clip(frame[_ni], 0.0, 100.0))
-        else:
-            p = float(np.clip(chunk_row[dim], 0.0, 100.0))
-            if args.grip_ema_alpha > 0:
-                prev = _GRIPJ_EMA.get(name)
-                p = p if prev is None else \
-                    args.grip_ema_alpha * p + (1.0 - args.grip_ema_alpha) * prev
-                _GRIPJ_EMA[name] = p
-        GRIP["sent"][name] = p   # 记模型意图（state-cmd/sent_peak 语义不变；
-                                 # hold 只改物理下发，不改指令记账）
-        w = GRIP["wmin"] + p / 100.0 * (GRIP["wmax"] - GRIP["wmin"])
-        _gs = robot.get_gripper_state(getattr(G1JointGroup, name))
-        w_sent, eff_sent, vel_sent, _tag = w, 10.0, GRIP["speed"], ""
-        _skip = False
-        if args.grip_hold_on_stall and _gs is not None:
-            phys = _gs.width
-            h = _GRIPJ_HOLD.setdefault(name, {"on": False, "hist": [],
-                                              "enters": 0, "tgt": None,
-                                              "floor": None,
-                                              "rail": 0, "relax_n": 0,
-                                              "quiet": 0, "silent_n": 0})
-            # 双史窗口：(实宽, 本拍指令是否够深)。进入须「实宽平台」∧「深指令
-            # 持续满窗」——150603 死锁教训：爪静停开位时模型刚下合令，只看
-            # 当拍深指令会误进（onset 未到爪还没动）→ 冻结在开位=意图永不上
-            # 穿 exit 门、爪全程不闭合。满窗深指令=「给了 onset+行程时间仍到
-            # 不了」才算真憋死；自由爪满窗前早动了，平台破即不进。
-            h["hist"].append((phys,
-                              w <= phys - args.grip_hold_gap_mm / 1000.0))
-            _win = max(2, int(args.grip_hold_window))
-            while len(h["hist"]) > _win:
-                del h["hist"][:-_win]
-            _plateau = (len(h["hist"]) >= _win and
-                        (max(p for p, _ in h["hist"])
-                         - min(p for p, _ in h["hist"])) * 1000.0
-                        <= args.grip_hold_plateau_mm)
-            _deep_all = all(d for _, d in h["hist"])
-            if h["on"]:
-                if w >= phys + args.grip_hold_exit_mm / 1000.0:
-                    h["on"] = False
-                    h["hist"].clear()   # 退出清史：再进须新平台（防近阈闪断）
-                    h["tgt"] = None
-                    h["floor"] = None
-                    h["rail"] = 0
-                    h["quiet"] = 0
-                    _tag = " HOLD退出"
-            elif _plateau and _deep_all:
-                h["on"] = True
-                h["enters"] += 1
-                # 进入时冻结目标（144325 教训：逐拍跟随 实宽−margin=棘轮
-                # 碾进；冻结后刚性物同样钉死、软物最多压进 margin 一次）
-                h["tgt"] = max(0.0,
-                               phys - args.grip_hold_margin_mm / 1000.0)
-                h["floor"] = phys   # 外松上限=进入时实宽（零误差=停追静音）
-                h["quiet"] = 0      # 重新武装：进 hold 先发满 quiet-n 拍
-                _tag = " HOLD进入"
-            if h["on"]:
-                if args.grip_hold_relax_mm > 0 and h["floor"] is not None:
-                    # eff 闭环自动外松（执行侧导纳仿真，095207 实证：1mm 误差
-                    # 仍伺服满驱 eff 恒贴轨=「有差就追」天性，收 margin 治不了
-                    # 声）。贴轨满 6 拍→目标外移一步；eff 掉头或到进入时实宽
-                    # （零误差）即停。单向只松不紧=无棘轮回旋余地。先于
-                    # w_sent 赋值：步进当拍即按新目标下发。
-                    if _gs.effort >= args.grip_hold_relax_eff:
-                        h["rail"] += 1
-                    else:
-                        h["rail"] = 0
-                    if h["rail"] >= 6 and h["tgt"] < h["floor"] - 1e-6:
-                        h["tgt"] = min(h["floor"],
-                                       h["tgt"] + args.grip_hold_relax_mm
-                                       / 1000.0)
-                        h["rail"] = 0
-                        h["relax_n"] += 1
-                        h["quiet"] = 0   # 外松步重新武装：发满 quiet-n 拍
-                        _tag = f" HOLD松{h['tgt'] * 1000:.1f}"
-                # 目标恒定=稳态误差恒为 margin（观测 093335：误差即伺服持续
-                # 内顶驱动力，故 margin 1mm+保持段速度帽放软双管压声）
-                w_sent = h["tgt"]
-                if args.grip_effort_hold > 0:
-                    eff_sent = args.grip_effort_hold
-                if args.grip_hold_vel > 0:
-                    vel_sent = min(args.grip_hold_vel, GRIP["speed"])
-                _tag = _tag or " HOLD"
-                if args.grip_hold_quiet_n > 0:
-                    # 静默制（101418 定案）：外松到零误差 eff 仍恒贴轨+响——
-                    # 每拍重发虽逐位相同，但 10-20 爪定律=每条新令打断在途
-                    # 从头重来，密发把爪永远钉在起步段 settle 不了。发满
-                    # quiet-n 拍后本爪退出指令包=真静默，让最后一条走完收工；
-                    # 读回/退出/外松评估照常（不依赖发送）。
-                    if h["quiet"] >= args.grip_hold_quiet_n:
-                        _skip = True
-                        h["silent_n"] += 1
-                        _tag = " HOLD静"
-                    else:
-                        h["quiet"] += 1
-        c = JointCommand()
-        c.position = float(w_sent)
-        c.velocity = float(vel_sent)        # 速度帽语义：恒速段被钳在此值
-        c.effort = float(eff_sent)
-        if not _skip and _tx:   # 静默制/节流：该爪本拍退出指令包（读回照常）
-            cmds.append(c)
-            groups.append(getattr(G1JointGroup, name))
-        # eff 回读单位未知（144325 实证：饱和轨 100、全开 114mm 也 100，
-        # 头文件 "Newtons" 被推翻）——只当负载/堵转指示，勿按牛顿判读
-        _phys = (f" 实{_gs.width * 1000:.1f}mm eff{_gs.effort:.1f}"
-                 if _gs is not None else " 实?")
-        if not _tx and not _skip:
-            _tag = f"{_tag} 跳" if _tag else " 跳"
-        parts.append(f"{name[0].upper()} {p:.1f}%→{w_sent * 1000:.0f}mm@j"
-                     f"{_phys}{_tag}")
-    if not cmds:    # 双爪皆静默：本拍无指令包
-        return "  ".join(parts) + " j静"
-    st = robot.set_joint_commands(cmds, joint_groups=groups,
-                                  time_from_start_s=tfs_s)
-    ok = str(st).startswith("ControlStatus.SUCCESS")
-    return "  ".join(parts) + (" jOK" if ok else
-                               f" j{str(st).replace('ControlStatus.', '')}")
 
 
 # ── ① SDK 初始化 + 模型 ──
 print("== ① SDK 初始化（确认急停可及！）==")
 robot = GalbotRobot()
+RT.robot = robot   # _fatal_hook 的 SDK 优雅三连用
 sensors = {getattr(SensorType, c) for c in list(CAM_MAP.values())[:VIEWS]}
 if not robot.init(sensors):
     raise SystemExit("robot.init 失败")
@@ -1743,6 +1066,7 @@ if not str(st).startswith("ControlStatus.SUCCESS"):
 if args.nav_suspend:
     NAV = NavSuspend()
     NAV.suspend()
+RT.NAV = NAV   # 退出路径导航恢复用（None 守卫照旧）
 
 HOME = read_joints(robot, ARM_NAMES)   # 起始位 = 漂移护栏基准（应在预热工作位）
 print(f"起始位（漂移护栏基准）: {np.round(HOME, 3).tolist()}")
@@ -1786,936 +1110,74 @@ GRIP_INTERP = create_interpolator(args.interp, dim=2,
                                   output_hz=args.fps * args.frames_per_row)
 
 _EMA_STATE = None   # 跨块连续 EMA 状态（上块末行滤波输出；None=尚无历史不滤波）
-_GRIP_EMA = {}      # 爪指令 EMA 状态（--grip-ema-alpha>0 时启用；跨块连续，爪流
-                    # 换块不弃尾——爪相位是低频意图，逐拍直通=物理包络被抖动打断）
-                    # ⚠ GRIP_SS 的初值 None 放 argparse 段（≈300 行）——若在此处再
-                    # 置 None 会把上面解析好的 --grip-ss 盖掉（125953 实录：banner
-                    # 打了 50/35 但循环里 GRIP_SS 已被本行旧赋值抹成 None，静默退
-                    # 回 chg 门=状态机整跑未生效）
-_GRIP_SS_STATE = {}  # 状态机每爪当前态 'hi'/'lo'
-_GRIP_SS_SENT = {}   # 状态机每爪 (上次实发时刻, 上次实发值)
-_GRIP_BEAT = 0       # --grip-send-every 机会拍计数（send_grip 每调用 +1）
-_GRIP_SENT_AT = {}   # 事件门每爪上次实发时刻（--grip-min-interval；send_grip 记账）
-_GRIP_PRE_HIST = {}  # 预合爪每爪意图史 (t, p)，0.75s 窗（判「下行未平稳」用）
+# ⚠ GRIP_SS 的初值 None 放 argparse 段（≈300 行）——若在此处再
+# 置 None 会把上面解析好的 --grip-ss 盖掉（125953 实录：banner
+# 打了 50/35 但循环里 GRIP_SS 已被本行旧赋值抹成 None，静默退
+# 回 chg 门=状态机整跑未生效）
+# （_GRIP_EMA/_GRIP_SS_*/_GRIP_BEAT/_GRIP_SENT_AT/_GRIP_PRE_HIST 状态块已
+# 收编 common/bodies/g1.py，步2c）
 
 
-def build_rows(cur, prev0=None, offset=None, seam=False):
-    """chunk delta 块 → 链式限幅行目标（14 维，右臂在前）。
-
-    ⚠ 2026-09-23 语义修正（同母本 plan_step）：训练管线
-    relative_actions_processor 把臂维动作转成 delta（相对本块预测时刻臂位
-    BASE_ARM）——行目标不是 chunk 绝对值，须加回 BASE_ARM（换块时随 job 更新）。
-    链式：rows[0]=cur 向行 0 绝对位限幅挪一步，rows[k]=rows[k−1] 再向行 k 挪——
-    每行位移 ≤ --max-joint-delta-per-step，且逐行夹在 cur 与 chunk 绝对位之间（包络盒凸性 →
-    行目标自动在包络内；样条过冲由 build_block_stream 的帧级钳位兜底）。
-    EMA：--filter-alpha>0 时状态跨块连续（infer_policy action_filter 同款语义，
-    2026-10-12 对照判明块内重启版对接缝无效）：新块 rows[0] 先与上块末行滤波
-    输出混合再起链，接缝首行同样被滤；首块/循环起点无历史即以 rows[0] 播种。
-    滤波对象=链钳后的绝对行目标（与同事"钳位→滤波"同序），凸组合仍在包络内。
-    seam=True：接缝窗 α 阶梯（10-17 回放台移植）——换块后前 --seam-beats 拍
-    α 从 --seam-alpha 线性爬回主 α，削块首衰减尾峰值、稳态零税；仅跨块
-    有历史时生效（首块无接缝）。缺省 False=原口径逐位不变。
-    """
-    global _EMA_STATE
-    rows = np.empty((len(chunk), 14), dtype=np.float32)
-    # prev0=链起点（skip-install 参考连续用）：缺省从 cur 出发（原口径）；
-    # 传入 last_tgt 时链从上一拍下发目标接续——首行=last_tgt+clip(新首行−
-    # last_tgt, ±delta_max)，参考不重锚（110411 判明：换块重锚=脉动残留源）。
-    prev = (np.asarray(cur, dtype=np.float32) if prev0 is None
-            else np.asarray(prev0, dtype=np.float32))
-    for kk in range(len(chunk)):
-        arm_tgt = BASE_ARM + np.concatenate([chunk[kk][:7], chunk[kk][8:15]])
-        if offset is not None:
-            arm_tgt = arm_tgt + offset      # --ref-offset：整条计划平移（块首零回走）
-        prev = prev + np.clip(arm_tgt - prev, -args.delta_max, args.delta_max)
-        rows[kk] = prev
-    if args.ema_alpha > 0:
-        a = float(args.ema_alpha)
-        # 接缝窗 α 阶梯（seam=True 且有跨块历史时启用）：α 从 seam_alpha
-        # 线性爬回主 α；硬切会把积压滞后一次放出成新凸点（回放台离线实证）
-        _ramp = seam and args.seam_alpha > 0 and _EMA_STATE is not None
-        a_seam = float(args.seam_alpha)
-        n_sb = max(1, int(args.seam_beats))
-        # 接缝 α 助推（--seam-boost-alpha，2026-10-26 块间停顿案 160323）：
-        # 与 seam-ramp 反向。换块 EMA 重播回 last_tgt（防瞬移修正）清零了
-        # 速度状态 → 命令速度块首=α×模型速度、τ=1/α≈整块，水位0 短块(11拍)
-        # 永在瞬态=目视停顿；块首 n 拍用大 α 快速重建速度再线性落回主 α，
-        # 稳态纹理零税。α 全程 0.3 对照=纹理粗 50%（161429 残差 p50
-        # 11.6→20.7），勿再走。与 _ramp 互斥（守卫把关，此处 boost 优先）。
-        _boost = args.seam_boost_alpha > 0 and _EMA_STATE is not None
-        a_boost = float(args.seam_boost_alpha)
-        n_bb = max(1, int(args.seam_boost_beats))
-        acc = None
-        for kk in range(len(rows)):
-            if _boost:
-                a_k = a_boost + (a - a_boost) * min(kk, n_bb) / n_bb
-            elif _ramp:
-                a_k = a_seam + (a - a_seam) * min(kk, n_sb) / n_sb
-            else:
-                a_k = a
-            if kk == 0:
-                acc = rows[0] if _EMA_STATE is None else \
-                    a_k * rows[0] + (1.0 - a_k) * _EMA_STATE
-            else:
-                acc = a_k * rows[kk] + (1.0 - a_k) * acc
-            rows[kk] = acc
-        _EMA_STATE = acc.copy()
-    return rows
 
 
-def build_block_stream(cur, prev0=None, offset=None, seam=False):
-    """换块时一次性：行目标 → [链起点]+行目标 样条插值 → 逐行分桶帧。
-
-    返回 (rows_abs, frames_all, bursts)：frames_all (M,14) float32；
-    bursts[k]=第 k 拍下发的帧号列表（恰好 --frames-per-row 帧/行）。
-    帧级包络钳位同 infer_policy robot_controller._clip_to_joint_limits
-    （样条可能过冲）。帧时间网格 = 行节奏 1/args.fps → 帧率
-    args.fps×frames_per_row：帧按 wall-clock 匀速铺满整行（--fps<30 时整块
-    放慢播放，节奏语义同 native 的慢速彩排）。prev0 透传 build_rows
-    （skip-install 参考连续：链起点=last_tgt，首帧恰=last_tgt=零缝步）。
-    """
-    rows = build_rows(cur, prev0, offset, seam=seam)
-    _start = (np.asarray(cur, dtype=np.float32) if prev0 is None
-              else np.asarray(prev0, dtype=np.float32))
-    per = args.frames_per_row
-    if args.merge > 1:
-        # 合步（等时粗化，replay 台 3b40d0e 同构）：滤波后每 N 行取 1 个宏步
-        #（末行必保=块尾/链状态不动），宏步段 P 帧按拍均分 N 组——同轨迹同速
-        # 同墙钟只稀疏化目标，下发 ≈fps×per/N Hz。样条跑在宏步序列上（声明
-        # input_hz 仍 30=replay 同款时间折法），行级 EMA/链钳已在 build_rows
-        # 完成。返回行=重复宏步行（k 逐拍推进与水位/星饿/RTC 语义不变）。
-        idx = list(range(0, len(rows), args.merge))
-        if idx[-1] != len(rows) - 1:
-            idx[-1] = len(rows) - 1
-        rows = np.repeat(rows[idx], args.merge, axis=0)
-        n_macro = len(rows) // args.merge
-        waypoints = np.vstack([_start[None, :], rows[::args.merge]])
-        frames_all = INTERP.interpolate(waypoints)
-        if ENV_LO is not None:
-            np.clip(frames_all, ENV_LO14[None, :], ENV_HI14[None, :],
-                    out=frames_all)
-        bursts = []
-        for _m in range(n_macro):
-            for _grp in np.array_split(np.arange(_m * per, (_m + 1) * per),
-                                       args.merge):
-                bursts.append([int(i) for i in _grp])   # 空组=静默拍（per<N 时）
-        # ── 爪维随臂同管线（2026-10-26 用户定案；--grip-rawrows 恢复旧行率
-        # 流）：dim7/15 与臂同 idx 宏步粗化+同款样条逐帧插帧。EMA 上移到行
-        # 准备（镜像臂 build_rows：滤波→粗化→插帧，勿在 send 端二次滤波），
-        # 换块从 GRIP['sent']（最后实发意图）重播=臂 _EMA_STATE=last_tgt 的
-        # 防瞬移镜像；首块/无历史以首行播种。起点=GRIP['sent']（prev0 镜像，
-        # 块首帧恰=上块末发值=零缝步）。帧值钳 [0,100]（样条过冲兜底）。
-        grip_frames = None
-        if GRIP is not None and not args.grip_rawrows:
-            def _sent_seed():
-                _v = [GRIP["sent"].get(n) for n, _d in GRIP["names"]]
-                return (None if any(x is None for x in _v)
-                        else np.asarray(_v, dtype=np.float32))
-            g = np.stack([chunk[:, d] for _, d in GRIP["names"]],
-                         axis=1).astype(np.float32)
-            if args.grip_ema_alpha > 0:
-                _ab = float(args.grip_ema_alpha)
-                _seed = _sent_seed()
-                acc = g[0].copy() if _seed is None else _seed.copy()
-                for _k in range(len(g)):
-                    acc = _ab * g[_k] + (1.0 - _ab) * acc
-                    g[_k] = acc
-            _seed = _sent_seed()
-            _g_start = g[0].copy() if (prev0 is None or _seed is None) else _seed
-            _g_wp = np.vstack([_g_start[None, :], g[idx]])
-            grip_frames = np.clip(GRIP_INTERP.interpolate(_g_wp), 0.0, 100.0)
-        return rows, frames_all, bursts, grip_frames
-    waypoints = np.vstack([_start[None, :], rows])
-    frames_all = INTERP.interpolate(waypoints)
-    if ENV_LO is not None:
-        np.clip(frames_all, ENV_LO14[None, :], ENV_HI14[None, :], out=frames_all)
-    bursts = [list(range(kk * per, (kk + 1) * per)) for kk in range(len(rows))]
-    return rows, frames_all, bursts, None
+# ── 换块融合纯件已收编 common/control/fusion.py（步2b-1，原文逐位一致；
+#    chunk/BASE_ARM/_EMA_STATE 活状态全链只 FU 一份，引擎 run() 每处重绑后
+#    自回填同名属性）──
+import common.control.fusion as FU
+from common.control.fusion import build_block_stream  # noqa: E402
+import common.control.guards as GD
 
 
-def _rtc_prefix(new_base):
-    """旧块未消费尾段 → 新块 delta 坐标系（RTC 前缀，推理侧引导输入）。
+# ── common 模块回填：此时 init 全就位（首块 chunk/BASE_ARM/插值器/包络盒/
+#    爪标定）；其后重绑由引擎 run() 自回填（FU.chunk/FU.BASE_ARM/FU._EMA_STATE/
+#    GD.BASE_ARM 见引擎 ②/换块/护栏各点）──
+FU.args = args
+FU.chunk = chunk
+FU.BASE_ARM = BASE_ARM
+FU.INTERP = INTERP
+FU.GRIP_INTERP = GRIP_INTERP
+FU.GRIP = GRIP
+FU.ENV_LO, FU.ENV_LO14, FU.ENV_HI14 = ENV_LO, ENV_LO14, ENV_HI14
+FU._EMA_STATE = _EMA_STATE
+GD.BASE_ARM = BASE_ARM
+GD.ENV_LO, GD.ENV_HI = ENV_LO, ENV_HI
 
-    臂维重锚：绝对构型 (OLD_BASE+delta) − NEW_BASE（新块自己的 delta 基准）
-    夹爪维（7/15）数据集语义即绝对 0-100，原值携带。
-    尾段不足 horizon 时按 lerobot rollout 语义 hold-pad（重复末行——零填充
-    会解码到数据集均值）；块耗尽/RTC 关时返回 None（引擎侧 enable=0 短路）。
-    须在 job.start 前调用（chunk/BASE_ARM 还属旧块，new_base=本次取关节读数，
-    与 job 即将存下的 state_arm 同源）。
+# ── ② 预取 worker/换块主循环/③执行确认/④汇总已收编 common/loop/traj_engine.py
+#    （步2c，原文逐位一致整体搬入 TE.run()；两机体 FACE 闸二选一——G1 脸=
+#    发送拍逐帧单点 tfs 流/_PredictJob 调用方取图/_ovp 门 α>0/汇总打印无批窗
+#    后缀/G1JointGroup 爪组枚举）──
+# ── 引擎回填（一次，TE.run() 前）。G1 脸：机体函体/常量=common/bodies/g1
+#    （覆盖引擎顶部 s1 同名 import）；JointCommand=g1 SDK 类（引擎顶部 s1 类
+#    仅供 S1 攒批 _rp_flush 用，G1 脸恒不触达）；s1_warm 不回填（gate-15 在
+#    S1 支内，G1=操作员手动收尾）。TE.run() 不返回（SDK 优雅三连 + os._exit）──
+import common.loop.traj_engine as TE
 
-    ⚠ 10-09 修正：前缀窗口右移 inference_delay 拍。前缀快照在抓帧时刻（拍 25），
-    而引导的新块要到换块（拍 ~35=推理 330ms/33ms≈10 拍后）才落地执行；期间旧块
-    尾段照常下发，臂已物理走过前缀描述的区域——不右移则每次换块都引导新块
-    "倒退"回已走过的 ~10 拍（141706 实证：接缝 251 mrad≈方向反转，与 RTC-off
-    无异）。此即 lerobot rtc 的 inference_delay 语义（补偿快照→落地延迟），
-    此前误读为换块时机而设 0。延迟拍数=推理 p50÷tick，动态估计。
-    """
-    if not args.rtc_horizon or chunk is None:
-        return None
-    _p50 = infer_ms.percentile(0.5) if len(infer_ms) else 340.0
-    # 右移帽=旧块剩余行数（勿用 WMARK）：水位 0 模式下 WMARK=0 会把补偿钳没，
-    # 前缀窗口退回快照时刻=每块引导新块倒退（141706 同款）。水位 ≥1 时两帽
-    # 等价（delay≈10 < 剩余行数），在役配方行为不变。
-    delay = max(0, min(int(round(_p50 / (TICK * 1000.0))), len(chunk) - k - 1))
-    j0 = k + delay
-    if j0 >= len(chunk):
-        return None                      # 延迟把旧块尾段吃尽 → 该块免引导
-    left = chunk[j0:]
-    pf = np.empty_like(left)
-    pf[:, :7] = left[:, :7] + BASE_ARM[None, :7] - new_base[None, :7]
-    pf[:, 7] = left[:, 7]
-    pf[:, 8:15] = left[:, 8:15] + BASE_ARM[None, 7:14] - new_base[None, 7:14]
-    pf[:, 15] = left[:, 15]
-    h = args.rtc_horizon
-    if len(pf) < h:
-        pf = np.concatenate([pf, np.repeat(pf[-1:], h - len(pf), axis=0)], axis=0)
-    return pf
-
-
-class _PredictJob:
-    """后台推理作业：GPU 推理与固定节拍执行重叠。
-
-    只有 predict 放后台；SDK 取图/读关节/下发全部留在主线程，不碰 SDK
-    线程安全。同一时刻只有一个 predict 在飞（到水位才启动下一个）。
-    """
-
-    def __init__(self, model, prompt):
-        self._model, self._prompt = model, prompt
-        self._done = threading.Event()
-        self._res = None
-        self._err = None
-        self.dur_ms = 0.0
-
-    def start(self, obs, state_n, state_arm, rtc_prefix=None):
-        self._done.clear()
-        self._err = None
-        self.state_arm = state_arm   # 本块 delta 基准（预测时刻臂位）
-
-        def _run():
-            t = time.perf_counter()
-            try:
-                self._res = np.asarray(self._model.predict(
-                    obs, prompt=self._prompt, state=state_n,
-                    rtc_prefix=rtc_prefix))
-            except Exception as e:      # 主线程 result() 时再抛
-                self._err = e
-            self.dur_ms = (time.perf_counter() - t) * 1000
-            self._done.set()
-            if _frames_dir is not None and isinstance(obs, dict):
-                _dump_frames(obs)   # 推理 worker 里写盘，tick 零代价
-
-        threading.Thread(target=_run, daemon=True).start()
-
-    def done(self):
-        return self._done.is_set()
-
-    def result(self):
-        self._done.wait()
-        if self._err is not None:
-            raise self._err
-        return self._res
-
-
-def fresh_obs():
-    """取图+读关节+夹爪换算+归一化（主线程，~22ms），耗时计入 grab_ms。
-
-    返回 (obs, 归一化 state, 臂位原始值)——臂位原始值作该块 delta 基准随块走。
-    """
-    t_g = time.perf_counter()
-    obs = grab_views(robot)
-    st_raw = grip_state_cmd_override(
-        state_from_joints(read_joints(robot, STATE_NAMES)))
-    st_n = normalize_state(st_raw, ns)
-    grab_ms.add((time.perf_counter() - t_g) * 1000)
-    return obs, st_n, st_raw[ARM_SLICE]
-
-
-# ── ② 干跑：只打印首块前 5 拍计划，绝不下发 ──
-infer_ms = LatencyTracker()
-grab_ms = LatencyTracker()
-job = _PredictJob(model, args.prompt)
-job.start(*fresh_obs())              # 首块
-chunk = job.result()
-_dur0 = job.dur_ms
-infer_ms.add(_dur0)
-BASE_ARM = job.state_arm
-job = None
-_dump_chunk(chunk, BASE_ARM, 1, _dur0)
-
-
-def swap_envelope_check():
-    """换块包络检查（v3 轮头同款）：越界截断，行 0 越界/连续越界→停。返回是否中止。
-
-    非有限值（NaN/Inf）先于包络查：nan 与任何界的比较恒 False，会静默穿透
-    包络检查与 np.clip，最终以 position=nan 下发（infer_policy 对非 finite
-    动作显式拒收，2026-10-12 对照补齐）。截到首个污染行前缀；行 0 即污染→停。
-    """
-    global chunk, env_hits, env_trunc, aborted
-    _bad = ~np.isfinite(chunk)
-    if _bad.any():
-        _r = int(np.flatnonzero(_bad.any(axis=1))[0])
-        if _r == 0:
-            print("⛔ 非有限值护栏：chunk 行 0 含 NaN/Inf——无处可截，停止循环"
-                  "（机械臂留在原地）")
-            aborted = True
-            return True
-        print(f"⛔ 非有限值护栏：chunk 行{_r} 含 NaN/Inf——截到行{_r}前缀"
-              "（模型输出异常，关注是否复发）")
-        chunk = chunk[:_r]
-    if ENV_LO is None:
-        return False
-    _v = env_first_violation(chunk_abs_block(chunk))
-    if _v is None:
-        env_hits = 0
-        return False
-    _r, _j, _val, _bnd = _v
-    env_hits += 1
-    env_trunc += 1
-    _side = "上" if _val > _bnd else "下"
-    print(f"⛔ 包络护栏：指令行{_r} 维{_j}={_val:.3f} 越{_side}界 "
-          f"{_bnd:.3f}——截到行{_r}前缀（连续 {env_hits}/"
-          f"{args.envelope_abort_n} 块）")
-    if _r == 0:
-        print("⛔ 行 0 即越界，无处可截——停止循环（机械臂留在原地）")
-        aborted = True
-        return True
-    if env_hits >= args.envelope_abort_n:
-        print("⛔ 连续越界=感知漂移（场景认错了），继续跑只会反复撞桌"
-              "——停止循环（机械臂留在原地）")
-        aborted = True
-        return True
-    chunk = chunk[:_r]
-    return False
-
-
-if not args.do_exec:
-    print(f"\n== [干跑] 首块轨迹流预览（tick {TICK * 1000:.1f} ms，"
-          f"{args.frames_per_row} 帧/行，链式限幅 ±{args.delta_max} rad）"
-          "未下发任何命令 ==")
-    _cur0 = read_joints(robot, ARM_NAMES)
-    _rows, _frames, _bursts, _gframes = build_block_stream(_cur0)
-    print(f"  行 {len(_rows)} → 帧 {len(_frames)}（{args.interp}）；"
-          f"全块最大帧间步长 {float(np.max(np.abs(np.diff(_frames, axis=0)))) * 1000:.3f} mrad")
-    for kk in range(3):
-        fr = _frames[_bursts[kk]]
-        _fd = float(np.max(np.abs(np.diff(fr, axis=0)))) * 1000 if len(fr) > 1 else 0.0
-        print(f"  行{kk}: 帧 {len(fr)} | 行目标 {np.round(_rows[kk], 3).tolist()}"
-              f"\n        帧首→帧末位移 {float(np.max(np.abs(fr[-1] - fr[0]))) * 1000:.2f} mrad"
-              f" | 帧间最大步长 {_fd:.3f} mrad")
-    if ENV_LO is not None:
-        _v = env_first_violation(chunk_abs_block(chunk))
-        _m = ("全块通过" if _v is None else
-              f"⛔ 行{_v[0]} 维{_v[1]}={_v[2]:.3f} 越界 {_v[3]:.3f}")
-        print(f"  包络预检: {_m}（帧级另钳臂包络盒）")
-    if GRIP:
-        desc = []
-        for name, dim in GRIP["names"]:
-            p = float(np.clip(chunk[0][dim], 0.0, 100.0))
-            w = GRIP["wmin"] + p / 100.0 * (GRIP["wmax"] - GRIP["wmin"])
-            desc.append(f"{name[0].upper()} {p:.1f}%→{w * 1000:.0f}mm")
-        print(f"  夹爪目标: {'  '.join(desc)}")
-    print("\n[干跑] 未下发。继续无下发彩排至 --rounds 块"
-          "（覆盖水位预取→换块弃尾→出口全路径；逐拍节奏见循环打印）\n")
-
-# ── ③ 固定节拍循环（绝对截止时序；水位预取；换块弃尾）──
-WATCH.pause()
-if args.do_exec:
-    input(f"\n⚠ 将连续驱动双臂 {args.rounds} 块 × 至多 {len(chunk)} 拍"
-          f"（tick {TICK * 1000:.1f} ms，轨迹流 {args.frames_per_row} 帧/行"
-          f"≈{args.fps * args.frames_per_row}Hz {args.interp}，"
-          + ((f"指令沿 合步 1/{args.cmd_every}={args.fps / args.cmd_every:.1f}Hz"
-              f"（每 {args.cmd_every} 拍 1 条）" if args.cmd_every > 1 else
-              (f"指令沿 合步×{args.merge}={args.fps * args.frames_per_row / args.merge:.0f}Hz"
-               f"（目标 {args.fps // args.merge}Hz 宏步、每宏步 {args.merge} 拍、"
-               f"拍线|Δcmd|=帧流口径"
-               + ("、爪随臂宏步插帧" if (GRIP is not None
-                                         and not args.grip_rawrows) else "")
-               + "）" if args.merge > 1 else
-               f"指令沿 {args.fps:g}Hz 逐拍 1 条")))
-          + (f"，tfs {args.tfs_ms:g} ms" if args.tfs_ms > 0 else "")
-          + f"，链式限幅 ±{args.delta_max} rad/行，"
-          f"漂移护栏 ±{args.max_excursion} rad"
-          + ("，夹爪下发开启）。\n" if GRIP else ")。\n")
-          + "急停就绪后回车开始，循环期间随时按 q 退出...")
-WATCH.resume()
-
-round_ms = LatencyTracker()          # 块耗时（换块到换块，对齐 v3 轮耗时口径）
-tick_ms = LatencyTracker()           # tick 服务时长（不含节拍睡眠）
-track_err = []                       # 每拍回读跟踪误差 mrad
-aborted = False
-k = 0                                # 本块已消费步数
-_obs_k = 0                           # 预取观测拍摄时的本块拍号（跳帧安装用）
-n_swapped = 1                        # 已换入块数（首块同步换入计 1）
-blend_hits = 0                       # 前向搭接触发块数（--blend）
-entry_gap_hist = []                  # 实发拍 |Δcmd|（rad）滚动窗，g₀ 中位用（免发不计）
-entries = []                         # 各块入口行 j（首块不计；汇总用）
-last_tgt = None                      # 上一拍下发目标（|Δcmd|/接缝基准）
-_EMA_STATE = None                    # 循环起点重置：干跑预览那次 build 不作块 1 的跨块历史
-t_loop0 = time.perf_counter()        # 任务秒表
-t_block0 = t_loop0                   # 块秒表（换块节拍）
-seam_first = None                    # 换块后首拍 |Δcmd|（接缝尖峰，主指标）
-seam_rest = []                       # 换块后其余拍 |Δcmd|（块内均值基准）
-seam_first_all = []                  # 跨块累计：每块首拍 |Δcmd|
-seam_intra_all = []                  # 跨块累计：每块块内均值 |Δcmd|
-seam_bw_all = []                     # 跨块累计：每块首拍最负分量（缝口回走，mrad）
-
-
-def seam_flush():
-    """把当前块的接缝样本并入跨块累计并复位（换块/收尾两处调用）。"""
-    global seam_first, seam_rest
-    if seam_first is not None:
-        seam_first_all.append(seam_first)
-    if seam_rest:
-        seam_intra_all.append(float(np.mean(seam_rest)))
-    seam_first = None
-    seam_rest = []
-starve_windows = 0                   # 星饿段数（块耗尽等推理的连续段）
-starve_ticks = 0                     # 星饿拍总数
-starve_total = 0.0                   # 星饿总时长 s
-starve_worst = 0.0                   # 最长星饿段 s
-_starve_t0 = None                    # 当前星饿段起点（None=不在星饿）
-skip_sends = 0                       # 导程 <GAP_EPS 免发拍数
-merged_skips = 0                     # 合步静默拍数（cmd-every>1 只消费不发送）
-_grp_k0 = 0                          # ramp 当前组起点拍号（块内，--cmd-every-ramp）
-_grp_idx = 0                         # 已耗 ramp 组数（耗尽后恒 cmd_every）
-dropped_ticks = 0                    # 落后超 1 拍的重锚次数（丢拍）
-overlap_hits = 0                     # 重叠混接生效块数（--seam-overlap-alpha）
-_old_rows_abs = None                 # 旧块行流快照（换块捕获，混接惯性项）
-_old_chunk = None                    # 旧块原始 chunk 快照（爪维混接用）
-_old_k = 0                           # 换块时旧流下一行号
-next_t = time.perf_counter()
-swap_envelope_check()
-_cur0 = read_joints(robot, ARM_NAMES)
-rows_abs, frames_all, bursts, grip_frames_all = build_block_stream(_cur0)
-print(f"\n── 块 1 | t+0.0s | 推理 {infer_ms.percentile(1.0) if len(infer_ms) else float('nan'):.0f} ms ──")
-print(f"[轨迹流] 行 {len(rows_abs)} → 帧 {len(frames_all)}（{args.interp} "
-      f"{args.frames_per_row} 帧/行，≈{args.fps * args.frames_per_row}Hz）")
-
-while not aborted:
-    # ── 节拍头：睡到绝对截止；落后超 1 拍即重锚（绝不连发追赶）──
-    now = time.perf_counter()
-    if now < next_t:
-        time.sleep(next_t - now)
-    elif now - next_t > TICK:
-        dropped_ticks += 1
-        next_t = now
-    next_t += TICK
-    t_tick = time.perf_counter()
-
-    # ── 换块：推理落地 → 整块换入弃尾（lerobot 水位语义）──
-    if job is not None and job.done():
-        # 重叠混接前置捕获（--seam-overlap-alpha）：旧块行流/chunk 在覆盖前
-        # 存快照——混接的惯性项=「旧计划未执行段」，弃尾模式直接丢、混接模式
-        # 留作 0.3 权重参考流（同事 _aggregate_action_queues 的 old 侧）。
-        _old_rows_abs = rows_abs.copy() if rows_abs is not None else None
-        _old_chunk = chunk.copy() if chunk is not None else None
-        _old_k = k
-        chunk = job.result()
-        _dur = job.dur_ms
-        infer_ms.add(_dur)
-        BASE_ARM = job.state_arm
-        job = None
-        n_swapped += 1
-        _dump_chunk(chunk, BASE_ARM, n_swapped, _dur)   # n_swapped 初值=1（首块计入）→ 块2 起 idx 连号不覆盖
-        prev_block_ticks = k          # 上块消费拍数（重置前捕获，表头用）
-        k = 0
-        _grp_k0 = _grp_idx = 0        # ramp 组游标随块复位
-        seam_flush()
-        # 重叠混接门与偏移（须在跳帧安装消费 _obs_k 前捕获）：偏移=取图→落地
-        # 流逝拍数=跳帧安装的 skip 数，同一把墙钟对齐键（同事栈 timestep 语义）
-        _ovp = (args.seam_overlap_alpha > 0 and args.merge <= 1
-                and n_swapped > 1
-                and last_tgt is not None and _old_rows_abs is not None)
-        # ⚠ merge 模式必须旁路：_ovp 块内按行网格 INTERP.interpolate 重建
-        # frames_all（n_macro×merge×per 帧），与宏步突发下标表不匹配（突发
-        # 只覆盖前 1/merge）——latest_only(α=1.0) 行混合虽是恒等，帧重建
-        # 仍是破坏性的，故 merge>1 直接关门。
-        _ovp_off = max(0, prev_block_ticks - _obs_k) if _ovp else 0
-        if _starve_t0 is not None:
-            _d = t_tick - _starve_t0
-            starve_windows += 1
-            starve_total += _d
-            starve_worst = max(starve_worst, _d)
-            _starve_t0 = None
-        round_ms.add((t_tick - t_block0) * 1000)
-        t_block0 = t_tick
-        print(f"\n── 块 {n_swapped} | t+{t_tick - t_loop0:6.1f}s | "
-              f"推理 {infer_ms.percentile(1.0):.0f} ms（上块 {round_ms.percentile(1.0) / 1000:.1f}s，"
-              f"{prev_block_ticks} 拍）──")
-        # ── 跳帧安装（--skip-install，infer_policy add_chunk skip_frames 同款）：
-        # 新 chunk 行 j 对应墙钟 t_obs + j·tick；换块时已流逝
-        # prev_block_ticks−_obs_k 拍，模型把这拍的 plan 重绘在行 0..skip——行 0
-        # 接续=先消费历史（块界「减速→冲刺」脉动的构造性根源）。跳掉后时间槽
-        # 对齐，首行天然在臂前方 ~lag 处（残差 7-30 mrad 级），回溯段不进链。
-        # 星饿期 k 冻结在块长=旧帧全部计流逝，同语义（hold 帧不占 plan 时隙）。
-        if args.skip_install and prev_block_ticks > _obs_k:
-            _skip_n = min(prev_block_ticks - _obs_k, len(chunk) - 1)
-            if _skip_n > 0:
-                chunk = chunk[_skip_n:].copy()
-                _obs_k = 0
-                print(f"  [跳帧安装] 丢前 {_skip_n} 行（观测→落地流逝拍，"
-                      f"墙钟槽位对齐接续；余 {len(chunk)} 行）")
-        if swap_envelope_check():
-            break
-        # 换块重建轨迹流：锚=当前实际位（链式限幅从实际位重新出发，块内开环
-        # 执行、块间重锚校正——轨迹路线的固有节奏，同 infer_policy）
-        _cur_sw = read_joints(robot, ARM_NAMES)
-        # ── 入口动态匹配（--entry-match，10-17 回放台移植；10-17 晚真机
-        # 174448 破案改锚）：闭环模型每块从观测臂位重锚定 → 新 chunk 前段天然
-        # 落在 last_tgt 之后（臂恒追着指令流跑），gap 若锚臂位则可行行只剩
-        # 1-13/50、每块深跳 gap 30-117 mrad 或超上限→行 0 回拖——一冲一收
-        # =摆幅（α 阶梯把深跳摊成拍1-6 的 12-13 mrad 反弹，块中 |Δcmd| 放大
-        # 3×）。锚改 last_tgt（续流语义）：在计划自然跨回参考的位置接入，首拍
-        # 步长≈g₀。①主导关节不退到臂后方 ②命令流单调（不把参考往回带；
-        # 追账段反向阶跃=伺服急停反转=摆动，回放台 171925 实证）③距
-        # last_tgt≈g₀ ④深跳超上限=行 0（EMA 阻尼小步，防棘轮）。
-        # 门均无符号绝对化+显著运动地板（180940 二破案，见门内注）。
-        # 匹配只含 14 臂关节维（chunk 第 7 列=夹爪，独立通道不参与）。
-        if args.entry_match and last_tgt is not None and n_swapped > 1:
-            _plan = BASE_ARM[None, :] + np.concatenate(
-                [chunk[:, :7], chunk[:, 8:15]], axis=1)
-            if not entry_gap_hist:
-                entries.append(0)
-                print("  [入口匹配] 缺 g₀ 历史（上块全免发）→行 0")
-            else:
-                _g0_raw = float(np.median(
-                    entry_gap_hist[-args.entry_gap_win:]))
-                _g0 = float(np.clip(_g0_raw, args.entry_gap_min,
-                                    args.entry_gap_max))
-                _dir = last_tgt - _cur_sw
-                _mag = np.abs(_dir)
-                # 显著运动地板（180940 二破案）：平静段参考-臂差全是几 mrad
-                # 噪声，主导集被噪声关节占满，方向门把微抖行全拒→30 行内凑不
-                # 出可行行→假回退→行0 落回计划锚点后阶梯展开进冲刺段=块内
-                # 呼吸（导程 10→42→11/块）。低于地板的关节不设门；全臂低于
-                # 地板=全部不设门（平静段只按 gap 匹配）。
-                _dom = ((_mag >= args.entry_dir_floor)
-                        & (_mag >= args.entry_dir_frac
-                           * max(float(_mag.max()), 1e-9)))
-                _rel = _plan - _cur_sw[None]
-                # 方向门三代教训（174448/180940/181946）：符号门锁过冲帧
-                # （_ds 反转把前进续流误判违约）、绝对门锁拖曳帧（计划爬不过
-                # last_tgt 时参考被钉在臂前 40-98 mrad，每块行0+阶梯展开=脉冲，
-                # 拖曳恒存）——两代各有一类「全窗不可行」死帧。--entry-no-dir-gate
-                # 全关后选择恒有解：argmin|gap−g₀| 自然落跨回点/最近逼近点，
-                # backward 步长被 α 阶梯阻尼到 ≤0.12×（软着陆是 EMA 本体职能，
-                # 门只是回放台开环内容下的校验器，闭环里越位）。
-                if args.entry_no_dir_gate:
-                    _cand = np.arange(len(_plan))
-                else:
-                    _ds = np.sign(_dir)
-                    _back = (_dom[None, :]
-                             & ((_rel * _ds[None, :]) < -args.entry_dir_tol))
-                    _back_cmd = (_dom[None, :]
-                                 & (((_plan - last_tgt[None]) * _ds[None, :])
-                                    < -args.entry_dir_tol))
-                    _viol = (_back | _back_cmd).any(axis=1)
-                    _cand = np.where(~_viol)[0]
-                # gap 锚=last_tgt（174448 改锚，见上注）：闭环臂恒落后参考，
-                # 锚臂位=每块深跳追参考；锚参考=在计划跨回指令流处接入。
-                _gaps = np.max(np.abs(_plan - last_tgt[None]), axis=1)
-                # 窗口完整余量 14 行（水位 0 块长≈13 拍）∩ 跳深上限
-                _jcap = min(max(0, len(chunk) - 14),
-                            max(0, int(args.entry_j_cap)))
-                if len(_cand) and (_cand <= _jcap).any():
-                    _cand = _cand[_cand <= _jcap]
-                    # 前向偏好软代价（10-18 用户提案）：|gap−g₀| 绝对值匹配在参考
-                    # 两侧同距行间分不出方向，选中后方侧=首拍倒退（EMA 阻尼≤0.12×
-                    # 但非零）。目标加 ε×后方越界量——软偏好非硬门，无死帧，纯
-                    # 选择层不加内容。后方越界只在主导关节上计（151241 二破案）：
-                    # 臂恒落后参考一段导程，用 last_tgt 全关节计罚会把落后关节的
-                    # ≈导程常数抬进所有浅行——ε 名义挑前向、实为挑深跳（j 被推
-                    # 深、参考更热），且同罚不改排序只加热。限主导关节=纯「模型
-                    # 自身是否在倒退」的度量；全臂平静段 _dom 全假=罚项自动退场。
-                    _obj = np.abs(_gaps[_cand] - _g0)
-                    if args.entry_fwd_bias > 0:
-                        _behind = np.maximum(
-                            (last_tgt[None, :] - _plan) * _dom[None, :],
-                            0.0).max(axis=1)
-                        _obj = _obj + args.entry_fwd_bias * _behind[_cand]
-                    _entry = int(_cand[np.argmin(_obj)])
-                    chunk = chunk[_entry:].copy()
-                    entries.append(_entry)
-                    print(f"  [入口匹配] j={_entry}（g₀={_g0 * 1000:.1f}"
-                          + (f"←{_g0_raw * 1000:.1f}夹紧"
-                             if _g0 != _g0_raw else "")
-                          + f" gap={_gaps[_entry] * 1000:.1f} mrad"
-                          + (f"，后越={_behind[_entry] * 1000:.1f}"
-                             if args.entry_fwd_bias > 0 else "")
-                          + f"，可行行 {len(_cand)}/{len(_plan)}；"
-                          f"余 {len(chunk)} 行）")
-                else:
-                    entries.append(0)
-                    _nf = np.where(~_viol)[0]
-                    _why = (f"可行最早 j={int(_nf[0])} 仍在窗外"
-                            if len(_nf) else "全窗无可行行")
-                    print(f"  [入口匹配] 前跳超上限{_jcap}→行 0"
-                          f"（{_why}，EMA 阻尼小步）")
-            # ── 凹陷填补（--entry-fill-dip，10-18 用户提案）：门全关后
-            # argmin|gap−g₀| 是绝对值匹配，参考两侧同距的行都可选——选中后方侧
-            # =首拍倒退（残摆源）；块内模型抖动的短促倒退段也照样入流。修补=
-            # 按关节把「回补窗内的短倒退凹陷」从坑前水平线性桥到回补行（用户
-            # 例：5→−7→−4→…→12 填成 5→桥→12，"补到能顺利衔接上的那个拍"；
-            # 取 0 持位/镜像取正侧都是桥的特例）。超窗不回补=持续后撤（真倒退）
-            # 放行——真后撤是平滑趋势非方向翻转，伺服追得上，不吃模型合法修正。
-            # 在 EMA 阶梯之前执行，EMA 再低通一次。
-            if args.entry_fill_dip:
-                _abs = BASE_ARM[None, :] + np.concatenate(
-                    [chunk[:, :7], chunk[:, 8:15]], axis=1)
-                _ftol = float(args.entry_fill_tol)
-                _fmax = max(2, int(args.entry_fill_max))
-                _seq = np.vstack([last_tgt[None, :], _abs])   # 锚=指令流尾
-                _ndip = _nrow = 0
-                for _j in range(_seq.shape[1]):
-                    _x = _seq[:, _j]
-                    _i = 1
-                    while _i < len(_x):
-                        if _x[_i] < _x[_i - 1] - _ftol:       # 凹陷起点
-                            _lvl = _x[_i - 1]
-                            _rec = -1
-                            for _k in range(_i, min(len(_x), _i + _fmax)):
-                                if _x[_k] >= _lvl - _ftol:
-                                    _rec = _k
-                                    break
-                            if _rec > 0:                       # 窗内回补→桥
-                                _x[_i:_rec] = np.linspace(
-                                    _lvl, _x[_rec], _rec - _i + 2)[1:-1]
-                                _ndip += 1
-                                _nrow += _rec - _i
-                                _i = _rec
-                            else:
-                                _i += 1                        # 真倒退放行
-                        else:
-                            _i += 1
-                chunk[:, :7] = _seq[1:, :7] - BASE_ARM[None, :7]
-                chunk[:, 8:15] = _seq[1:, 7:14] - BASE_ARM[None, 7:]
-                if _ndip:
-                    print(f"  [凹陷填补] 桥接 {_ndip} 处 / {_nrow} 行")
-        # ── EMA 重播（10-12 真机否决修正，161933 实测拍0 p90 294.6/max 559.3）：
-        # _EMA_STATE 原存整条 50 行链滤波完的链尾，而水位 10 弃尾每块只发 ~40
-        # 行——状态记在旧计划未发送的尾巴上（超前已发送点 ~10 行 ≈ 数百 mrad），
-        # 下一块 rows[0]=0.3×新首行+0.7×旧链尾=块首整体瞬移、伺服逐块冲刺。
-        # 改为从「最后实际下发目标」重播滤波：rows[0] 距臂 ≤ 滞后量级，且与
-        # blend 搭接基点（last_tgt）同基准，EMA/blend 状态差随之消失。
-        if args.ema_alpha > 0 and last_tgt is not None:
-            _EMA_STATE = last_tgt.copy()
-        # ── 参考链连续（skip-install 配套，10-13 真机 110411 判明）：链式限幅
-        # 从当前臂位重建链会把参考钳回 cur+delta_max（拍0 导程 50），换块锯齿
-        # 50→330→50 = 脉动的残留源（跳帧安装只对了时间槽，没动链锚）。
-        # 跳帧安装后新块行 0 本就 ≈ 墙钟正确位（≈last_tgt±模型修正），链改从
-        # last_tgt 接续：首帧恰=last_tgt（零缝步），参考全程前向不重锚——同
-        # 同事方案「执行原始计划行、无重锚」的语义。entry-match 同需参考
-        # 连续（首行=last_tgt+clip 修正，与入口判据同基准）。非二者口径不变。
-        _prev0 = last_tgt if ((args.skip_install or args.entry_match
-                               or args.continuous_ref)
-                              and last_tgt is not None) else None
-        _roff = None
-        if _prev0 is not None and args.ref_offset:
-            # 偏移平移（10-13）：新计划行 0 锚在观测滞后臂上，与参考链的失配量
-            # 就是块首回走刹车的来源。整条计划平移 offset 后 rows[0]=last_tgt
-            # （失配 ≤delta-max 时零缝步），臂速无块界刹车、导程呼吸趋平。
-            # offset 逐维钳 ±delta-max：平移后目标距计划绝对位 ≤50 mrad，
-            # 吃不满包络余量 ±0.15；残余失配仍由链式限幅回走收敛兜底。
-            _plan0 = BASE_ARM + np.concatenate([chunk[0][:7], chunk[0][8:15]])
-            _roff = np.clip(last_tgt - _plan0, -args.delta_max, args.delta_max)
-        rows_abs, frames_all, bursts, grip_frames_all = build_block_stream(
-            _cur_sw, prev0=_prev0, offset=_roff,
-            seam=(args.entry_match and n_swapped > 1))
-        # ── 重叠混接（--seam-overlap-alpha，2026-10-20 同事 lerobot 栈
-        # weighted_average 移植）：跳帧安装已把新块行 i 对齐墙钟槽「旧流
-        # 自拍 _old_k+i」，此处把混接窗内每行替换为 (1−α)·旧流+α·新链——
-        # 旧计划从「被弃尾」变为「惯性项」，换块跳变被凸组合衰减并摊在
-        # 整个重叠区（同事 _aggregate_action_queues：0.3·old+0.7·new，
-        # 重叠区=新块与旧队列的 timestep 交集；水位 0 节奏下稳态=每行
-        # 都是两代计划混合，接缝不再是事件而是永续惯性）。爪维 dim7/15
-        # 数据集语义即绝对 0-100，同窗同权凸组合仍在值域。链式限幅/样条
-        # /包络在混接前已作用于新链（凸组合的两个分量都近 last_tgt，
-        # 结果不引入超限步长）；帧流随行目标重建（同 --blend 手法）。
-        if _ovp:
-            _a = float(args.seam_overlap_alpha)
-            _m = min(len(_old_rows_abs) - _old_k, len(rows_abs))
-            if _m > 0:
-                rows_abs[:_m] = ((1.0 - _a) * _old_rows_abs[_old_k:_old_k + _m]
-                                 + _a * rows_abs[:_m])
-                chunk[:_m, 7] = ((1.0 - _a) * _old_chunk[_old_k:_old_k + _m, 7]
-                                 + _a * chunk[:_m, 7])
-                chunk[:_m, 15] = ((1.0 - _a) * _old_chunk[_old_k:_old_k + _m, 15]
-                                  + _a * chunk[:_m, 15])
-                _wp0 = (np.asarray(_prev0, dtype=np.float32)
-                        if _prev0 is not None else np.asarray(_cur_sw,
-                                                              dtype=np.float32))
-                _wp = np.vstack([_wp0[None, :], rows_abs])
-                frames_all = INTERP.interpolate(_wp)
-                if ENV_LO is not None:
-                    np.clip(frames_all, ENV_LO14[None, :], ENV_HI14[None, :],
-                            out=frames_all)
-                overlap_hits += 1
-                print(f"  [重叠混接] 旧{1.0 - _a:g}/新{_a:g}｜偏移 {_ovp_off} 行"
-                      f"｜混接窗 {_m} 行（旧流自拍 {_old_k}，块内实际消费至"
-                      f"水位为止）")
-            else:
-                print(f"  [重叠混接] 旧流已耗尽（自拍 {_old_k} ≥ 流长 "
-                      f"{len(_old_rows_abs)}）→ 纯新计划接管")
-        # ── 前向搭接（--blend，10-12 回放台定案移植）：新块前 M 行目标替换为
-        # 旧链末目标→rows[M−1] 直连——换块时新块行 0 落在臂后方 ~lag（预取到
-        # 落地 ~10 拍臂又走了），原链会俯冲进回溯段=块首往复；搭接让参考链
-        # 全程前向、臂不停车不回摆。1:1 替换不加拍；末行恰=原 rows[M−1]，
-        # EMA 状态链/包络凸性/消费配额均不受影响。门与回放台同款（滞后>60）。
-        if args.blend and last_tgt is not None:
-            _d_all = np.max(np.abs(rows_abs - _cur_sw[None, :]), axis=1)
-            _d_old = float(np.max(np.abs(last_tgt - _cur_sw)))
-            _rise = np.where(_d_all >= _d_old - 0.01)[0]
-            _m = (int(_rise[0]) + 1) if len(_rise) else len(rows_abs) - 1
-            _m = max(2, min(_m, len(rows_abs) - 2))
-            if (_d_old > args.blend_gate
-                    and _d_old - float(_d_all.min()) > args.blend_gate
-                    and _m < len(rows_abs) - 1):
-                _bstep = (rows_abs[_m - 1] - last_tgt) / _m
-                for _g in range(_m):
-                    rows_abs[_g] = last_tgt + _bstep * (_g + 1)
-                _wp = np.vstack([np.asarray(_cur_sw, dtype=np.float32)[None, :],
-                                 rows_abs])
-                frames_all = INTERP.interpolate(_wp)   # 帧流随行目标重建（消俯冲）
-                if ENV_LO is not None:
-                    np.clip(frames_all, ENV_LO14[None, :], ENV_HI14[None, :],
-                            out=frames_all)
-                blend_hits += 1
-                print(f"  [搭接] 前 {_m} 行前向直连旧链末目标"
-                      f"（滞后 {_d_old * 1000:.0f} mrad → 行{_m - 1}，"
-                      f"每行 ≤ {float(np.max(np.abs(_bstep))) * 1000:.1f} mrad）")
-
-    exhausted = k >= len(chunk)
-    if exhausted:
-        # ── 星饿：不下发（刚性伺服保持最后目标原地等待），只等推理 ──
-        if _starve_t0 is None:
-            _starve_t0 = t_tick
-        starve_ticks += 1
-        if t_tick - _starve_t0 > args.starve_limit:
-            print(f"⛔ 星饿超 {args.starve_limit}s（推理未归）——判挂死，停止循环"
-                  "（机械臂留在原地）")
-            aborted = True
-    else:
-        # ── 合步节流（--cmd-every N>1，默认 1=零变）：非发送拍只消费不发送，
-        # k 照常推进（参考时间线/水位/星饿/预取语义全部不动）；发送拍整组并
-        # 1 条，目标=组末行绝对位（帧/爪同取组末行，口径一致）。
-        # --cmd-every-ramp：缝侧组宽序列（1/1/2→N），组游标 _grp_k0/_grp_idx
-        # 随块复位；组宽=1 的发送拍 tgi=k=锚行 j 本身（entry-match 匹配精度
-        # 不再被 +N−1 吃掉）。g₀ 窗只记满宽组（单位=4 行组差，细笔拍不入窗）。
-        _ramp_on = bool(args.cmd_every_ramp) and args.cmd_every > 1
-        if _ramp_on:
-            _grp_n = (args.cmd_every_ramp[_grp_idx]
-                      if _grp_idx < len(args.cmd_every_ramp) else args.cmd_every)
-            _send_this = k >= _grp_k0 + _grp_n - 1
-            _is_merged = args.cmd_every > 1 and _send_this
-            if _send_this:
-                _grp_k0, _grp_idx = k + 1, _grp_idx + 1
-        else:
-            _is_merged = args.cmd_every > 1 and (
-                k == 0 if args.cmd_first_only else k % args.cmd_every == 0)
-            # 发送拍 = 合步拍，或（first-only 口径）组后恢复的逐拍流式拍
-            _send_this = _is_merged or (args.cmd_first_only and k >= args.cmd_every)
-            _grp_n = args.cmd_every
-        if args.cmd_every > 1 and not _send_this:
-            k += 1
-            merged_skips += 1
-        else:
-            # ── 发送拍：合步拍发组末行、流式拍发本行（全部走 set_joint_commands
-            # burst 接口；接口铁律见文件头——本脚本不碰 set_joint_positions）──
-            tgi = (k if _ramp_on else
-                   (min(k + args.cmd_every - 1, len(rows_abs) - 1) if _is_merged else k))
-            cur = read_joints(robot, ARM_NAMES)
-            tgt = rows_abs[tgi]
-            gap0 = float(np.max(np.abs(tgt - cur)))
-            # 拍线 |Δcmd| 口径（replay 台 cd4c1a3 同构）：merge 模式记真实下发
-            # 帧流——发送拍=本拍最后发送帧 vs 上次发送帧，免发拍持有上次
-            # （帧+0.0=真原地、免发=静默）；merge=1 行目标口径不变
-            #（接缝尖峰 seam_first 历史可比）。
-            if args.merge > 1:
-                _ref_new = (frames_all[bursts[tgi][-1]]
-                            if (gap0 >= GAP_EPS and bursts[tgi]) else last_tgt)
-            else:
-                _ref_new = tgt
-            cmd_delta = ((_ref_new - last_tgt) if last_tgt is not None
-                         else np.zeros_like(tgt))
-            d_mrad = float(np.max(np.abs(cmd_delta))) * 1000
-            if seam_first is None:
-                seam_first = d_mrad          # 接缝尖峰：换块首发 |Δcmd|
-                # 缝口回走：首拍有符号最负分量（>0=目标倒退）。|Δcmd| 无符号
-                # 看不见它——量级正常但方向倒退=伺服减速/反打，停顿主嫌疑。
-                _bw = float(np.max(-cmd_delta)) * 1000
-                seam_bw_all.append(_bw)
-                _bw_s = f" | ⚠回走{_bw:.1f}mrad" if _bw >= 0.5 else ""
-            else:
-                seam_rest.append(d_mrad)
-                _bw_s = ""
-            if grip_frames_all is not None:
-                # 爪随臂宏步帧流：发本拍末帧（突发完成时刻的插值目标，
-                # 与拍线 |Δcmd| 帧流口径同帧）；空突发=静默持有
-                _gb = bursts[tgi]
-                gp = (send_grip_joint(robot, None, args.tfs_ms / 1000.0,
-                                      frame=grip_frames_all[_gb[-1]])
-                      if _gb else None)
-            else:
-                gp = (send_grip_joint(robot, chunk[tgi], args.tfs_ms / 1000.0)
-                      if args.grip_path == "joint"
-                      else send_grip(robot, chunk[tgi]))
-            if (args.entry_match and gap0 >= GAP_EPS
-                    and _grp_n == args.cmd_every):
-                # g₀ 滚动窗：只记实发拍（免发拍污染中位），同回放台口径
-                entry_gap_hist.append(d_mrad / 1000.0)
-                if len(entry_gap_hist) > 32:
-                    del entry_gap_hist[:-32]
-            drift = float(np.max(np.abs(tgt - HOME)))
-            if drift > args.max_excursion:
-                print(f"⛔ 漂移护栏：关节最大偏离 {drift * 1000:.0f} mrad > "
-                      f"{args.max_excursion * 1000:.0f}，停止循环（机械臂留在原地）")
-                aborted = True
-                break
-            if gap0 >= GAP_EPS:
-                b = bursts[tgi]
-                if args.do_exec:
-                    # 帧突发：绝对截止配速（预算 tick−reserve 匀速铺满整行），
-                    # SDK 单帧调用超预算只体现为丢拍重锚，绝不追发
-                    fdt = (TICK - args.burst_reserve_ms / 1000.0) / len(b)
-                    _t_f = time.perf_counter()
-                    st = None
-                    for _bi, _fi in enumerate(b):
-                        _fr = frames_all[_fi]
-                        _cmds = []
-                        for _ji in range(14):
-                            _c = JointCommand()
-                            _c.position = float(_fr[_ji])   # 标准关节只消费 position
-                            _cmds.append(_c)
-                        _st = robot.set_joint_commands(_cmds, joint_names=ARM_NAMES,
-                                                       time_from_start_s=args.tfs_ms / 1000.0)
-                        if not str(_st).startswith("ControlStatus.SUCCESS"):
-                            st = _st
-                            break
-                        _t_f += fdt
-                        if _bi < len(b) - 1:
-                            _sl = _t_f - time.perf_counter()
-                            if _sl > 0:
-                                time.sleep(_sl)
-                    if st is not None:
-                        print(f"⛔ 下发非 SUCCESS（{st}），停止循环")
-                        aborted = True
-                        break
-                else:
-                    st = "dry"   # 干跑彩排：打印节奏与遥测，绝不下发
-                n_fr = len(b)
-            else:
-                skip_sends += 1
-                n_fr = 0
-                st = "held（导程≈0 免发）"
-            last_tgt = _ref_new.copy() if _ref_new is not None else None
-            k += 1
-            ach = read_joints(robot, ARM_NAMES)
-            err = float(np.max(np.abs(ach - tgt))) * 1000
-            track_err.append(err)
-            # 合步拍打实际下发沿频率（沿=fps/组宽，ramp 变宽逐拍如实）；
-            # 流式拍维持 @参考流密度 旧口径（fps×frames_per_row）
-            if n_fr:
-                fr_s = (f"{n_fr}帧·沿{args.fps / _grp_n:.0f}Hz" if _is_merged
-                        else f"{n_fr}帧@{args.fps * args.frames_per_row / args.merge:.0f}Hz")
-            else:
-                fr_s = ("· 无帧 ·" if (args.merge > 1 and not bursts[tgi])
-                        else "· 免发 ·")
-            print(f"  拍{k - 1}: |Δcmd| {d_mrad:5.1f} mrad"
-                  f" | 导程 {gap0 * 1000:5.1f} → {fr_s}"
-                  f" | 残差 {err:4.1f} mrad"
-                  + (f" | 合步[{tgi}]×{_grp_n}" if _is_merged else "")
-                  + _bw_s
-                  + f" | {gp if gp else st}")
-
-    # ── 出口：最后一块消费到水位（或包络截短后耗尽）──
-    _w = min(WMARK, len(chunk))
-    if n_swapped >= args.rounds and (k >= _w or k >= len(chunk)):
-        break
-
-    # ── 预取：到水位且无在飞推理 → 带前缀启动下块 ──
-    if job is None and n_swapped < args.rounds and k >= _w:
-        _obs_k = k               # 观测拍摄时点（跳帧安装的流逝基准）
-        _obs, _st_n, _st_arm = fresh_obs()
-        job = _PredictJob(model, args.prompt)
-        job.start(_obs, _st_n, _st_arm, rtc_prefix=_rtc_prefix(_st_arm))
-
-    tick_ms.add((time.perf_counter() - t_tick) * 1000)
-
-# ── ④ 汇总 ──
-seam_flush()
-if _starve_t0 is not None:
-    _d = time.perf_counter() - _starve_t0
-    starve_windows += 1
-    starve_total += _d
-    starve_worst = max(starve_worst, _d)
-if GRIP and args.do_exec:
-    time.sleep(8.0)   # 等爪走完最后一程再读终态（死区 0.9s+满程 0.8s，含余量）
-    for name, _ in GRIP["names"]:
-        gs = robot.get_gripper_state(getattr(G1JointGroup, name))
-        if gs is not None:
-            print(f"夹爪终态 {name}: {gs.width * 1000:.1f} mm "
-                  f"(moving={gs.is_moving} eff={gs.effort:.1f})")
-    if args.grip_hold_on_stall and _GRIPJ_HOLD:
-        _hs = "  ".join(f"{n.split('_')[0].upper()} 进{v['enters']}"
-                        f"{'/保持中' if v['on'] else ''}"
-                        f"{'/松' + str(v['relax_n']) if v['relax_n'] else ''}"
-                        f"{'/静' + str(v['silent_n']) if v['silent_n'] else ''}"
-                        for n, v in _GRIPJ_HOLD.items())
-        print(f"爪憋死保持统计: {_hs}")
-fin = read_joints(robot, ARM_NAMES)
-exc = float(np.max(np.abs(fin - HOME))) * 1000
-print(f"\n== 汇总（{n_swapped} 块 / {len(tick_ms)} 拍 / tick {TICK * 1000:.1f} ms / "
-      f"轨迹流 {args.frames_per_row} 帧/行 {args.interp}）==")
-print(f"总用时: {time.perf_counter() - t_loop0:.1f} s"
-      f"（数据集单条任务 13s / 390 步参照）")
-if len(infer_ms):
-    print(f"推理: {pstats(infer_ms)}")
-if len(grab_ms):
-    print(f"取图+读关节: {pstats(grab_ms)}")
-if len(tick_ms):
-    print(f"tick 服务时长: {pstats(tick_ms)} | 丢拍重锚 {dropped_ticks} | 免发 {skip_sends}"
-          + (f" | 合步静默 {merged_skips} 拍（cmd-every {args.cmd_every}）"
-             if args.cmd_every > 1 else ""))
-if len(round_ms):
-    print(f"块耗时: {pstats(round_ms)}")
-if track_err:
-    print(f"导程残差: mean {np.mean(track_err):.1f} | max {max(track_err):.1f} mrad"
-          + (f"；包络护栏截断 {env_trunc} 块" if ENV_LO is not None else ""))
-if seam_first_all:
-    _intra = float(np.mean(seam_intra_all)) if seam_intra_all else float("nan")
-    print(f"接缝尖峰（换块首拍 |Δcmd|）: 均值 {np.mean(seam_first_all):.1f} | 最大 "
-          f"{max(seam_first_all):.1f} mrad | 块内均值 {_intra:.1f} mrad"
-          f"（RTC A/B 主指标：--rtc-horizon on 应显著压低首拍/块内比）"
-          + (f"（合步口径：首发含 {args.cmd_every} 行组差，勿与直发跑直比）"
-             if args.cmd_every > 1 else "")
-          + (f" | 搭接触发 {blend_hits} 块" if args.blend else ""))
-if seam_bw_all:
-    _bw = np.asarray(seam_bw_all, float)
-    print(f"缝口回走（换块首拍最负分量，>0=目标倒退）: 块 {len(_bw)} | "
-          f"p50/p90/max {np.percentile(_bw, 50):.1f}/{np.percentile(_bw, 90):.1f}/"
-          f"{_bw.max():.1f} mrad | ≥2mrad {int((_bw >= 2).sum())} 块"
-          f"（回走大=伺服减速/反打，停顿嫌疑；对比 154843 好感基线）")
-if args.entry_match and entries:
-    _e = np.asarray(entries, float)              # 仅块 2+ 追加（首块无入口）
-    print(f"入口匹配: 块 {len(_e)} | j min/p50/max "
-          f"{_e.min():.0f}/{np.median(_e):.0f}/{_e.max():.0f}"
-          f"（行0 {int((_e == 0).sum())} 块；j 是内容/位姿失配的深读数，"
-          "闭环应显著浅于回放台）")
-if overlap_hits:
-    print(f"重叠混接: {overlap_hits} 块（α新={args.seam_overlap_alpha:g}，"
-          "偏移=取图→落地流逝拍；首拍 |Δcmd| 即混接后缝口径，与 A 组直比）")
-if starve_windows or starve_ticks:
-    print(f"星饿: {starve_windows} 段 / {starve_ticks} 拍 / 共 {starve_total:.1f} s"
-          f"（最长 {starve_worst:.1f}s，上限 {args.starve_limit}s 未触发即健康）")
-if dropped_ticks:
-    print(f"⚠ 丢拍重锚 {dropped_ticks} 次（tick 服务超 {TICK * 1000:.1f} ms——"
-          "取图拍撞推理落地拍等；持续丢拍说明 --fps 偏高）")
-print(f"最终偏离起始位: {exc:.0f} mrad（护栏 {args.max_excursion * 1000:.0f} mrad）"
-      + (" ⛔ 护栏触发过" if aborted else ""))
-
-WATCH.restore()
-if NAV is not None:
-    NAV.resume()
-print("SDK 关闭中...")
-robot.request_shutdown(); robot.wait_for_shutdown(); robot.destroy()
-os._exit(0)   # SDK 残留线程，干净退出
+TE.FACE = "g1"
+TE.args = args
+TE.robot = robot
+TE.model = model
+TE.ns = ns
+TE.TICK = TICK
+TE.WATCH = WATCH
+TE.HOME = HOME
+TE.WMARK = WMARK
+TE.GAP_EPS = GAP_EPS
+TE.GRIP = GRIP
+TE.ENV_LO, TE.ENV_LO14, TE.ENV_HI14 = ENV_LO, ENV_LO14, ENV_HI14
+TE.INTERP = INTERP
+TE.NAV = NAV
+TE._frames_dir = _frames_dir
+TE._dump_dir = _dump_dir
+TE.CKPT = CKPT
+TE._env_file = _env_file
+TE.ARM_NAMES, TE.ARM_SLICE, TE.STATE_NAMES = ARM_NAMES, ARM_SLICE, STATE_NAMES
+TE._GRIPJ_HOLD = _GRIPJ_HOLD
+TE.grab_views = grab_views
+TE.grip_state_cmd_override = grip_state_cmd_override
+TE.read_joints = read_joints
+TE.send_grip = send_grip
+TE.send_grip_joint = send_grip_joint
+TE.state_from_joints = state_from_joints
+TE.JointCommand = JointCommand
+TE.G1JointGroup = G1JointGroup
+TE.run()

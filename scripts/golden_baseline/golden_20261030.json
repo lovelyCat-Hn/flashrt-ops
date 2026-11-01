@@ -1,16 +1,16 @@
 {
  "meta": {
   "date": "2026-10-30",
-  "git_head": "09ee70c",
+  "git_head": "d7ccdbf",
   "python": "3.11.16",
   "numpy": "1.26.4",
   "files": {
-   "scripts/s1/inference/run_s1_loop_traj.py": "596b4cc9e997e0e7",
+   "scripts/s1/inference/run_s1_loop_traj.py": "dfcf6f74429b4ab6",
    "scripts/g1/inference/run_g1_loop_traj.py": "0e05ca85638fce4e",
-   "scripts/s1/inference/s1_traj_interp.py": "447598961bba8443",
-   "scripts/g1/inference/g1_traj_interp.py": "6bfb63d9c52124d6",
-   "scripts/s1/inference/s1_config.py": "68920b36667379db",
-   "scripts/g1/inference/g1_config.py": "904e91b255f4c8ae"
+   "scripts/s1/inference/s1_traj_interp.py": "09f39af066cc3f24",
+   "scripts/g1/inference/g1_traj_interp.py": "48a832b65e9892f2",
+   "scripts/s1/inference/s1_config.py": "752e34b05bd8d28f",
+   "scripts/g1/inference/g1_config.py": "6c37c621433a75a1"
   }
  },
  "cases": {
@@ -4953,6 +4953,329 @@
      0.3078579902648926
     ]
    ]
+  },
+  "g1body/state_from_joints": {
+   "missing": [],
+   "st": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    50.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    3.8834950923919678
+   ],
+   "st_nocal": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.05849999934434891,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.010999999940395355
+   ],
+   "warn": "⚠ 夹爪未标定：SDK 宽度(米)原样进 state，与数据集 0~100% 单位不符!\n"
+  },
+  "g1body/grip_state_cmd_override": {
+   "holding": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    33.5,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    60.0
+   ],
+   "no_grip": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "flag_off": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  "g1body/read_joints": {
+   "vals": [
+    0.0,
+    0.009999999776482582,
+    0.019999999552965164,
+    0.029999999329447746,
+    0.03999999910593033,
+    0.05000000074505806,
+    0.05999999865889549,
+    0.07000000029802322,
+    0.07999999821186066,
+    0.09000000357627869,
+    0.10000000149011612,
+    0.10999999940395355,
+    0.11999999731779099,
+    0.12999999523162842
+   ],
+   "fail": "关节读取失败（返回 0 维）"
+  },
+  "g1body/send_grip_chg": {
+   "c1": "R 50.0%→58mm@0.15 实20.0mm eff100.0 SUCCESS  L 20.0%→28mm@0.15 实20.0mm eff100.0 SUCCESS",
+   "c2": "R 50.0%·hold  L 20.0%·hold",
+   "c3": "R 60.0%→69mm@0.15 实20.0mm eff100.0 SUCCESS  L 20.0%·hold",
+   "sent": {
+    "right_gripper": 60.0,
+    "left_gripper": 20.0
+   },
+   "cmds": [
+    [
+     "right_gripper",
+     0.0585,
+     0.15,
+     30,
+     false
+    ],
+    [
+     "left_gripper",
+     0.0276,
+     0.15,
+     30,
+     false
+    ],
+    [
+     "right_gripper",
+     0.0688,
+     0.15,
+     30,
+     false
+    ]
+   ]
+  },
+  "g1body/send_grip_ss": {
+   "c1": "R 60.0%→69mm@0.15 实20.0mm eff100.0 SUCCESS(首拍)",
+   "c2": "R 60.0%·hold",
+   "c3": "R 30.0%·hold",
+   "c4": "R 15.0%→22mm@0.15 实20.0mm eff100.0 SUCCESS(合阈)",
+   "c5": "R 31.0%→39mm@0.15 实20.0mm eff100.0 SUCCESS(漂移补发)",
+   "ss_state": {
+    "right_gripper": "lo"
+   },
+   "cmds": [
+    [
+     "right_gripper",
+     0.0688,
+     0.15,
+     30,
+     false
+    ],
+    [
+     "right_gripper",
+     0.02245,
+     0.15,
+     30,
+     false
+    ],
+    [
+     "right_gripper",
+     0.03893,
+     0.15,
+     30,
+     false
+    ]
+   ]
+  },
+  "g1body/send_grip_joint": {
+   "h1": "R 0.0%→7mm@j 实20.0mm eff100.0  L 100.0%→110mm@j 实20.0mm eff100.0 jOK",
+   "h2": "R 0.0%→7mm@j 实20.0mm eff100.0  L 100.0%→110mm@j 实20.0mm eff100.0 jOK",
+   "h3": "R 0.0%→19mm@j 实20.0mm eff100.0 HOLD进入  L 100.0%→110mm@j 实20.0mm eff100.0 jOK",
+   "h4": "R 24.0%→32mm@j 实20.0mm eff100.0 HOLD退出  L 100.0%→110mm@j 实20.0mm eff100.0 jOK",
+   "hold": {
+    "right_gripper": {
+     "on": false,
+     "hist": [],
+     "enters": 1,
+     "tgt": null,
+     "floor": null,
+     "rail": 0,
+     "relax_n": 0,
+     "quiet": 0,
+     "silent_n": 0
+    },
+    "left_gripper": {
+     "on": false,
+     "hist": [
+      [
+       0.02,
+       false
+      ],
+      [
+       0.02,
+       false
+      ],
+      [
+       0.02,
+       false
+      ]
+     ],
+     "enters": 0,
+     "tgt": null,
+     "floor": null,
+     "rail": 0,
+     "relax_n": 0,
+     "quiet": 0,
+     "silent_n": 0
+    }
+   },
+   "ema": {
+    "right_gripper": 24.0,
+    "left_gripper": 100.0
+   },
+   "cmds": [
+    [
+     [
+      [
+       0.007,
+       0.15,
+       10.0
+      ],
+      [
+       0.11,
+       0.15,
+       10.0
+      ]
+     ],
+     [
+      "right_gripper",
+      "left_gripper"
+     ],
+     0.033
+    ],
+    [
+     [
+      [
+       0.007,
+       0.15,
+       10.0
+      ],
+      [
+       0.11,
+       0.15,
+       10.0
+      ]
+     ],
+     [
+      "right_gripper",
+      "left_gripper"
+     ],
+     0.033
+    ],
+    [
+     [
+      [
+       0.019,
+       0.15,
+       10.0
+      ],
+      [
+       0.11,
+       0.15,
+       10.0
+      ]
+     ],
+     [
+      "right_gripper",
+      "left_gripper"
+     ],
+     0.033
+    ],
+    [
+     [
+      [
+       0.03172,
+       0.15,
+       10.0
+      ],
+      [
+       0.11,
+       0.15,
+       10.0
+      ]
+     ],
+     [
+      "right_gripper",
+      "left_gripper"
+     ],
+     0.033
+    ]
+   ]
+  },
+  "g1body/grab_views": {
+   "keys": [
+    "image",
+    "left"
+   ],
+   "shape": [
+    224,
+    224,
+    3
+   ],
+   "sum": 13793177,
+   "sum2": 13793946,
+   "freeze": "⛔ 相机流疑似冻结：HEAD_RIGHT_CAMERA 连续 3 轮逐字节相同（实时流有传感器噪声不可能全等）——观测已失真，停止循环。排查 RT 相机服务"
+  },
+  "g1body/nav_resume": {
+   "out": "[nav-suspend] 已恢复 1 进程（CONT 幂等；守护网发现主进程退出后自退）\n",
+   "stopped": {}
   },
   "config/s1": {
    "builtin": {

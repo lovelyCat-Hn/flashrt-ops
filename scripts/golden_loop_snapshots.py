@@ -23,13 +23,16 @@ common/ 整理工程的红线=「只搬不改、行为零变」——本 harness
 """
 import argparse
 import ast
+import contextlib
 import hashlib
+import io
 import json
 import os
 import pathlib
 import platform
 import sys
 import tempfile
+import time
 import types
 
 import numpy as np
@@ -206,6 +209,160 @@ def traj_namespace(func_names, args, **extra):
     if ns is None:
         return None, missing
     return ns, []
+
+
+# ── G1 机体函体命名空间（步2c：G1 分歧函体现状口径闸）─────────────────────
+
+class _G1CmdStub:
+    """galbot_sdk.g1 JointCommand 桩（仅 position/velocity/effort 载荷面）。"""
+
+    def __init__(self):
+        self.position = self.velocity = self.effort = 0.0
+
+
+class _G1GroupStub:
+    """G1JointGroup 桩：getattr → 同名字符串（爪名即 token，进记录可比）。"""
+
+    right_gripper = "right_gripper"
+    left_gripper = "left_gripper"
+
+
+class _G1SensorStub:
+    """SensorType 桩：getattr → 同名字符串。"""
+
+    HEAD_RIGHT_CAMERA = "HEAD_RIGHT_CAMERA"
+    HEAD_LEFT_CAMERA = "HEAD_LEFT_CAMERA"
+
+
+class _StubGS:
+    """get_gripper_state 快照桩（width 米/velocity/effort 三字段）。"""
+
+    def __init__(self, width, velocity, effort):
+        self.width, self.velocity, self.effort = width, velocity, effort
+
+
+class _StubRobotG1:
+    """G1 SDK 面桩：读关节/取图/爪下发/爪回读。grip_script=回读弹射队列
+    （空→恒 (0.05, 0, 100)）；rgb={相机名: jpeg 字节}；joint_fail=读失败分支。
+    joint_vals=关节读数 fixture；grip_cmds/cmds=下发记录（金样可比）。"""
+
+    def __init__(self):
+        self.joint_vals = [round(0.01 * i, 3) for i in range(16)]
+        self.joint_fail = False
+        self.rgb = {}
+        self.grip_script = []
+        self.grip_cmds = []      # set_gripper_command (组, w, spd, effort, block)
+        self.cmds = []           # set_joint_commands ([(p,v,e)], 组, tfs)
+        self.grip_width = None   # 最近下发的爪宽（米）
+
+    def get_joint_positions(self, groups, names):
+        if self.joint_fail:
+            return []
+        return list(self.joint_vals[:len(names)])
+
+    def get_rgb_data(self, cam, *a, **k):
+        d = self.rgb.get(cam)
+        return {"data": d} if d is not None else None
+
+    def _gs(self):
+        if self.grip_script:
+            return _StubGS(*self.grip_script.pop(0))
+        return _StubGS(0.05, 0.0, 100.0)
+
+    def get_gripper_state(self, group):
+        return self._gs()
+
+    def set_gripper_command(self, group, w, spd, effort, block):
+        self.grip_cmds.append((group, round(w, 9), spd, effort, block))
+        self.grip_width = w
+        return "ControlStatus.SUCCESS"
+
+    def set_joint_commands(self, cmds, joint_names=None, joint_groups=None,
+                           time_from_start_s=0.0):
+        self.cmds.append(([(c.position, c.velocity, c.effort) for c in cmds],
+                          list(joint_groups or []), time_from_start_s))
+        if cmds:
+            self.grip_width = cmds[0].position
+        return "ControlStatus.SUCCESS"
+
+
+# G1 机体的模块级活状态（legacy=ns 键 / common=bodies.g1 模块属性）
+_G1_STATE_KEYS = ("_GRIP_EMA", "_GRIP_BEAT", "_GRIP_SS_STATE", "_GRIP_SS_SENT",
+                  "_GRIP_SENT_AT", "_GRIP_PRE_HIST", "_GRIPJ_EMA",
+                  "_GRIPJ_HOLD", "_GRIPJ_TX", "_LAST_FRAMES", "_FREEZE_STREAK",
+                  "GRIP", "GRIP_SS", "GRIP_WMIN", "GRIP_WMAX", "CAM_MAP")
+_G1_STATE_INIT = {"_GRIP_EMA": {}, "_GRIP_BEAT": 0, "_GRIP_SS_STATE": {},
+                  "_GRIP_SS_SENT": {}, "_GRIP_SENT_AT": {}, "_GRIP_PRE_HIST": {},
+                  "_GRIPJ_EMA": {}, "_GRIPJ_HOLD": {}, "_GRIPJ_TX": 0,
+                  "_LAST_FRAMES": {}, "_FREEZE_STREAK": {}}
+
+
+def g1_args(**kw):
+    """G1 机体函体的 args 依赖面（traj 现役旗标名）。"""
+    d = dict(do_exec=True, grip_state_cmd=True, head_crop=False,
+             grip_ema_alpha=0.0, grip_send_every=0, grip_min_interval=0,
+             grip_preclose=0, gripj_every=1, grip_hold_on_stall=False,
+             grip_hold_gap_mm=5.0, grip_hold_window=3, grip_hold_plateau_mm=1.0,
+             grip_hold_exit_mm=8.0, grip_hold_margin_mm=1.0,
+             grip_hold_relax_mm=0.0, grip_hold_relax_eff=90.0,
+             grip_hold_vel=0.0, grip_effort_hold=0.0, grip_hold_quiet_n=0)
+    d.update(kw)
+    return types.SimpleNamespace(**d)
+
+
+def g1_namespace(func_names, args, **extra):
+    """G1 机体函体双后端取名：脚本仍含 def=ast 提取（G1 现状闸，capture 口）；
+    已搬 common/bodies/g1.py=import+模块属性回填（check 口）。SDK 面全桩化
+    （两侧同桩=位可比，不依赖本机是否装 g1 SDK）。"""
+    import time as _time
+    import cv2
+    srcs, missing = extract(G1_TRAJ, func_names)
+    if not missing:
+        from common.bodies import vision as V
+        ns = {"np": np, "time": _time, "os": os, "cv2": cv2,
+              "sys": sys, "signal": __import__("signal"),
+              "subprocess": __import__("subprocess"),
+              "G1JointGroup": _G1GroupStub, "JointCommand": _G1CmdStub,
+              "SensorType": _G1SensorStub,
+              "letterbox224": V.letterbox224,
+              "head_training_crop": V.head_training_crop,
+              "GRIP_IDX": (7, 15),
+              "ARM_NAMES": (G1ARM14 := [f"right_arm_joint{i}" for i in range(1, 8)]
+                            + [f"left_arm_joint{i}" for i in range(1, 8)]),
+              "STATE_NAMES": None, "robot": _StubRobotG1(), "args": args,
+              "VIEWS": 3}
+        ns.update(_G1_STATE_INIT)
+        ns.update({k: _G1_STATE_INIT.get(k) for k in
+                   ("GRIP", "GRIP_SS", "GRIP_WMIN", "GRIP_WMAX", "CAM_MAP")})
+        ns.update(extra)
+        exec_into(ns, srcs)
+        return ns, []
+    from common.bodies import g1 as B
+    ns = _LiveNS({k: B for k in _G1_STATE_KEYS})
+    robot = _StubRobotG1()
+    ns.update({"np": np, "time": _time, "robot": robot, "args": args,
+               "JointCommand": _G1CmdStub, "G1JointGroup": _G1GroupStub,
+               "SensorType": _G1SensorStub, "VIEWS": 3})
+    # 机体模块的 SDK 类/状态对齐 legacy 桩位（每案重置=与 fresh ns 同语义）
+    B.G1JointGroup, B.JointCommand, B.SensorType = (
+        _G1GroupStub, _G1CmdStub, _G1SensorStub)
+    for k, v in _G1_STATE_INIT.items():
+        setattr(B, k, v)
+    for k in ("GRIP", "GRIP_SS", "GRIP_WMIN", "GRIP_WMAX", "CAM_MAP"):
+        setattr(B, k, extra.get(k))
+    B.VIEWS = extra.get("VIEWS", 3)
+    B.args = args
+    for n in func_names:
+        ns[n] = getattr(B, n)
+    return ns, []
+
+
+def _jpeg(arr):
+    """ndarray → JPEG 字节（grab_views 桩载荷；同库编解码=逐位确定）。"""
+    import cv2
+    ok, buf = cv2.imencode(".jpg", arr)
+    assert ok
+    return buf.tobytes()
 
 
 def fixed_inputs(n_rows=6):
@@ -407,6 +564,139 @@ def run_case(cid):
         return {"cubic": _j(f1), "s1_eq_g1": bool(np.array_equal(f1, f2)),
                 "linear_240": _j(f3)}
 
+    # G1 机体函体（步2c：G1 分歧函体现状口径闸；SDK 全桩，两侧同桩位可比）
+    if cid == "g1body/state_from_joints":
+        vals = [0.0] * 16
+        vals[7], vals[15] = 0.0585, 0.011          # 行程 50% / 3.88%
+        ns, miss = g1_namespace(["state_from_joints"], g1_args(),
+                                GRIP_WMIN=0.007, GRIP_WMAX=0.11)
+        r1 = ns["state_from_joints"](vals)
+        ns2, _ = g1_namespace(["state_from_joints"], g1_args(),
+                              GRIP_WMIN=None, GRIP_WMAX=None)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            r2 = ns2["state_from_joints"](vals)    # 未标定分支：原样+⚠
+        return {"missing": miss, "st": _j(r1), "st_nocal": _j(r2),
+                "warn": buf.getvalue()}
+
+    if cid == "g1body/grip_state_cmd_override":
+        st = [0.0] * 16
+        GR = {"names": [("right_gripper", 7), ("left_gripper", 15)],
+              "sent": {"right_gripper": 0.0, "left_gripper": 60.0},
+              "sent_peak": {"right_gripper": 80.0, "left_gripper": 0.0},
+              "chg": 2.0}
+        ns, _ = g1_namespace(["grip_state_cmd_override"], g1_args(), GRIP=GR)
+        r1 = ns["grip_state_cmd_override"](st)     # R 持物签名 33.5 / L 喂指令
+        ns2, _ = g1_namespace(["grip_state_cmd_override"], g1_args(), GRIP=None)
+        r2 = ns2["grip_state_cmd_override"](st)    # 无爪恒等
+        ns3, _ = g1_namespace(["grip_state_cmd_override"],
+                              g1_args(grip_state_cmd=False), GRIP=GR)
+        r3 = ns3["grip_state_cmd_override"](st)    # 旗标关恒等
+        return {"holding": _j(r1), "no_grip": _j(r2), "flag_off": _j(r3)}
+
+    if cid == "g1body/read_joints":
+        ns, _ = g1_namespace(["read_joints"], g1_args())
+        rb = ns["robot"]
+        ok = ns["read_joints"](rb, [f"j{i}" for i in range(14)])
+        rb.joint_fail = True
+        try:
+            ns["read_joints"](rb, [f"j{i}" for i in range(14)])
+            fail = None
+        except SystemExit as e:
+            fail = str(e)
+        return {"vals": _j(ok), "fail": fail}
+
+    if cid == "g1body/send_grip_chg":
+        GR = {"names": [("right_gripper", 7), ("left_gripper", 15)],
+              "sent": {}, "sent_peak": {}, "chg": 2.0,
+              "wmin": 0.007, "wmax": 0.11, "speed": 0.15, "effort": 30}
+        ns, _ = g1_namespace(["send_grip"], g1_args(), GRIP=GR)
+        rb = ns["robot"]
+        rb.grip_script = [(0.02, 0.0, 100.0)] * 4
+        row = [0.0] * 16
+        row[7], row[15] = 50.0, 20.0
+        c1 = ns["send_grip"](rb, row)              # 首拍双爪发
+        c2 = ns["send_grip"](rb, row)              # 变化 <chg → hold
+        row2 = list(row)
+        row2[7] = 60.0
+        c3 = ns["send_grip"](rb, row2)             # 变化超阈 → 发
+        return {"c1": c1, "c2": c2, "c3": c3, "sent": _j(GR["sent"]),
+                "cmds": _j(rb.grip_cmds)}
+
+    if cid == "g1body/send_grip_ss":
+        GR = {"names": [("right_gripper", 7)], "sent": {}, "sent_peak": {},
+              "chg": 2.0, "wmin": 0.007, "wmax": 0.11, "speed": 0.15,
+              "effort": 30}
+        ns, _ = g1_namespace(["send_grip"], g1_args(), GRIP=GR,
+                             GRIP_SS=(50.0, 20.0))
+        rb = ns["robot"]
+        rb.grip_script = [(0.02, 0.0, 100.0)] * 3
+        row = [0.0] * 16
+        row[7] = 60.0
+        c1 = ns["send_grip"](rb, row)              # 首拍定态 hi 发
+        c2 = ns["send_grip"](rb, row)              # 无翻转 hold
+        row[7] = 30.0
+        c3 = ns["send_grip"](rb, row)              # 中间带未到合阈 hold
+        row[7] = 15.0
+        c4 = ns["send_grip"](rb, row)              # 合阈 lo 发
+        ns["_GRIP_SS_SENT"]["right_gripper"] = (time.monotonic() - 3.0, 15.0)
+        row[7] = 31.0
+        c5 = ns["send_grip"](rb, row)              # 漂移补发（0.5Hz 限频窗过）
+        return {"c1": c1, "c2": c2, "c3": c3, "c4": c4, "c5": c5,
+                "ss_state": _j(ns["_GRIP_SS_STATE"]), "cmds": _j(rb.grip_cmds)}
+
+    if cid == "g1body/send_grip_joint":
+        GR = {"names": [("right_gripper", 7), ("left_gripper", 15)],
+              "sent": {}, "sent_peak": {}, "chg": 2.0,
+              "wmin": 0.007, "wmax": 0.11, "speed": 0.15, "effort": 30}
+        ns, _ = g1_namespace(["send_grip_joint"], g1_args(
+            grip_ema_alpha=0.3, grip_hold_on_stall=True), GRIP=GR)
+        rb = ns["robot"]
+        rb.grip_script = [(0.02, 0.0, 100.0)] * 8
+        row = [0.0] * 16
+        row[7], row[15] = 0.0, 100.0               # R 深闭合 / L 全开
+        h1 = ns["send_grip_joint"](rb, row, 0.033)
+        h2 = ns["send_grip_joint"](rb, row, 0.033)
+        h3 = ns["send_grip_joint"](rb, row, 0.033)  # 实宽平台+深指令满窗 → 进入
+        row2 = list(row)
+        row2[7] = 80.0                              # 上穿 exit → HOLD退出
+        h4 = ns["send_grip_joint"](rb, row2, 0.033)
+        return {"h1": h1, "h2": h2, "h3": h3, "h4": h4,
+                "hold": _j(ns["_GRIPJ_HOLD"]), "ema": _j(ns["_GRIPJ_EMA"]),
+                "cmds": _j(rb.cmds)}
+
+    if cid == "g1body/grab_views":
+        img1 = (np.arange(64 * 48 * 3, dtype=np.uint8).reshape(48, 64, 3)
+                % 251)
+        img2 = np.roll(img1, 7, axis=1)
+        CAM = {"image": "HEAD_RIGHT_CAMERA", "left": "HEAD_LEFT_CAMERA"}
+        ns, _ = g1_namespace(["grab_views"], g1_args(), CAM_MAP=CAM, VIEWS=2)
+        rb = ns["robot"]
+        rb.rgb = {"HEAD_RIGHT_CAMERA": _jpeg(img1),
+                  "HEAD_LEFT_CAMERA": _jpeg(img2)}
+        out1 = ns["grab_views"](rb)
+        out2 = ns["grab_views"](rb)                # 同帧 → 冻结计数 1
+        freeze = None
+        try:
+            for _ in range(2):                     # 计数 2、3 → 第 2 圈触发停车
+                ns["grab_views"](rb)
+        except SystemExit as e:
+            freeze = str(e)
+        return {"keys": sorted(out1), "shape": list(out1["image"].shape),
+                "sum": int(out1["image"].astype(np.int64).sum()),
+                "sum2": int(out2["left"].astype(np.int64).sum()),
+                "freeze": freeze}
+
+    if cid == "g1body/nav_resume":
+        ns, _ = g1_namespace(["NavSuspend"], g1_args())
+        nav = ns["NavSuspend"]()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            nav.resume()                           # 空 stopped=no-op
+            nav.stopped = {2147483000: "galbot_vtn"}
+            nav.resume()                           # 假 pid OSError 吞掉 → 全 CONT
+        return {"out": buf.getvalue(), "stopped": _j(nav.stopped)}
+
     # config 链
     if cid == "config/s1":
         import s1_config as C
@@ -482,6 +772,9 @@ CASES = [
     "img/letterbox224", "img/head_crop",
     "guard/env_first", "guard/chunk_abs",
     "tele/pstats", "interp/frames_cubic",
+    "g1body/state_from_joints", "g1body/grip_state_cmd_override",
+    "g1body/read_joints", "g1body/send_grip_chg", "g1body/send_grip_ss",
+    "g1body/send_grip_joint", "g1body/grab_views", "g1body/nav_resume",
     "config/s1", "config/g1",
 ]
 

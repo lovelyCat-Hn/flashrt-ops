@@ -13,6 +13,14 @@
     TE.args, TE.robot, TE.model, TE.ns = args, robot, model, ns
     ...
     TE.run()   # 不返回（内部归位 + SDK 三连 + os._exit(0)）
+
+两机体共用（步2c）：`FACE` 占位钉机体脸——"s1"=在役主线（引擎默认，S1 入口
+零回填）；"g1"=G1 入口回填，并回填 G1JointGroup/JointCommand（g1 SDK 类）
+与机体函体（grab_views/read_joints/state_from_joints/grip_state_cmd_
+override/send_grip/send_grip_joint/ARM_NAMES/ARM_SLICE/STATE_NAMES/HOME…
+，实现住 common/bodies/g1.py）。FACE 只由入口定死，不是调参旋钮：发送拍/
+_PredictJob/预取/_ovp 门/冲账/汇总打印等闸点按脸二选一，两支文本各自与其
+原文逐字节一致（闸点清单见步2c 提交说明）。
 """
 import json
 import os
@@ -67,6 +75,9 @@ _frames_dir = None   # --dump-frames 目录（None=关）
 _dump_dir = None     # --dump-chunks 目录（None=关）
 CKPT = None          # checkpoint 路径（落盘元数据用）
 _env_file = None     # 包络盒 toml 路径（落盘元数据用）
+FACE = "s1"         # 机体脸（入口定，非调参旋钮）：s1=在役主线
+                     # （引擎默认，S1 入口零回填）；G1 入口回填 "g1"
+G1JointGroup = None  # G1 专用：汇总区爪组枚举（G1 入口回填；s1 恒 None）
 
 _frame_seq = 0
 env_hits = 0                         # 包络护栏：连续越界块数（干净块清零）
@@ -202,78 +213,136 @@ def run():
         return pf
 
 
-    class _PredictJob:
-        """后台推理作业：GPU 推理与固定节拍执行重叠。
+    if FACE == "g1":
+        class _PredictJob:
+            """后台推理作业：GPU 推理与固定节拍执行重叠。
 
-        S1 版（10-29 审查①）：取图/读关节（fresh_obs，S1 三相机 ~86ms p50）也
-        搬进工作线程——主线程同步取图≈2.6 拍，水位 0 下每块预取拍必丢拍重锚
-        =块频 ~2.5Hz 卡顿节奏（与真机「卡卡」特征频率同区间）。主线程只保留下发
-        和节拍。SDK 双线程并发（worker 读 vs 主线程下发/回读）未真机验证，
-        --no-obs-worker 一键回退主线程取图（G1 traj 旧行为）对照。
-        同一时刻只有一个 predict 在飞（到水位才启动下一个）。
-        """
+            只有 predict 放后台；SDK 取图/读关节/下发全部留在主线程，不碰 SDK
+            线程安全。同一时刻只有一个 predict 在飞（到水位才启动下一个）。
+            """
 
-        def __init__(self, model, prompt):
-            self._model, self._prompt = model, prompt
-            self._done = threading.Event()
-            self._res = None
-            self._err = None
-            self.dur_ms = 0.0
+            def __init__(self, model, prompt):
+                self._model, self._prompt = model, prompt
+                self._done = threading.Event()
+                self._res = None
+                self._err = None
+                self.dur_ms = 0.0
 
-        def start(self, obs=None, state_n=None, state_arm=None):
-            """obs 三件套=None（默认）→ 工作线程内 fresh_obs() 自取。
+            def start(self, obs, state_n, state_arm, rtc_prefix=None):
+                self._done.clear()
+                self._err = None
+                self.state_arm = state_arm   # 本块 delta 基准（预测时刻臂位）
 
-            rtc_prefix 不再由调用方预计算（它依赖 st_arm）：随 fresh_obs 在线程内
-            取。_rtc_prefix 读 chunk/BASE_ARM/last_tgt 发生在「上一块已换入、下一
-            换块未到」窗口（主线程此刻只在拍间睡眠推进 last_tgt/k，GIL 下逐项
-            原子），与换块写窗口不重叠。"""
-            self._done.clear()
-            self._err = None
-            self.state_arm = state_arm   # 本块 delta 基准（预测时刻臂位）
+                def _run():
+                    t = time.perf_counter()
+                    try:
+                        self._res = np.asarray(self._model.predict(
+                            obs, prompt=self._prompt, state=state_n,
+                            rtc_prefix=rtc_prefix))
+                    except Exception as e:      # 主线程 result() 时再抛
+                        self._err = e
+                    self.dur_ms = (time.perf_counter() - t) * 1000
+                    self._done.set()
+                    if _frames_dir is not None and isinstance(obs, dict):
+                        _dump_frames(obs)   # 推理 worker 里写盘，tick 零代价
 
-            def _run(obs=obs, state_n=state_n, state_arm=state_arm):
-                # 默认参绑定（def 时求值）：_run 内对 obs 赋值会把闭包名变局部，
-                # 前置的 `if obs is None` 必 UnboundLocal——别改回闭包引用
-                t = time.perf_counter()
-                try:
-                    if obs is None:
-                        obs, state_n, state_arm = fresh_obs()
-                        self.state_arm = state_arm
-                    self._res = np.asarray(self._model.predict(
-                        obs, prompt=self._prompt, state=state_n,
-                        rtc_prefix=_rtc_prefix(state_arm)))
-                except Exception as e:      # 主线程 result() 时再抛
-                    self._err = e
-                self.dur_ms = (time.perf_counter() - t) * 1000
-                self._done.set()
-                if _frames_dir is not None and isinstance(obs, dict):
-                    _dump_frames(obs)   # 推理 worker 里写盘，tick 零代价
+                threading.Thread(target=_run, daemon=True).start()
 
-            threading.Thread(target=_run, daemon=True).start()
+            def done(self):
+                return self._done.is_set()
 
-        def done(self):
-            return self._done.is_set()
+            def result(self):
+                self._done.wait()
+                if self._err is not None:
+                    raise self._err
+                return self._res
+    else:
+        class _PredictJob:
+            """后台推理作业：GPU 推理与固定节拍执行重叠。
 
-        def result(self):
-            self._done.wait()
-            if self._err is not None:
-                raise self._err
-            return self._res
+            S1 版（10-29 审查①）：取图/读关节（fresh_obs，S1 三相机 ~86ms p50）也
+            搬进工作线程——主线程同步取图≈2.6 拍，水位 0 下每块预取拍必丢拍重锚
+            =块频 ~2.5Hz 卡顿节奏（与真机「卡卡」特征频率同区间）。主线程只保留下发
+            和节拍。SDK 双线程并发（worker 读 vs 主线程下发/回读）未真机验证，
+            --no-obs-worker 一键回退主线程取图（G1 traj 旧行为）对照。
+            同一时刻只有一个 predict 在飞（到水位才启动下一个）。
+            """
+
+            def __init__(self, model, prompt):
+                self._model, self._prompt = model, prompt
+                self._done = threading.Event()
+                self._res = None
+                self._err = None
+                self.dur_ms = 0.0
+
+            def start(self, obs=None, state_n=None, state_arm=None):
+                """obs 三件套=None（默认）→ 工作线程内 fresh_obs() 自取。
+
+                rtc_prefix 不再由调用方预计算（它依赖 st_arm）：随 fresh_obs 在线程内
+                取。_rtc_prefix 读 chunk/BASE_ARM/last_tgt 发生在「上一块已换入、下一
+                换块未到」窗口（主线程此刻只在拍间睡眠推进 last_tgt/k，GIL 下逐项
+                原子），与换块写窗口不重叠。"""
+                self._done.clear()
+                self._err = None
+                self.state_arm = state_arm   # 本块 delta 基准（预测时刻臂位）
+
+                def _run(obs=obs, state_n=state_n, state_arm=state_arm):
+                    # 默认参绑定（def 时求值）：_run 内对 obs 赋值会把闭包名变局部，
+                    # 前置的 `if obs is None` 必 UnboundLocal——别改回闭包引用
+                    t = time.perf_counter()
+                    try:
+                        if obs is None:
+                            obs, state_n, state_arm = fresh_obs()
+                            self.state_arm = state_arm
+                        self._res = np.asarray(self._model.predict(
+                            obs, prompt=self._prompt, state=state_n,
+                            rtc_prefix=_rtc_prefix(state_arm)))
+                    except Exception as e:      # 主线程 result() 时再抛
+                        self._err = e
+                    self.dur_ms = (time.perf_counter() - t) * 1000
+                    self._done.set()
+                    if _frames_dir is not None and isinstance(obs, dict):
+                        _dump_frames(obs)   # 推理 worker 里写盘，tick 零代价
+
+                threading.Thread(target=_run, daemon=True).start()
+
+            def done(self):
+                return self._done.is_set()
+
+            def result(self):
+                self._done.wait()
+                if self._err is not None:
+                    raise self._err
+                return self._res
 
 
-    def fresh_obs():
-        """取图+读关节+夹爪换算+归一化（默认在推理工作线程跑，10-29 审查①；
-        S1 三相机 ~86ms p50≈2.6 拍），耗时计入 grab_ms。
+    if FACE == "g1":
+        def fresh_obs():
+            """取图+读关节+夹爪换算+归一化（主线程，~22ms），耗时计入 grab_ms。
 
-        返回 (obs, 归一化 state, 臂位原始值)——臂位原始值作该块 delta 基准随块走。
-        """
-        t_g = time.perf_counter()
-        obs = grab_views(robot)
-        st_raw = grip_state_cmd_override(
-            state_from_joints(read_joints(robot, STATE_NAMES)))
-        st_n = normalize_state(st_raw, ns)
-        grab_ms.add((time.perf_counter() - t_g) * 1000)
-        return obs, st_n, st_raw[ARM_SLICE]
+            返回 (obs, 归一化 state, 臂位原始值)——臂位原始值作该块 delta 基准随块走。
+            """
+            t_g = time.perf_counter()
+            obs = grab_views(robot)
+            st_raw = grip_state_cmd_override(
+                state_from_joints(read_joints(robot, STATE_NAMES)))
+            st_n = normalize_state(st_raw, ns)
+            grab_ms.add((time.perf_counter() - t_g) * 1000)
+            return obs, st_n, st_raw[ARM_SLICE]
+    else:
+        def fresh_obs():
+            """取图+读关节+夹爪换算+归一化（默认在推理工作线程跑，10-29 审查①；
+            S1 三相机 ~86ms p50≈2.6 拍），耗时计入 grab_ms。
+
+            返回 (obs, 归一化 state, 臂位原始值)——臂位原始值作该块 delta 基准随块走。
+            """
+            t_g = time.perf_counter()
+            obs = grab_views(robot)
+            st_raw = grip_state_cmd_override(
+                state_from_joints(read_joints(robot, STATE_NAMES)))
+            st_n = normalize_state(st_raw, ns)
+            grab_ms.add((time.perf_counter() - t_g) * 1000)
+            return obs, st_n, st_raw[ARM_SLICE]
 
 
     def _launch(job):
@@ -289,7 +358,10 @@ def run():
     infer_ms = LatencyTracker()
     grab_ms = LatencyTracker()
     job = _PredictJob(model, args.prompt)
-    _launch(job)                         # 首块（取图在工作线程，干跑同样口径）
+    if FACE == "g1":
+        job.start(*fresh_obs())              # 首块
+    else:
+        _launch(job)                         # 首块（取图在工作线程，干跑同样口径）
     chunk = job.result()
     _dur0 = job.dur_ms
     infer_ms.add(_dur0)
@@ -348,10 +420,15 @@ def run():
 
 
     if not args.do_exec:
-        print(f"\n== [干跑] 首块轨迹流预览（tick {TICK * 1000:.1f} ms，"
-              f"{args.frames_per_row} 帧/行，批窗 {args.rows_per_cmd}×{TICK * 1000:.0f} ms，"
-              f"链式限幅 ±{args.delta_max} rad）"
-              "未下发任何命令 ==")
+        if FACE == "g1":
+            print(f"\n== [干跑] 首块轨迹流预览（tick {TICK * 1000:.1f} ms，"
+                  f"{args.frames_per_row} 帧/行，链式限幅 ±{args.delta_max} rad）"
+                  "未下发任何命令 ==")
+        else:
+            print(f"\n== [干跑] 首块轨迹流预览（tick {TICK * 1000:.1f} ms，"
+                  f"{args.frames_per_row} 帧/行，批窗 {args.rows_per_cmd}×{TICK * 1000:.0f} ms，"
+                  f"链式限幅 ±{args.delta_max} rad）"
+                  "未下发任何命令 ==")
         _cur0 = read_joints(robot, ARM_NAMES)
         _rows, _frames, _bursts, _gframes = build_block_stream(_cur0)
         print(f"  行 {len(_rows)} → 帧 {len(_frames)}（{args.interp}）；"
@@ -461,11 +538,15 @@ def run():
     _cur0 = read_joints(robot, ARM_NAMES)
     rows_abs, frames_all, bursts, grip_frames_all = build_block_stream(_cur0)
     print(f"\n── 块 1 | t+0.0s | 推理 {infer_ms.percentile(1.0) if len(infer_ms) else float('nan'):.0f} ms ──")
-    print(f"[轨迹流] 行 {len(rows_abs)} → 帧 {len(frames_all)}（{args.interp} "
-          f"{args.frames_per_row} 帧/行，≈{args.fps * args.frames_per_row}Hz；"
-          f"批窗 {args.rows_per_cmd}×{TICK * 1000:.0f}ms"
-          + ("=跨行攒批" if args.rows_per_cmd > 1 else "=每拍一包")
-          + f"，取图{'在worker' if args.obs_worker else '在主线程'}）")
+    if FACE == "g1":
+        print(f"[轨迹流] 行 {len(rows_abs)} → 帧 {len(frames_all)}（{args.interp} "
+              f"{args.frames_per_row} 帧/行，≈{args.fps * args.frames_per_row}Hz）")
+    else:
+        print(f"[轨迹流] 行 {len(rows_abs)} → 帧 {len(frames_all)}（{args.interp} "
+              f"{args.frames_per_row} 帧/行，≈{args.fps * args.frames_per_row}Hz；"
+              f"批窗 {args.rows_per_cmd}×{TICK * 1000:.0f}ms"
+              + ("=跨行攒批" if args.rows_per_cmd > 1 else "=每拍一包")
+              + f"，取图{'在worker' if args.obs_worker else '在主线程'}）")
 
     while not aborted:
         # ── 节拍头：睡到绝对截止；落后超 1 拍即重锚（绝不连发追赶）──
@@ -507,9 +588,14 @@ def run():
             # aggregate_fn=latest_only（α=1.0=旧流 0 权重=恒等）——恒等混接免重建
             # 帧免打印；缝平滑只留 EMA 跨块连续（α=filter_alpha，从 last_tgt 重播）。
             # 召回 crossfade：--aggregate-fn weighted_average 或 --fusion-alpha 0.7
-            _ovp = (0 < args.seam_overlap_alpha < 1 and args.merge <= 1
-                    and n_swapped > 1
-                    and last_tgt is not None and _old_rows_abs is not None)
+            if FACE == "g1":
+                _ovp = (args.seam_overlap_alpha > 0 and args.merge <= 1
+                        and n_swapped > 1
+                        and last_tgt is not None and _old_rows_abs is not None)
+            else:
+                _ovp = (0 < args.seam_overlap_alpha < 1 and args.merge <= 1
+                        and n_swapped > 1
+                        and last_tgt is not None and _old_rows_abs is not None)
             # ⚠ merge 模式必须旁路：_ovp 块内按行网格 INTERP.interpolate 重建
             # frames_all（n_macro×merge×per 帧），与宏步突发下标表不匹配（突发
             # 只覆盖前 1/merge）——latest_only(α=1.0) 行混合虽是恒等，帧重建
@@ -775,12 +861,13 @@ def run():
             # ── 星饿：不下发（刚性伺服保持最后目标原地等待），只等推理 ──
             if _starve_t0 is None:
                 _starve_t0 = t_tick
-                if _rp_n:                 # 冲账：攒窗内剩余帧先放完（臂走到段末
-                    _stf, _ = _rp_flush() # 目标自然缓停，勿带账进星饿保持）
-                    if _stf is not None and not str(_stf).startswith("ControlStatus.SUCCESS"):
-                        print(f"⛔ 星饿冲账下发非 SUCCESS（{_stf}），停止循环")
-                        aborted = True
-                        break
+                if FACE == "s1":
+                    if _rp_n:                 # 冲账：攒窗内剩余帧先放完（臂走到段末
+                        _stf, _ = _rp_flush() # 目标自然缓停，勿带账进星饿保持）
+                        if _stf is not None and not str(_stf).startswith("ControlStatus.SUCCESS"):
+                            print(f"⛔ 星饿冲账下发非 SUCCESS（{_stf}），停止循环")
+                            aborted = True
+                            break
             starve_ticks += 1
             if t_tick - _starve_t0 > args.starve_limit:
                 print(f"⛔ 星饿超 {args.starve_limit}s（推理未归）——判挂死，停止循环"
@@ -866,28 +953,56 @@ def run():
                 if gap0 >= GAP_EPS:
                     b = bursts[tgi]
                     if args.do_exec:
-                        # 帧突发 → 带时间轴批【S1 移植版改形，文件头④】：G1 traj
-                        # 此处=逐帧单点 tfs=0 流（G1 伺服在役形状）；S1 singorix
-                        # WBC 按 tfs 时间轴细插，tfs=0=参考跳变→LP 削顶→力矩跳变
-                        # =卡卡（S1 ③定案 10-29 晚真机实锤，「时间轴是解药非病因」）。
-                        # 故并一包 set_joint_commands_batch：tfs 全批累计=墙钟节拍
-                        # （fdt·(i+1)，绝不追发；--tfs-ms>0=每点追加到达时限余量）。
-                        # --rows-per-cmd R>1 再跨拍攒窗（窗口=R×tick、每 R 拍一发；
-                        # 10-29 审查②，适配器执行器/回放台 R×fr 真机形状同款）。
-                        _rp_q.extend(frames_all[_fi] for _fi in b)
-                        _rp_n += 1
-                        st = None
-                        if _rp_n >= args.rows_per_cmd:
-                            _st, n_fr = _rp_flush()
-                            if not str(_st).startswith("ControlStatus.SUCCESS"):
-                                st = _st
+                        if FACE == "g1":
+                            # 帧突发：绝对截止配速（预算 tick−reserve 匀速铺满整行），
+                            # SDK 单帧调用超预算只体现为丢拍重锚，绝不追发
+                            fdt = (TICK - args.burst_reserve_ms / 1000.0) / len(b)
+                            _t_f = time.perf_counter()
+                            st = None
+                            for _bi, _fi in enumerate(b):
+                                _fr = frames_all[_fi]
+                                _cmds = []
+                                for _ji in range(14):
+                                    _c = JointCommand()
+                                    _c.position = float(_fr[_ji])   # 标准关节只消费 position
+                                    _cmds.append(_c)
+                                _st = robot.set_joint_commands(_cmds, joint_names=ARM_NAMES,
+                                                               time_from_start_s=args.tfs_ms / 1000.0)
+                                if not str(_st).startswith("ControlStatus.SUCCESS"):
+                                    st = _st
+                                    break
+                                _t_f += fdt
+                                if _bi < len(b) - 1:
+                                    _sl = _t_f - time.perf_counter()
+                                    if _sl > 0:
+                                        time.sleep(_sl)
+                            if st is not None:
+                                print(f"⛔ 下发非 SUCCESS（{st}），停止循环")
+                                aborted = True
+                                break
                         else:
-                            n_fr = len(b)
-                            st = f"攒批 {_rp_n}/{args.rows_per_cmd}"
-                        if st is not None and not str(st).startswith("攒批"):
-                            print(f"⛔ 下发非 SUCCESS（{st}），停止循环")
-                            aborted = True
-                            break
+                            # 帧突发 → 带时间轴批【S1 移植版改形，文件头④】：G1 traj
+                            # 此处=逐帧单点 tfs=0 流（G1 伺服在役形状）；S1 singorix
+                            # WBC 按 tfs 时间轴细插，tfs=0=参考跳变→LP 削顶→力矩跳变
+                            # =卡卡（S1 ③定案 10-29 晚真机实锤，「时间轴是解药非病因」）。
+                            # 故并一包 set_joint_commands_batch：tfs 全批累计=墙钟节拍
+                            # （fdt·(i+1)，绝不追发；--tfs-ms>0=每点追加到达时限余量）。
+                            # --rows-per-cmd R>1 再跨拍攒窗（窗口=R×tick、每 R 拍一发；
+                            # 10-29 审查②，适配器执行器/回放台 R×fr 真机形状同款）。
+                            _rp_q.extend(frames_all[_fi] for _fi in b)
+                            _rp_n += 1
+                            st = None
+                            if _rp_n >= args.rows_per_cmd:
+                                _st, n_fr = _rp_flush()
+                                if not str(_st).startswith("ControlStatus.SUCCESS"):
+                                    st = _st
+                            else:
+                                n_fr = len(b)
+                                st = f"攒批 {_rp_n}/{args.rows_per_cmd}"
+                            if st is not None and not str(st).startswith("攒批"):
+                                print(f"⛔ 下发非 SUCCESS（{st}），停止循环")
+                                aborted = True
+                                break
                     else:
                         st = "dry"   # 干跑彩排：打印节奏与遥测，绝不下发
                         n_fr = len(b)
@@ -908,14 +1023,22 @@ def run():
                 else:
                     fr_s = ("· 无帧 ·" if (args.merge > 1 and not bursts[tgi])
                             else "· 免发 ·")
-                print(f"  拍{k - 1}: |Δcmd| {d_mrad:5.1f} mrad"
-                      f" | 导程 {gap0 * 1000:5.1f} → {fr_s}"
-                      f" | 残差 {err:4.1f} mrad"
-                      + (f" | 合步[{tgi}]×{_grp_n}" if _is_merged else "")
-                      + _bw_s
-                      + f" | {gp if gp else st}"
-                      + (f" 〈攒批 {_rp_n}/{args.rows_per_cmd}〉"
-                         if args.do_exec and 0 < _rp_n < args.rows_per_cmd else ""))
+                if FACE == "g1":
+                    print(f"  拍{k - 1}: |Δcmd| {d_mrad:5.1f} mrad"
+                          f" | 导程 {gap0 * 1000:5.1f} → {fr_s}"
+                          f" | 残差 {err:4.1f} mrad"
+                          + (f" | 合步[{tgi}]×{_grp_n}" if _is_merged else "")
+                          + _bw_s
+                          + f" | {gp if gp else st}")
+                else:
+                    print(f"  拍{k - 1}: |Δcmd| {d_mrad:5.1f} mrad"
+                          f" | 导程 {gap0 * 1000:5.1f} → {fr_s}"
+                          f" | 残差 {err:4.1f} mrad"
+                          + (f" | 合步[{tgi}]×{_grp_n}" if _is_merged else "")
+                          + _bw_s
+                          + f" | {gp if gp else st}"
+                          + (f" 〈攒批 {_rp_n}/{args.rows_per_cmd}〉"
+                             if args.do_exec and 0 < _rp_n < args.rows_per_cmd else ""))
 
         # ── 出口：最后一块消费到水位（或包络截短后耗尽）──
         _w = min(WMARK, len(chunk))
@@ -927,16 +1050,21 @@ def run():
         if job is None and n_swapped < args.rounds and k >= _w:
             _obs_k = k               # 观测拍摄时点（跳帧安装的流逝基准）
             job = _PredictJob(model, args.prompt)
-            _launch(job)
+            if FACE == "g1":
+                _obs, _st_n, _st_arm = fresh_obs()
+                job.start(_obs, _st_n, _st_arm, rtc_prefix=_rtc_prefix(_st_arm))
+            else:
+                _launch(job)
 
         tick_ms.add((time.perf_counter() - t_tick) * 1000)
 
-    # 收尾冲账（自然出口：放完最后半窗攒帧再进汇总/归位；aborted 出口不冲——
-    # 护栏/星饿/非 SUCCESS 停机让臂留在原地，攒帧一并作废）
-    if args.do_exec and not aborted and _rp_n:
-        _stf, _nfr = _rp_flush()
-        if _stf is not None and not str(_stf).startswith("ControlStatus.SUCCESS"):
-            print(f"⚠ 收尾冲账下发非 SUCCESS（{_stf}；共 {_nfr} 帧）")
+    if FACE == "s1":
+        # 收尾冲账（自然出口：放完最后半窗攒帧再进汇总/归位；aborted 出口不冲——
+        # 护栏/星饿/非 SUCCESS 停机让臂留在原地，攒帧一并作废）
+        if args.do_exec and not aborted and _rp_n:
+            _stf, _nfr = _rp_flush()
+            if _stf is not None and not str(_stf).startswith("ControlStatus.SUCCESS"):
+                print(f"⚠ 收尾冲账下发非 SUCCESS（{_stf}；共 {_nfr} 帧）")
 
     # ── ④ 汇总 ──
     seam_flush()
@@ -948,7 +1076,10 @@ def run():
     if GRIP and args.do_exec:
         time.sleep(8.0)   # 等爪走完最后一程再读终态（死区 0.9s+满程 0.8s，含余量）
         for name, _ in GRIP["names"]:
-            gs = robot.get_gripper_state(name)
+            if FACE == "g1":
+                gs = robot.get_gripper_state(getattr(G1JointGroup, name))
+            else:
+                gs = robot.get_gripper_state(name)
             if gs is not None:
                 print(f"夹爪终态 {name}: {gs.width * 1000:.1f} mm "
                       f"(moving={gs.is_moving} eff={gs.effort:.1f})")
@@ -961,9 +1092,13 @@ def run():
             print(f"爪憋死保持统计: {_hs}")
     fin = read_joints(robot, ARM_NAMES)
     exc = float(np.max(np.abs(fin - HOME))) * 1000
-    print(f"\n== 汇总（{n_swapped} 块 / {len(tick_ms)} 拍 / tick {TICK * 1000:.1f} ms / "
-          f"轨迹流 {args.frames_per_row} 帧/行 {args.interp}"
-          f" / 批窗 {args.rows_per_cmd}×{TICK * 1000:.0f}ms）==")
+    if FACE == "g1":
+        print(f"\n== 汇总（{n_swapped} 块 / {len(tick_ms)} 拍 / tick {TICK * 1000:.1f} ms / "
+              f"轨迹流 {args.frames_per_row} 帧/行 {args.interp}）==")
+    else:
+        print(f"\n== 汇总（{n_swapped} 块 / {len(tick_ms)} 拍 / tick {TICK * 1000:.1f} ms / "
+              f"轨迹流 {args.frames_per_row} 帧/行 {args.interp}"
+              f" / 批窗 {args.rows_per_cmd}×{TICK * 1000:.0f}ms）==")
     print(f"总用时: {time.perf_counter() - t_loop0:.1f} s"
           f"（数据集单条任务 13s / 390 步参照）")
     if len(infer_ms):
@@ -1006,20 +1141,25 @@ def run():
         print(f"星饿: {starve_windows} 段 / {starve_ticks} 拍 / 共 {starve_total:.1f} s"
               f"（最长 {starve_worst:.1f}s，上限 {args.starve_limit}s 未触发即健康）")
     if dropped_ticks:
-        print(f"⚠ 丢拍重锚 {dropped_ticks} 次（tick 服务超 {TICK * 1000:.1f} ms——"
-              "SDK 下发/回读超拍等"
-              + ("；取图已在 worker，仍持续丢拍=节拍/SDK 侧问题" if args.obs_worker else "；取图在主线程（--no-obs-worker），每块预取拍必丢")
-              + "）")
+        if FACE == "g1":
+            print(f"⚠ 丢拍重锚 {dropped_ticks} 次（tick 服务超 {TICK * 1000:.1f} ms——"
+                  "取图拍撞推理落地拍等；持续丢拍说明 --fps 偏高）")
+        else:
+            print(f"⚠ 丢拍重锚 {dropped_ticks} 次（tick 服务超 {TICK * 1000:.1f} ms——"
+                  "SDK 下发/回读超拍等"
+                  + ("；取图已在 worker，仍持续丢拍=节拍/SDK 侧问题" if args.obs_worker else "；取图在主线程（--no-obs-worker），每块预取拍必丢")
+                  + "）")
     print(f"最终偏离起始位: {exc:.0f} mrad（护栏 {args.max_excursion * 1000:.0f} mrad）"
           + (" ⛔ 护栏触发过" if aborted else ""))
 
-    # 自然跑完（rounds 消费尽）→ warm 慢速归位到 S1_HOME_POSE（G1 无此步=操作员
-    # 手动收尾；S1 内嵌，10-29「一瞬间复位」病的治愈口径）。q/Ctrl-C 走
-    # QuitWatcher 立即 os._exit 不经过这里（traj 忠实语义：已下发目标可能仍在
-    # 限速执行）；护栏/星饿/非 SUCCESS 停机（aborted）也留在原地供排查。
-    if args.do_exec and not aborted:
-        print("[warm] 归位 S1_HOME_POSE（@0.15 rad/s 慢速）…")
-        s1_warm(robot, "归位")
+    if FACE == "s1":
+        # 自然跑完（rounds 消费尽）→ warm 慢速归位到 S1_HOME_POSE（G1 无此步=操作员
+        # 手动收尾；S1 内嵌，10-29「一瞬间复位」病的治愈口径）。q/Ctrl-C 走
+        # QuitWatcher 立即 os._exit 不经过这里（traj 忠实语义：已下发目标可能仍在
+        # 限速执行）；护栏/星饿/非 SUCCESS 停机（aborted）也留在原地供排查。
+        if args.do_exec and not aborted:
+            print("[warm] 归位 S1_HOME_POSE（@0.15 rad/s 慢速）…")
+            s1_warm(robot, "归位")
 
     WATCH.restore()
     if NAV is not None:
