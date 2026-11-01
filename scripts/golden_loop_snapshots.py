@@ -45,6 +45,7 @@ SEED = 20261030
 
 S1_TRAJ = INF / "run_s1_loop_traj.py"
 G1_TRAJ = G1F / "run_g1_loop_traj.py"
+ADAPT = INF / "run_s1_loop.py"   # 适配器版执行器（Phase 4 home 收编源）
 
 # ── ast 提取 ────────────────────────────────────────────────────────────────
 
@@ -209,6 +210,22 @@ def traj_namespace(func_names, args, **extra):
     if ns is None:
         return None, missing
     return ns, []
+
+
+def home_namespace(func_names):
+    """home_pose_targets 双后端（Phase 4）：适配器仍含 def=ast 提取（capture 口）；
+    已搬 common/home.py=import（check 口）。S1_HOME_POSE 两侧同源（policies.base
+    烘档；harness 不带 [warm_pose] 覆盖=两 backend 同值可比）。"""
+    srcs, missing = extract(ADAPT, func_names)
+    if not missing:
+        from policies.base import S1_HOME_POSE, S1Targets, gripper_pct_to_width_m
+        ns = {"np": np, "S1Targets": S1Targets,
+              "gripper_pct_to_width_m": gripper_pct_to_width_m,
+              "S1_HOME_POSE": S1_HOME_POSE}
+        exec_into(ns, srcs)
+        return ns, []
+    import common.home as H
+    return {"home_pose_targets": H.home_pose_targets}, []
 
 
 # ── G1 机体函体命名空间（步2c：G1 分歧函体现状口径闸）─────────────────────
@@ -405,6 +422,13 @@ def run_case(cid):
     chunk, base_arm = fixed_inputs()
     last_tgt = (base_arm + 0.01).astype(np.float32)
     cur = (base_arm + 0.003).astype(np.float32)   # build_*(cur)=当前臂位读数 14 维
+
+    # Phase 4：home_pose_targets（适配器→common.home）
+    if cid == "home/pose_targets":
+        import dataclasses
+        ns, miss = home_namespace(["home_pose_targets"])
+        return {"missing": miss,
+                "tgt": _j(dataclasses.asdict(ns["home_pose_targets"]()))}
 
     # traj S1：build_rows 五态
     if cid == "build_rows/first_block":
@@ -776,6 +800,7 @@ CASES = [
     "g1body/read_joints", "g1body/send_grip_chg", "g1body/send_grip_ss",
     "g1body/send_grip_joint", "g1body/grab_views", "g1body/nav_resume",
     "config/s1", "config/g1",
+    "home/pose_targets",
 ]
 
 

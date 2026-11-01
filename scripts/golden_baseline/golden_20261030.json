@@ -1,15 +1,15 @@
 {
  "meta": {
   "date": "2026-10-30",
-  "git_head": "d7ccdbf",
+  "git_head": "b257705",
   "python": "3.11.16",
   "numpy": "1.26.4",
   "files": {
-   "scripts/s1/inference/run_s1_loop_traj.py": "dfcf6f74429b4ab6",
-   "scripts/g1/inference/run_g1_loop_traj.py": "0e05ca85638fce4e",
+   "scripts/s1/inference/run_s1_loop_traj.py": "80a2c13eb0be9184",
+   "scripts/g1/inference/run_g1_loop_traj.py": "8ad5dad468598242",
    "scripts/s1/inference/s1_traj_interp.py": "09f39af066cc3f24",
    "scripts/g1/inference/g1_traj_interp.py": "48a832b65e9892f2",
-   "scripts/s1/inference/s1_config.py": "752e34b05bd8d28f",
+   "scripts/s1/inference/s1_config.py": "a59bf2f14ccea90d",
    "scripts/g1/inference/g1_config.py": "6c37c621433a75a1"
   }
  },
@@ -5410,6 +5410,37 @@
       0.2
      ]
     ]
+   }
+  },
+  "home/pose_targets": {
+   "missing": [],
+   "tgt": {
+    "left_arm": [
+     1.1692999601364136,
+     -1.5226000547409058,
+     -0.7996000051498413,
+     -2.155400037765503,
+     -0.2921000123023987,
+     0.20419999957084656,
+     0.10320000350475311
+    ],
+    "right_arm": [
+     -1.0699000358581543,
+     1.5570000410079956,
+     0.5444999933242798,
+     1.9464999437332153,
+     0.6055999994277954,
+     -0.4505000114440918,
+     -0.550000011920929
+    ],
+    "left_grip_m": 0.11,
+    "right_grip_m": 0.11,
+    "torso": 0.735,
+    "head": [
+     0.0,
+     0.0
+    ],
+    "meta": {}
    }
   }
  }

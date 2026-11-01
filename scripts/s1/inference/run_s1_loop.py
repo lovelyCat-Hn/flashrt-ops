@@ -54,9 +54,14 @@ import numpy as np
 os.environ.setdefault("FLASH_RT_PI05_ACTION_CHUNK_SIZE", "50")   # 须在 import flash_rt 前定死
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# ── 显式 holy 根引导（Phase 4：common 包 import 用；append 保持脚本目录
+#    优先=不遮蔽脚本目录同名包，traj 入口/s1_config 同口径）──
+_HOLY_ROOT = str(pathlib.Path(os.path.abspath(__file__)).resolve().parents[3])
+if _HOLY_ROOT not in sys.path:
+    sys.path.append(_HOLY_ROOT)
 from policies import ADAPTERS, create  # noqa: E402
 from policies.base import (  # noqa: E402
-    HEAD_JOINTS, LEFT_ARM_JOINTS, RIGHT_ARM_JOINTS, S1_HOME_POSE, S1_LIMITS,
+    HEAD_JOINTS, LEFT_ARM_JOINTS, RIGHT_ARM_JOINTS, S1_LIMITS,
     S1Targets, TORSO_JOINTS, gripper_pct_to_width_m, gripper_width_m_to_pct,
     letterbox224)
 
@@ -128,7 +133,8 @@ AP.add_argument("--live-frames", action="store_true",
                 help="用真机相机取图（init 相机订阅）；默认合成噪声帧")
 AP.add_argument("--no-home-start", dest="home_start", action="store_false",
                 help="--exec 就位段开关（默认开）：开始前慢速就位到任务起始"
-                     "位姿 S1_HOME_POSE（47 集首帧中位，base.py；链钳渐进+2点"
+                     "位姿 S1_HOME_POSE（47 集首帧中位，base.py；config "
+                     "[warm_pose] 可覆盖；链钳渐进+2点"
                      "时间轴批，回放台同款机制不卡卡）")
 AP.add_argument("--no-return-home", dest="return_home", action="store_false",
                 help="--exec 归位段开关（默认开）：结束/Ctrl-C 后慢速归位到"
@@ -166,6 +172,18 @@ if _cfg_path:
         _known = {a.dest for a in AP._actions}
         AP.set_defaults(**{k: v for k, v in _cfg.items() if k in _known})
 args = AP.parse_args()
+
+# ── warm 就位/归位姿态：config/s1.toml [warm_pose] 覆盖（bb1567b 同款；
+#    合并进 common.bodies.s1 模块属性=唯一汇聚点，common.home.home_pose_targets
+#    与 traj 线 s1_warm 同吃；toml 无 [warm_pose]=None 零改）──
+import s1_config  # noqa: E402  同目录共享配置
+
+_wp = s1_config.warm_pose(args.config)
+if _wp:
+    import common.bodies.s1 as _B1
+    _B1.S1_HOME_POSE = {**_B1.S1_HOME_POSE, **_wp}
+    print(f"[warm] 姿态覆盖 config/s1.toml [warm_pose]: {sorted(_wp)}"
+          "（未列组沿用 policies/base.py 烘档）")
 
 _ADAPTER = [None]      # 当前已加载适配器（grab_obs 经此取 camera_map）
 _args = [args]         # issue_targets/sleep_to 经此读 CLI 参数
@@ -399,15 +417,12 @@ def main() -> int:
 
 # ── 就位 / 归位（--exec 专用；dry-run 零运动不经过） ──
 
-def home_pose_targets() -> S1Targets:
-    """S1_HOME_POSE（base.py，47 集首帧中位）→ S1Targets（爪=全开宽度 m）。"""
-    return S1Targets(
-        left_arm=np.array(S1_HOME_POSE["left_arm"], dtype=np.float32),
-        right_arm=np.array(S1_HOME_POSE["right_arm"], dtype=np.float32),
-        left_grip_m=gripper_pct_to_width_m(S1_HOME_POSE["grip_pct"]),
-        right_grip_m=gripper_pct_to_width_m(S1_HOME_POSE["grip_pct"]),
-        torso=float(S1_HOME_POSE["torso"]),
-        head=np.array(S1_HOME_POSE["head"], dtype=np.float32))
+# home_pose_targets 已收编 common/home.py（Phase 4，原文逐行搬运；S1_HOME_POSE
+# 改经 common.bodies.s1 模块属性读取=[warm_pose] 覆盖汇聚点，回放台仍可从本
+# 入口 import 同名代码对象）。home_to 不挪：依赖 plan_row/read_s1_state/
+# send_grips/sleep_to 全是入口内单消费者执行链，回放台 spec_from_file_location
+# 从入口取用同批代码对象。
+from common.home import home_pose_targets  # noqa: E402
 
 
 def home_to(robot, body_names, goal: S1Targets, tag: str) -> bool:
