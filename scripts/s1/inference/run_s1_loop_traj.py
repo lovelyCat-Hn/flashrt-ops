@@ -118,7 +118,9 @@ S1 直接用——本文件 = run_g1_loop_traj.py 整文件复制，只换「机
     （policies/base.py GRIP_WIDTH_*，pyi 同值）+ 告警（未逐台标定）
   ⑥ warm：G1 手跑 g1_pose_warmup.py → 移植版内嵌同款机制（set_joint_positions
     is_blocking 限速 0.15 rad/s 臂+头 → torso @0.2，G1 send_warm 节奏），
-    --exec 确认后就位到 S1_HOME_POSE、自然跑完归位；q/Ctrl-C 照 traj=立即
+    --exec 确认后就位到 S1_HOME_POSE（config/s1.toml [warm_pose] 可覆盖，
+    scripts/tools/warm_pose_from_dataset.py 生成）、自然跑完归位；q/Ctrl-C
+    照 traj=立即
     退出不复位（已下发目标可能仍在限速执行）
   ⑦ 导航栈：S1 无 nav 栈，NavSuspend 整类删除（--nav-suspend 旗标保留兼容
     档键，生效 no-op）；包络护栏=S1 ckpt 无 joint_envelope.json 时自动关闭
@@ -1109,6 +1111,16 @@ B.args = args
 B.GRIP, B.GRIP_SS = GRIP, GRIP_SS   # dict 引用回填（send_grip* 原地改写共享）
 B.GRIP_WMIN, B.GRIP_WMAX = GRIP_WMIN, GRIP_WMAX
 B.CAM_MAP, B.VIEWS = CAM_MAP, VIEWS
+
+# ── warm 就位/归位姿态：config/s1.toml [warm_pose] 覆盖（工作人员自配；
+#    scripts/tools/warm_pose_from_dataset.py 按数据集重生成；缺省=烘档零改）
+#    ——重绑 B.S1_HOME_POSE 模块属性（s1_warm 读自身模块 global，引擎经
+#    TE 回填的函体同源），先于 TE.run()=引擎 gate-15 前 ──
+_wp = s1_config.warm_pose(args.config)
+if _wp:
+    B.S1_HOME_POSE = {**B.S1_HOME_POSE, **_wp}
+    print(f"[warm] 姿态覆盖 config/s1.toml [warm_pose]: {sorted(_wp)}"
+          f"（未列组沿用 policies/base.py 烘档）")
 
 
 # ── state 拼装/关节读取/相机冻结守卫已收编 common/bodies/s1.py（步2b-2）──

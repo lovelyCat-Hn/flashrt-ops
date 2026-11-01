@@ -56,3 +56,18 @@ head_crop = false                        # S1 训练口径=4:3 letterbox 全幅
 #   live_frames                : 适配器版合成图开关；traj 版取图即真实相机
 #                                （冻结守卫常开），无此概念
 #   execution_horizon = 10     : 同上 execution_horizon=0 判读
+
+# ── warm 就位/归位姿态覆盖（工作人员自配）────────────────────────────
+# 缺省（整段注释或删段）= policies/base.py 烘档 S1_HOME_POSE（clean_ready_224_1028
+# 47 集首帧逐关节中位，in-distribution 起点）。换任务/换数据集时用提取脚本
+# 重生成再贴进来（输出已按跨集中位+散布报告核过；配方与烘档同款可复算对照）：
+#   ~/miniforge3/envs/lerobot_cpu/bin/python \
+#     ~/holy/scripts/tools/warm_pose_from_dataset.py --dataset ~/datasets/<数据集>
+# 设置任一键只覆盖对应组，未列的键沿用烘档。生效核对=traj 启动打印
+# `[warm] 姿态覆盖 config/s1.toml [warm_pose]: [...]`。
+# [warm_pose]
+# right_arm = [-1.0699, 1.557, 0.5445, 1.9465, 0.6056, -0.4505, -0.55]
+# left_arm  = [1.1693, -1.5226, -0.7996, -2.1554, -0.2921, 0.2042, 0.1032]
+# torso     = 0.735          # 升降高度 m（非 rad）
+# head      = [0.0, 0.0]
+# grip_pct  = 100.0          # 0-100 状态维口径（warm 下发换算宽度米）

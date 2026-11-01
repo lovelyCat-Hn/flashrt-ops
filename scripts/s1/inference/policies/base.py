@@ -53,6 +53,8 @@ GRIP_FEEDBACK_HALF_M = 0.055    # 单侧行程反馈上限（yuqiz 参考）
 # 来源 = clean_ready_224_1028 全部 47 集首帧逐关节中位（10-29 提取；各关节
 # 跨集散布多在 ±0.1 rad 内、双爪恒 100% 全开、torso 恒 0.735、head 0/0）——
 # 推理就位/结束后归位到此 = in-distribution 起点，闭环可复现。
+# 换任务/换数据集：scripts/tools/warm_pose_from_dataset.py 重生成 → 贴
+# config/s1.toml [warm_pose]（traj 入口启动回填覆盖对应组，本烘档=缺省）。
 S1_HOME_POSE = {
     "left_arm": [1.1693, -1.5226, -0.7996, -2.1554, -0.2921, 0.2042, 0.1032],
     "right_arm": [-1.0699, 1.557, 0.5445, 1.9465, 0.6056, -0.4505, -0.55],

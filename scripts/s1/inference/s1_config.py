@@ -73,8 +73,50 @@ _RENAMED_KEYS = {
     "rtc_horizon": "execution_horizon",
     "grip_speed": "grip_velocity",
 }
-# 未认键告警白名单（run_s1_loop.py 消费、traj 移植版不消费的键也算认识）
-_KNOWN_EXTRA = {"policy", "subtask_every", "live_frames"}
+# 未认键告警白名单（run_s1_loop.py 消费、traj 移植版不消费的键也算认识；
+# warm_pose 段由本模块 warm_pose() 消费=traj 入口回填 S1_HOME_POSE 覆盖组）
+_KNOWN_EXTRA = {"policy", "subtask_every", "live_frames", "warm_pose"}
+
+# [warm_pose] 合法组键（=policies/base.py S1_HOME_POSE 的键集）
+_WARM_POSE_KEYS = {"right_arm", "left_arm", "torso", "head", "grip_pct"}
+
+
+def warm_pose(path=DEFAULT_PATH):
+    """读 toml [warm_pose] 覆盖表；未配置返回 None（沿用 policies/base.py
+    烘档 S1_HOME_POSE）。
+
+    生成=scripts/tools/warm_pose_from_dataset.py（数据集每集首帧逐关节跨集
+    中位，与烘档同配方）。设置任一键只覆盖对应组；配置错误硬报错（同
+    _RENAMED_KEYS 哲学：配置类错误宁可启动报错不可静默换值）。
+    """
+    data, p = load(path)
+    wp = data.get("warm_pose")
+    if not wp:
+        return None
+    if not isinstance(wp, dict):
+        raise SystemExit(
+            f"[config] {p}.warm_pose 须为 [warm_pose] 表，实得 {type(wp).__name__}")
+    bad = set(wp) - _WARM_POSE_KEYS
+    if bad:
+        raise SystemExit(
+            f"[config] {p}.warm_pose 未认组键 {sorted(bad)}"
+            f"（合法={sorted(_WARM_POSE_KEYS)}）")
+    for k, n in (("right_arm", 7), ("left_arm", 7), ("head", 2)):
+        if k in wp:
+            v = wp[k]
+            if (not isinstance(v, list) or len(v) != n
+                    or not all(isinstance(x, (int, float)) for x in v)):
+                raise SystemExit(
+                    f"[config] {p}.warm_pose.{k} 须 {n} 维数值表，实得 {v!r}")
+    if "torso" in wp and not isinstance(wp["torso"], (int, float)):
+        raise SystemExit(
+            f"[config] {p}.warm_pose.torso 须数值（升降高度 m），实得 {wp['torso']!r}")
+    if "grip_pct" in wp:
+        g = wp["grip_pct"]
+        if not isinstance(g, (int, float)) or not 0 <= g <= 100:
+            raise SystemExit(
+                f"[config] {p}.warm_pose.grip_pct 须 0-100 数值，实得 {g!r}")
+    return wp
 
 
 def load(path=DEFAULT_PATH):
