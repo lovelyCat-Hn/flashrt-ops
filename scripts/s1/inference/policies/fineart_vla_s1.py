@@ -36,6 +36,27 @@ CKPT_DIR = ("/home/galbot/model_weights/pi05/"
 _STATS_FILE = "policy_preprocessor_step_3_normalizer_processor.safetensors"
 
 
+def state_stats_ns(ckpt) -> dict:
+    """preprocessor safetensors → flash_rt normalize_state 兼容 ns（(27,) 硬闸）。
+
+    traj 引擎 fresh_obs 走 flash_rt normalize_state(ns)——同一入口喂两族
+    （引擎零改）。⚠ 归一式微差已量化（11-02）：flash_rt 分母恒 +1e-6，训练
+    (lerobot) 只在 denom==0 时替换——近常维 torso/head/swerve 偏差 ≤2.2e-2
+    （训练 spread 25µrad 级，模型不敏感），臂/爪维逐位精确。适配器内联
+    _norm_state27 是训练精确式；两路并存，真机 fineart 出异常先 A/B 这里。
+    """
+    from safetensors import safe_open
+    with safe_open(os.path.join(str(ckpt), _STATS_FILE),
+                   framework="pt", device="cpu") as f:
+        q01 = f.get_tensor("observation.state.q01").numpy().astype(np.float32)
+        q99 = f.get_tensor("observation.state.q99").numpy().astype(np.float32)
+    if q01.shape != (27,) or q99.shape != (27,):
+        raise SystemExit(
+            f"state stats q01/q99 形状 {q01.shape}/{q99.shape} ≠ (27,)——"
+            "不是 S1 语义微调包（ALOHA=14 维），拒绝加载")
+    return {"norm_mode": "q01_q99", "state": {"q01": q01, "q99": q99}}
+
+
 class FineartVlaS1Adapter(PolicyAdapter):
     name = "fineart_vla_s1"
     config_name = "fineart_vla"
@@ -55,21 +76,13 @@ class FineartVlaS1Adapter(PolicyAdapter):
     # ── 生命周期 ──
     def load(self, ckpt: str, task: str, calib_obs: dict | None = None) -> None:
         from flash_rt.api import load_model
-        from safetensors import safe_open
 
         self.model = load_model(ckpt, framework="torch", config="fineart_vla",
                                 num_views=3, num_steps=10, action_dim=16)
-        # state 归一化 stats：preprocessor safetensors 直读（fineart 路径，
-        # 11-02 实证；⚠ 前端 pipeline.norm_stats 是 pi05 前端属性，fineart 用 .pipeline 同理不依赖）
-        with safe_open(os.path.join(ckpt, _STATS_FILE),
-                       framework="pt", device="cpu") as f:
-            q01 = f.get_tensor("observation.state.q01").numpy().astype(np.float32)
-            q99 = f.get_tensor("observation.state.q99").numpy().astype(np.float32)
-        if q01.shape != (27,) or q99.shape != (27,):
-            raise SystemExit(
-                f"state stats q01/q99 形状 {q01.shape}/{q99.shape} ≠ (27,)——"
-                "不是 S1 语义微调包（ALOHA=14 维），拒绝加载")
-        self._q01, self._q99 = q01, q99
+        # state 归一化 stats：preprocessor safetensors 直读（fineart 路径；
+        # ⚠ 前端 pipeline.norm_stats 是 pi05 前端属性，fineart 不依赖）
+        ns = state_stats_ns(ckpt)
+        self._q01, self._q99 = ns["state"]["q01"], ns["state"]["q99"]
         self._task = task
         # 初始 prompt（零态占位；首轮真 state 在 infer 时重设）
         self._norm_state = self._norm_state27(np.zeros(27, np.float32))

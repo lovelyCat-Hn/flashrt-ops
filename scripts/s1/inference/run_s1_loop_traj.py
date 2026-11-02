@@ -190,6 +190,9 @@ ap = argparse.ArgumentParser(description=__doc__,
                              formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument("--ckpt", default=None, help="部署目录（默认 config [run].ckpt）")
 ap.add_argument("--prompt", default=None, help="任务指令（默认 config [run].prompt，须用训练原句）")
+ap.add_argument("--policy", default=None,
+                help="权重族：pi05（默认）| fineart_vla_s1（S1 微调版 fineart，"
+                     "16/27 维 delta-除爪同语义链；装载/stats 分支见模型段）")
 ap.add_argument("--exec", dest="do_exec", action="store_true",
                 help="真实连续驱动双臂（默认干跑只打印首块 5 拍目标；不进配置，仅 CLI）")
 ap.add_argument("--rounds", type=int, default=None,
@@ -656,6 +659,7 @@ for _b in ("skip_install", "grip_state_cmd", "nav_suspend", "head_crop"):
 s1_config.apply(args, {
     "ckpt": "ckpt",
     "prompt": "prompt",
+    "policy": "policy",
     "rounds": "rounds",
     "fps": "ctrl_hz",
     "n_action_steps": "execute_actions_per_chunk",
@@ -685,6 +689,20 @@ if args.frames_per_row is None:
     args.frames_per_row = 1
 if args.rows_per_cmd is None:
     args.rows_per_cmd = 1
+
+# ── policy 族门禁（10-29 适配器入口同口径）：toml/BUILTIN 的 ckpt 属 pi05 族
+#    （010000），policy≠pi05 不吃；CLI 显式给仍赢。prompt 两族训练 task 同为
+#    "test"（同源数据集），toml 值恰好通用——只补 None 回落，不排他 ──
+if args.policy is None:
+    args.policy = "pi05"
+if args.policy != "pi05":
+    if not any(a == "--ckpt" or a.startswith("--ckpt=") for a in sys.argv):
+        from policies.fineart_vla_s1 import CKPT_DIR as _FA_CKPT
+        args.ckpt = _FA_CKPT
+        print(f"[policy] {args.policy}：ckpt 未显式给 → 族默认"
+              f"（…{pathlib.Path(_FA_CKPT).parent.name}）")
+    if args.prompt is None:
+        args.prompt = "test"
 
 # None 哨兵回落（配方旗标 argparse 默认改 None 交给三态回填，此处补脚本旧默认）
 # 换块融合：注册表名→α（上游 AGGREGATE_FUNCTIONS 逐名对应）；--fusion-alpha
@@ -1174,13 +1192,24 @@ HOME = read_joints(robot, ARM_NAMES)   # 起始位 = 漂移护栏基准（warm �
 print(f"起始位（漂移护栏基准）: {np.round(HOME, 3).tolist()}")
 
 t0 = time.time()
-model = flash_rt.load_model(
-    str(CKPT), config="pi05", num_views=VIEWS,
-    cache_frames=args.cache_frames, action_dim=ACTION_DIM,
-    rtc=args.rtc_horizon > 0,
-    rtc_horizon=args.rtc_horizon or 10,
-    rtc_max_weight=args.rtc_max_w)
-ns = model._pipe.norm_stats
+if args.policy == "pi05":
+    model = flash_rt.load_model(
+        str(CKPT), config="pi05", num_views=VIEWS,
+        cache_frames=args.cache_frames, action_dim=ACTION_DIM,
+        rtc=args.rtc_horizon > 0,
+        rtc_horizon=args.rtc_horizon or 10,
+        rtc_max_weight=args.rtc_max_w)
+    ns = model._pipe.norm_stats
+else:  # fineart_vla_s1：config/stats 来源不同；predict 包装层通用（set_prompt
+       # 带 state 特征探测 / calibrate 自动闩 / rtc_prefix 签名门控全族适用，
+       # 11-02 traj 调用形探针 P1-P4 全绿；无 cache_frames——前端未声明该参）
+    from policies.fineart_vla_s1 import state_stats_ns
+    model = flash_rt.load_model(
+        str(CKPT), config="fineart_vla", num_views=VIEWS, action_dim=ACTION_DIM,
+        rtc=args.rtc_horizon > 0,
+        rtc_horizon=args.rtc_horizon or 10,
+        rtc_max_weight=args.rtc_max_w)
+    ns = state_stats_ns(CKPT)   # preprocessor q01/q99 → ns dict（(27,) 硬闸）
 print(f"tier=int8_full views={VIEWS} | load {time.time() - t0:.1f}s")
 
 obs = grab_views(robot)

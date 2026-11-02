@@ -1,0 +1,38 @@
+{
+  "policy": "fineart_vla_s1",
+  "ckpt": "/home/galbot/model_weights/pi05/fineart_vla_rtc_subtask_relative_loss_monitor_050000/pretrained_model",
+  "prompt": "pick up the object",
+  "executing": false,
+  "rounds": [
+    {
+      "round": 0,
+      "infer_ms": 398.7,
+      "steps": 14,
+      "sent": 0,
+      "frames": 0,
+      "clamped": 0,
+      "discarded": 36,
+      "starve_ms": 0.0,
+      "late_ms_max": 6.2,
+      "text": null
+    },
+    {
+      "round": 1,
+      "infer_ms": 398.7,
+      "steps": 50,
+      "sent": 0,
+      "frames": 0,
+      "clamped": 0,
+      "discarded": 0,
+      "starve_ms": 0.0,
+      "late_ms_max": 0.1,
+      "text": null
+    }
+  ],
+  "max_joint_delta_per_step": 0.05,
+  "ctrl_hz": 30.0,
+  "execute_actions_per_chunk": 0,
+  "filter_alpha": 0.1,
+  "grip_path": "joint",
+  "live_frames": false
+}
