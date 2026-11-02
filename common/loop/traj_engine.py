@@ -357,6 +357,8 @@ def run():
     # ── ② 干跑：只打印首块前 5 拍计划，绝不下发 ──
     infer_ms = LatencyTracker()
     grab_ms = LatencyTracker()
+    chunk = None                         # 首块无旧块：S1 侧 start() 内联算 RTC 前缀（10-29 审查①），
+                                         # 首块也过 _rtc_prefix → 须先绑定，None=免引导（native 同语义）
     job = _PredictJob(model, args.prompt)
     if FACE == "g1":
         job.start(*fresh_obs())              # 首块

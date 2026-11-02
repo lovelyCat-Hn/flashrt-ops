@@ -48,7 +48,10 @@ max_excursion = 3.0
 # S1 判读（勿照抄 G1 定档的键）：
 grip_state_cmd = false                   # state 爪维喂实时回读（SDK 爪回读滞后未测，首跑专项核查）
 nav_suspend = false                      # S1 无导航栈，旗标 no-op（兼容档键）
-execution_horizon = 0                    # trained-RTC 专属；S1 pi05 非 RTC 权重
+execution_horizon = 0                    # trained-RTC 专属；非 RTC 权重=0。
+                                         # RTC 训练权重（train_config rtc_training_max_delay>0，
+                                         # 如 b3f637a6_030000）推理必带 --execution-horizon 10
+                                         # （训练 max_delay 15 拍、推理 p50 ~10 拍，域内；10-30）
 head_crop = false                        # S1 训练口径=4:3 letterbox 全幅
 
 # ── G1 [lerobot] 键的 S1 判读（无对应=刻意不带，非遗漏）──
