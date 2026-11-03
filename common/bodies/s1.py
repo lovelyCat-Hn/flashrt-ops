@@ -4,11 +4,11 @@
 state_from_joints 等 8 处分歧函数）住 common/bodies/g1.py（Phase 3 收编）。
 
 跨模块状态走模块属性回填：`args`/爪标定/相机表由入口 init 后一次回填；
-爪状态 dict/计数器（_GRIP_EMA/_GRIPJ_* 等）以本模块为唯一持有地（send_grip*
+爪状态 dict/计数器（_GRIPJ_* 等）以本模块为唯一持有地（send_grip*
 经 `global` 改写的 int 计数器住这里，入口零直读）——
 
     import common.bodies.s1 as B
-    B.args, B.GRIP, B.GRIP_SS = args, GRIP, GRIP_SS
+    B.args, B.GRIP = args, GRIP
     B.GRIP_WMIN, B.GRIP_WMAX = GRIP_WMIN, GRIP_WMAX   # manifest 爪行程标定
     B.CAM_MAP, B.VIEWS = CAM_MAP, VIEWS               # manifest 相机表
 """
@@ -36,7 +36,6 @@ from common.bodies.vision import head_training_crop, letterbox224  # noqa: E402
 # ── 回填占位（入口 init 后赋值；先于此处任何函数调用）──
 args = None        # argparse Namespace（do_exec/head_crop/grip_* 全族）
 GRIP = None        # 爪标定/状态 dict（None=无爪）；send_grip* 原地改写
-GRIP_SS = None     # --grip-ss (开阈, 合阈)；None=关（旧 chg 门行为）
 GRIP_WMIN = None   # 爪行程标定下限（米；manifest 缺省=出厂 0.007）
 GRIP_WMAX = None   # 爪行程标定上限（米；manifest 缺省=出厂 0.11）
 CAM_MAP = None     # manifest 相机表 {模型键: SensorType 名}
@@ -59,16 +58,8 @@ ARM_SLICE = list(range(0, 7)) + list(range(8, 15))   # state 里的臂维（0-6 
 # ── 爪/相机状态（本模块=唯一持有地；dict 原地改写、int 经 global 重绑）──
 _LAST_FRAMES = {}     # 相机冻结守卫：逐轮像素级对比（2026-09-24 右臂下压排查引入）
 _FREEZE_STREAK = {}
-_GRIP_EMA = {}      # 爪指令 EMA 状态（--grip-ema-alpha>0 时启用；跨块连续，爪流
-                    # 换块不弃尾——爪相位是低频意图，逐拍直通=物理包络被抖动打断）
-_GRIP_SS_STATE = {}  # 状态机每爪当前态 'hi'/'lo'
-_GRIP_SS_SENT = {}   # 状态机每爪 (上次实发时刻, 上次实发值)
-_GRIP_BEAT = 0       # --grip-send-every 机会拍计数（send_grip 每调用 +1）
-_GRIP_SENT_AT = {}   # 事件门每爪上次实发时刻（--grip-min-interval；send_grip 记账）
-_GRIP_PRE_HIST = {}  # 预合爪每爪意图史 (t, p)，0.75s 窗（判「下行未平稳」用）
 
-# --grip-path joint：爪维走关节固件路径的独立 EMA 状态（与 cmd 路径 _GRIP_EMA
-# 分开，A/B 切路径不串状态）
+# 爪维关节流的指令 EMA 状态（cmd 行程控制器路已封存 11-03，_GRIP_EMA 随之移除）
 _GRIPJ_EMA = {}
 # --grip-hold-on-stall 憋死保持状态（每爪独立）：on=保持中；hist=实宽平台窗；
 # enters=累计进入次数（汇总打印）；tgt=冻结目标；floor=进入时实宽（外松上限）；
@@ -189,141 +180,6 @@ def grab_views(robot) -> dict:
             _lb = head_training_crop(_lb)   # 头图训练裁剪放大（仅头相机）
         out[key] = np.ascontiguousarray(cv2.cvtColor(_lb, cv2.COLOR_BGR2RGB))
     return out
-
-
-def send_grip(robot, chunk_row):
-    """chunk 行 dim7/dim15（0~100%）→ 标定宽度下发（超阈值才发，非阻塞）。
-
-    ⚠ 10-21 起默认路径是 send_grip_joint（--grip-path joint=lerobot 采集
-    语义）；本函数=set_gripper_command 行程控制器路【逃生门/复现对照】，
-    下列各门只在此路适用（该路 onset=0.12s+行程/速度+吞令=训练外注入行为，
-    P6 三格破案在案）。
-
-    只发不查不等待（拖死控制环）；终态核对放循环结束后。回读新鲜（10-13
-    标定 p50 10ms），实际下发拍顺带采样一次物理实宽进日志（[实 X.Xmm]），
-    爪的物理时序证据逐 send 可见。已知物理动态（同标定）：起步死区 ~0.9s +
-    0.15 m/s 帽（满程 ~0.8s）。
-    ⚠ 111901 终审：每条新指令把行程从头重启（死区重吃）——逐拍补发的指令流
-    p50 间隙 2-3 拍，死区永不耗尽 → 110 send 全 SUCCESS 实宽全程 0.5mm 冻结；
-    q 停流静→最后一条 1.5s 走满（「q 后突然张开」全案闭合）。故
-    --grip-ss 状态机=少发（每相 1-2 条、每条 ≥2s 静默窗）；无 ss 时退回旧
-    chg 门（2% 变化即发，111901 证明该模式爪会冻结——保留只为对照）。
-    --grip-send-every N=定时静默制（2026-10-20 定稿）：chg 死区门整体旁路，
-    每 N 个机会拍无条件发当前 EMA 值一条、其余拍纯静默 → 爪在静默窗内跑完
-    行程；N=4→≈7.5Hz/静默 75%。纯去掉死区（≡chg=0）=143831 实证完全冻结，
-    勿用。⚠ 10-20 晚定律终版（174428）补判决：拍隙 <0.9s 死区的周期拍从静止
-    永起步不了（合步2 N=4→0.27s=永冻），此路要真静默须 N≥18。
-    --grip-min-interval N=事件门（2026-10-20 定律终版，三选一门之一）：距上次
-    实发 ≥N 秒才发（固件 onset=0.12s+行程/速度，0.15 全行程 0.91s < N=1.2 →
-    下一条来时上一条必已在途，吞令结构性不可能）；间隔未满仅「在途(|v|>0.02)
-    且意图差≥3%」豁免——在途同向/反向均平滑零罚（P2 174428 满速零凹陷滑到底；
-    P4 183232 反向掉头 ~0.2s 不碰零；10-16「反转重启律」随之改写：杀手=死区
-    密发，方向只是伴随特征）。
-    --grip-preclose V=预合爪爬行【185317 极限梯判死勿启用】：固件速度下限
-    0.03 m/s（0.01 指令实测执行 0.03）且 onset=0.12s+行程/速度——爬速 0.03
-    全行程起步要 ~4.1s，慢速反把起步拖晚，「低速吸收死区」前提不成立。
-    """
-    if GRIP is None:
-        return None
-    if not args.do_exec:
-        return "dry（不下发）"
-    parts = []
-    now = time.monotonic()
-    # --grip-send-every：节流判定每调用一次（=一个机会拍），R/L 共用同一判定
-    # 保持同拍配对；合步模式只组末拍调用，节奏自然跟随。chg 门在节流模式下
-    # 整体旁路（死区逻辑去掉，见函数 docstring 的剂量-响应证据）。
-    global _GRIP_BEAT
-    _pace = int(args.grip_send_every) > 0
-    _send_beat = False
-    if _pace:
-        _send_beat = (_GRIP_BEAT % int(args.grip_send_every)) == 0
-        _GRIP_BEAT += 1
-    _minint = float(args.grip_min_interval or 0.0)
-    _pre = float(args.grip_preclose or 0.0)
-    for name, dim in GRIP["names"]:
-        p = float(np.clip(chunk_row[dim], 0.0, 100.0))
-        if args.grip_ema_alpha > 0:
-            prev = _GRIP_EMA.get(name)
-            p = p if prev is None else \
-                args.grip_ema_alpha * p + (1.0 - args.grip_ema_alpha) * prev
-            _GRIP_EMA[name] = p
-        last = GRIP["sent"].get(name)
-        why = ""
-        if GRIP_SS is not None:
-            st0 = _GRIP_SS_STATE.get(name)
-            t0, v0 = _GRIP_SS_SENT.get(name, (None, None))
-            if st0 is None:                      # 首拍定态并发一次
-                st0 = "hi" if p >= GRIP_SS[0] else "lo"
-                _GRIP_SS_STATE[name] = st0
-                why = "首拍"
-            elif p >= GRIP_SS[0] and st0 != "hi":
-                _GRIP_SS_STATE[name] = "hi"
-                why = "开阈"
-            elif p <= GRIP_SS[1] and st0 != "lo":
-                _GRIP_SS_STATE[name] = "lo"
-                why = "合阈"
-            elif (t0 is not None and abs(p - v0) >= 15.0
-                  and now - t0 >= 2.0):
-                why = "漂移补发"                 # 中间宽度意图，限频 0.5Hz
-            if not why:                          # 无翻转未到补发条件=一律不发
-                parts.append(f"{name[0].upper()} {p:.1f}%·hold")
-                continue
-        elif _minint > 0:
-            # 事件门（定律终版）：间隔窗=静默保证起步；在途同向豁免=免费微调。
-            # 意图没动（<max(chg,3%)）连间隔窗也不发——零travel重发只会白白
-            # 重置静默钟、推迟下一条真令。
-            lt = _GRIP_SENT_AT.get(name)
-            moved = last is not None and \
-                abs(p - last) >= max(float(GRIP["chg"] or 2.0), 3.0)
-            if lt is None:
-                why = "首拍"
-            elif not moved:
-                parts.append(f"{name[0].upper()} {p:.1f}%·hold")
-                continue
-            elif now - lt >= _minint:
-                why = "间隔窗"
-            else:
-                _gs = robot.get_gripper_state(name)
-                if _gs is not None and abs(_gs.velocity) > 0.02:
-                    why = "在途"                # P2/P4 双实锤：在途同向/反向均
-                                                # 平滑零罚（183232 掉头仅 ~0.2s
-                                                # 减速-再加速，不碰零）
-            if not why:
-                parts.append(f"{name[0].upper()} {p:.1f}%·hold")
-                continue
-        elif not _pace and last is not None and abs(p - last) < GRIP["chg"]:
-            parts.append(f"{name[0].upper()} {p:.1f}%·hold")
-            continue
-        if _pace and not _send_beat:         # 节流窗内的拍一律不发（ss 放行也压住）
-            parts.append(f"{name[0].upper()} {p:.1f}%·hold")
-            continue
-        # --grip-preclose：意图下行（合爪）且未平稳 → 爬速下发；平稳回正常速收敛
-        spd = GRIP["speed"]
-        _tag = ""
-        if _pre > 0:
-            h = _GRIP_PRE_HIST.setdefault(name, [])
-            h.append((now, p))
-            while h and now - h[0][0] > 0.75:
-                h.pop(0)
-            if len(h) >= 2 and p < h[0][1] - 3.0:   # 净降 >3 点=真下行（±2 平台
-                spd = _pre                           # 摆动不重燃爬速，EMA 流常见）
-                _tag = " 爬"
-        w = GRIP["wmin"] + p / 100.0 * (GRIP["wmax"] - GRIP["wmin"])
-        st = robot.set_gripper_command(name,
-                                       w, spd, GRIP["effort"], False)
-        GRIP["sent"][name] = p
-        _GRIP_SENT_AT[name] = now
-        if GRIP_SS is not None:
-            _GRIP_SS_SENT[name] = (now, p)
-        _gs = robot.get_gripper_state(name)
-        # eff 回读单位未知（144325 实证：饱和轨 100、全开 114mm 也 100，
-        # 头文件 "Newtons" 被推翻）——只当负载/堵转指示，勿按牛顿判读
-        _phys = (f" 实{_gs.width * 1000:.1f}mm eff{_gs.effort:.1f}"
-                 if _gs is not None else " 实?")
-        parts.append(f"{name[0].upper()} {p:.1f}%→{w * 1000:.0f}mm@{spd:.2f}{_tag}"
-                     f"{_phys} {str(st).replace('ControlStatus.', '')}"
-                     + (f"({why})" if why else ""))
-    return "  ".join(parts)
 
 
 def send_grip_joint(robot, chunk_row, tfs_s, frame=None):

@@ -50,7 +50,6 @@ from common.bodies.s1 import (
     grip_state_cmd_override,
     read_joints,
     s1_warm,
-    send_grip,
     send_grip_joint,
     state_from_joints,
 )

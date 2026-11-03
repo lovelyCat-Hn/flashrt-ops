@@ -1,15 +1,15 @@
 {
  "meta": {
   "date": "2026-10-30",
-  "git_head": "b257705",
+  "git_head": "c274d4f",
   "python": "3.11.16",
   "numpy": "1.26.4",
   "files": {
-   "scripts/s1/inference/run_s1_loop_traj.py": "80a2c13eb0be9184",
+   "scripts/s1/inference/run_s1_loop_traj.py": "a8f810c7c7c5edfa",
    "scripts/g1/inference/run_g1_loop_traj.py": "8ad5dad468598242",
    "scripts/s1/inference/s1_traj_interp.py": "09f39af066cc3f24",
    "scripts/g1/inference/g1_traj_interp.py": "48a832b65e9892f2",
-   "scripts/s1/inference/s1_config.py": "a59bf2f14ccea90d",
+   "scripts/s1/inference/s1_config.py": "04a2d777ab074100",
    "scripts/g1/inference/g1_config.py": "6c37c621433a75a1"
   }
  },
@@ -5288,7 +5288,6 @@
     "rows_per_cmd": 1,
     "filter_alpha": 0.1,
     "max_joint_delta_per_step": 0.05,
-    "grip_path": "joint",
     "grip_velocity": 0.05,
     "grip_effort": 10,
     "skip_frames": true,
@@ -5301,8 +5300,7 @@
     "head_crop": false,
     "cache_frames": 1,
     "max_excursion": 3.0,
-    "grip_enabled": true,
-    "grip_chg": 2.0
+    "grip_enabled": true
    },
    "renamed": "[config] <tmp>/x.toml.ema_alpha 已改名 filter_alpha（键名对齐同事栈词汇/g1.toml [lerobot] 体系，见 docs/lerobot-alignment.md），请更新 toml；旧键硬报错防静默回落内置默认",
    "apply": {

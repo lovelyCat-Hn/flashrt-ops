@@ -278,16 +278,6 @@ ap.add_argument("--grip-filter-alpha", "--grip-ema-alpha",
                      "set_joint_commands，分旋钮是分路时代遗产）。显式传值=爪单独"
                      "覆盖（A/B 用），0=爪不滤。grip%% 流逐拍平滑后再进发送判定"
                      "（治模型爪列翻转：125953 实证 EMA 滤反转即治本）")
-ap.add_argument("--grip-ss", type=str, default="",
-                help="爪状态机「开阈,合阈」如 50,35（空=关，默认）：平滑后爪%%"
-                     "≥开阈→置开态发一次、≤合阈→置合态发一次、带内不发；无翻转"
-                     "时平滑值漂离上次实发 ≥15 点且距上次下发 ≥2.0s 才补发一条"
-                     "（中间宽度意图）。机制依据（111901 终审）："
-                     "set_gripper_command 每条新指令把行程从头重启（起步死区 "
-                     "~0.9s，单发标定台实证），循环流 p50 间隙 2-3 拍=死区永不"
-                     "耗尽→110 条 send 全 SUCCESS 但实宽全程 0.5mm 冻结；q 停流"
-                     "静→最后一条 1.5s 走满=「q 后突然张开」。治法=少发：状态机"
-                     "每相 1-2 条，每条都拿到 ≥2s 静默行程窗")
 ap.add_argument("--starve-limit", type=float, default=2.0,
                 help="星饿安全停机阈值 s：块耗尽且推理未归超过该时长即停循环"
                      "（默认 2.0s=正常推理余量 ~6×；星饿期不下发=伺服保持）")
@@ -367,42 +357,6 @@ ap.add_argument("--no-grip", action="store_true",
                 help="显式关闭夹爪下发（覆盖 config 的 gripper.enabled=true）")
 ap.add_argument("--grip-speed", type=float, default=None, help="夹爪速度 m/s（config [gripper].speed）")
 ap.add_argument("--grip-effort", type=float, default=None, help="夹爪力矩 N（config [gripper].effort）")
-ap.add_argument("--grip-chg", type=float, default=None,
-                help="夹爪下发变化阈值 %%（config [gripper].chg）")
-ap.add_argument("--grip-send-every", type=int, default=0,
-                help="爪定时静默制：每 N 个机会拍强制发 1 条当前 EMA 值，chg 死区门"
-                     "整体旁路（0=关，走旧 chg 门）。2026-10-20 静默定律：爪只在指令"
-                     "静默期执行、每条新指令打断在途行程从头重来——chg=0（无死区）"
-                     "30Hz 密发实证完全冻结（143831），chg=2 密发滞留爬行（135828）。"
-                     "N=4→≈7.5Hz/静默 75%%。R/L 同拍判定，同拍配对不变。⚠ 10-20 晚"
-                     "定律终版补判决：无条件周期拍隙 N/机会拍率 <0.9s 死区时从静止"
-                     "永起步不了（合步2 N=4→0.27s=永冻），要用须 N≥18（隙≥1.2s）。")
-ap.add_argument("--grip-min-interval", type=float, default=0.0,
-                help="爪事件门 s（2026-10-20 极限梯定律版）：距上次实发 ≥N 秒才发"
-                     "下一条。固件起步延迟 onset=0.12s+行程/速度（0.15 m/s 全行程"
-                     "119.5mm=0.91s），N=1.2>0.91 → 下一条来时上一条必已在途/完成，"
-                     "吞令重摆结构性不可能；间隔未满时仅「在途(|v|>0.02)且意图差"
-                     "≥3%%」豁免即时发（P2/P4 实锤：在途同向/反向均平滑零罚，"
-                     "183232 反向掉头仅 ~0.2s 不碰零）。0=关（走旧 chg 门）。"
-                     "推荐 1.2。与 --grip-send-every/--grip-ss 互斥。")
-ap.add_argument("--grip-preclose", type=float, default=0.0,
-                help="【已判死 185317 极限梯，勿启用】固件速度下限 0.03 m/s"
-                     "（0.01 指令实测执行 0.03）且起步延迟 onset=0.12s+行程/速度"
-                     "——爬速 0.03 全行程起步要 ~4.1s，爬速越慢起步越晚，"
-                     "「低速吸收死区」前提整体不成立。旗标保留仅供复现对照。0=关。")
-ap.add_argument("--grip-path", choices=["cmd", "joint"], default="joint",
-                help="爪下发路径（10-21 P6 破案+用户定案默认 joint：onset=0.12s+"
-                     "行程/速度＋吞令整条定律属 set_gripper_command 端点专属，"
-                     "该路=训练外注入行为；joint=dim7/15 并回 set_joint_commands "
-                     "关节流=lerobot 采集/同事 infer_policy 本体语义，P6 三格实证 "
-                     "onset≈0.14s 纯 L 与行程无关、velocity=速度帽（0.15→0.1500 "
-                     "被尊重）、密流不冻；双爪一包每发送拍一包，各门全旁路、"
-                     "EMA 照带、effort=10 同事同款）。"
-                     "cmd=set_gripper_command【降级=逃生门/复现对照】——爪各门"
-                     "（chg/min-interval/ss/send-every/preclose）只在此路适用，"
-                     "joint 路无该定律、门无对象（传了会被拒）。"
-                     "速度下限 0.03 m/s 双路径共享（电机级），0.15 不受影响。"
-                     "默认 joint。")
 ap.add_argument("--grip-hold-on-stall", action="store_true", default=False,
                 help="憋死保持（2026-10-21 力矩碰撞案；仅 --grip-path joint）："
                      "抓到物体后模型按训练语义持续发全闭指令，位置伺服以有限速度"
@@ -568,10 +522,8 @@ s1_config.apply(args, {
     "cache_frames": "cache_frames",
     "max_excursion": "max_excursion",
     "grip": "grip_enabled",
-    "grip_path": "grip_path",
     "grip_speed": "grip_velocity",
     "grip_effort": "grip_effort",
-    "grip_chg": "grip_chg",
 }, path=args.config)
 if args.fps is None:
     args.fps = 30
@@ -579,6 +531,7 @@ if args.frames_per_row is None:
     args.frames_per_row = 1
 if args.rows_per_cmd is None:
     args.rows_per_cmd = 1
+args.grip_path = "joint"   # cmd 逃生门已封存（11-03）：引擎 send 分发条件保活常数
 
 # ── policy 族门禁（10-29 适配器入口同口径）：toml/BUILTIN 的 ckpt 属 pi05 族
 #    （010000），policy≠pi05 不吃；CLI 显式给仍赢。prompt 两族训练 task 同为
@@ -759,17 +712,6 @@ if args.grip_ema_alpha is None:
     # 10-21 定档：同事 action_filter=dim23 全维单滤镜（robot_controller.py:110）
     # ——爪跟随臂 α，一个旋钮；显式传 --grip-ema-alpha 才单独覆盖（A/B 用）
     args.grip_ema_alpha = args.ema_alpha
-GRIP_SS = None      # --grip-ss 解析结果（开阈, 合阈）；None=关（旧 chg 门行为）。
-                    # ⚠ 初值必须在解析前且此后勿再赋 None：模块后段再置 None 会
-                    # 盖掉解析值（125953 教训：banner 先打印、循环时已被抹）
-if args.grip_ss:
-    try:
-        _o, _c = args.grip_ss.split(",")
-        GRIP_SS = (float(_o), float(_c))
-    except ValueError:
-        raise SystemExit('--grip-ss 格式：「开阈,合阈」，如 --grip-ss 50,35')
-    if not (0.0 <= GRIP_SS[1] < GRIP_SS[0] <= 100.0):
-        raise SystemExit("--grip-ss 需 0 ≤ 合阈 < 开阈 ≤ 100（带内=迟滞防抖）")
 if args.n_action_steps < 0:
     raise SystemExit("--execute-actions-per-chunk 须 ≥ 0（0=换块即预取）")
 if args.n_action_steps == 0 and not (args.skip_install or args.entry_match):
@@ -789,7 +731,6 @@ print(f"[loop-traj] tick {TICK * 1000:.1f} ms（{args.fps} Hz）| 轨迹流 "
          + (f"，缝侧细笔 {'/'.join(map(str, args.cmd_every_ramp))}→{args.cmd_every}"
             if args.cmd_every_ramp else "")
          if args.cmd_every > 1 else "")
-      + (f" | 爪状态机 {GRIP_SS[0]:g}/{GRIP_SS[1]:g}" if GRIP_SS is not None else "")
       + (f" | 帧落盘 {_frames_dir.name}" if _frames_dir is not None else "")
       + f" | 水位 {args.n_action_steps} 步换块弃尾"
       + ("（换块即预取，块长≈推理时延）" if args.n_action_steps == 0 else "")
@@ -873,32 +814,13 @@ if args.grip:
     GRIP = {"names": (("right_gripper", 7), ("left_gripper", 15)),
             "wmin": float(wmin), "wmax": float(wmax),
             "speed": args.grip_speed, "effort": args.grip_effort,
-            "chg": args.grip_chg, "sent": {}, "sent_peak": {}}
+            "sent": {}, "sent_peak": {}}
     print(f"夹爪下发开启: 0%→{wmin} m | 100%→{wmax} m | 速度 {args.grip_speed} m/s | "
-          f"力矩 {args.grip_effort} N | 变化阈值 {args.grip_chg}%")
-    if args.grip_path == "joint":
-        print("爪路径=关节流（--grip-path joint，10-21 起默认）：双爪作关节组并入 "
-              "set_joint_commands（tfs 与臂同参、velocity=速度帽 0.15 被尊重、"
-              "effort=10 同事同款）；chg/min-interval/send-every/ss/preclose "
-              "各门全旁路（10-21 P6 三格实证：onset 0.12+D/v 律属 "
-              "set_gripper_command 端点专属），EMA 照带")
-        _gp_bad = [n for n, _v in (
-            ("--grip-min-interval", args.grip_min_interval),
-            ("--grip-send-every", args.grip_send_every),
-            ("--grip-ss", args.grip_ss),
-            ("--grip-preclose", args.grip_preclose)) if _v]
-        if _gp_bad:
-            raise SystemExit(f"--grip-path joint 与 {'/'.join(_gp_bad)} 互斥"
-                             "（joint 路径无 onset/吞令定律，各门无对象；"
-                             "10-21 P6 三格实证）")
-    else:
-        if args.grip_hold_on_stall:
-            raise SystemExit("--grip-hold-on-stall 仅 --grip-path joint 支持"
-                             "（憋死保持改写关节流目标；cmd 路是降级逃生门，"
-                             "不加新行为）")
-        print("爪路径=行程控制器（--grip-path cmd【逃生门/复现对照】）："
-              "set_gripper_command 老路，各门适用——该路 onset=0.12s+行程/速度"
-              "+0.03 下限+吞令=训练外注入行为（10-21 P6 破案），默认已不走")
+          f"力矩 {args.grip_effort} N")
+    print("爪路径=关节流（grip_path joint，10-21 P6 破案+用户定案现役；"
+          "set_gripper_command cmd 逃生门已封存 11-03，send_grip/各门随路移除）："
+          "双爪作关节组并入 set_joint_commands（tfs 与臂同参、velocity=速度帽"
+          " 0.15 被尊重、effort=10 同事同款），每发送拍无条件发，EMA 照带")
     if args.grip_hold_on_stall:
         print(f"[grip-hold] 憋死保持开：指令≤实宽−{args.grip_hold_gap_mm}mm "
               f"持续满窗({args.grip_hold_window}拍)且实宽平台"
@@ -919,21 +841,6 @@ if args.grip:
         print(f"[grip] 爪通道节流: 每 {args.gripj_every} 拍发 1 条"
               f"（{30.0 / args.gripj_every:.1f}Hz；臂照旧 30Hz 直发，"
               f"hold 状态机照常 30Hz 跑、窗口墙钟不变）")
-    if args.grip_send_every > 0:
-        print(f"爪定时静默制: 每 {args.grip_send_every} 机会拍 1 条"
-              f"（≈{30.0 / args.grip_send_every:.1f}Hz、静默 "
-              f"{100.0 - 100.0 / args.grip_send_every:.0f}%），chg 死区门旁路")
-    if args.grip_min_interval > 0:
-        if args.grip_send_every > 0 or GRIP_SS is not None:
-            raise SystemExit("--grip-min-interval 与 --grip-send-every/--grip-ss "
-                             "互斥（三选一的门：事件门/周期拍/状态机）")
-        print(f"爪事件门: 距上次实发 ≥{args.grip_min_interval}s 才发；间隔未满仅"
-              f"在途(|v|>0.02)且意图差≥3% 豁免（chg 门旁路）——静默保证起步、"
-              f"在途更新免费（P2/P4：同向反向均平滑）")
-    if args.grip_preclose > 0:
-        print(f"预合爪爬行: 意图下行未平稳时下发改用 {args.grip_preclose} m/s"
-              f"（死区吸收进意图早期，在途同向免费跟随；平稳后回 "
-              f"{args.grip_speed} m/s 收敛；变速生效性待探针 P5）")
     if args.grip_state_cmd:
         print("⚠ state 夹爪维(7/15)喂【指令值】（--grip-state-cmd）：对齐数据集 state "
               "爪维语义（「回读滞后 6.3-8s」旧说已被 10-13 标定翻案，回读新鲜 "
@@ -1000,7 +907,6 @@ from common.bodies.s1 import (  # noqa: E402
     grip_state_cmd_override,
     read_joints,
     s1_warm,
-    send_grip,
     send_grip_joint,
     state_from_joints,
 )
@@ -1016,7 +922,7 @@ if "width_min" not in _gcal or "width_max" not in _gcal:
     print(f"[grip] ⚠ 无 manifest 爪标定，用出厂行程缺省 {GRIP_WMIN}/{GRIP_WMAX} m"
           "（未逐台标定；偏了只会平移爪百分比零点，不影响臂）")
 B.args = args
-B.GRIP, B.GRIP_SS = GRIP, GRIP_SS   # dict 引用回填（send_grip* 原地改写共享）
+B.GRIP = GRIP   # dict 引用回填（send_grip_joint 原地改写共享）
 B.GRIP_WMIN, B.GRIP_WMAX = GRIP_WMIN, GRIP_WMAX
 B.CAM_MAP, B.VIEWS = CAM_MAP, VIEWS
 
@@ -1128,11 +1034,8 @@ GRIP_INTERP = create_interpolator(args.interp, dim=2,
                                   output_hz=args.fps * args.frames_per_row)
 
 _EMA_STATE = None   # 跨块连续 EMA 状态（上块末行滤波输出；None=尚无历史不滤波）
-# ⚠ GRIP_SS 的初值 None 放 argparse 段（≈300 行）——若在此处再
-# 置 None 会把上面解析好的 --grip-ss 盖掉（125953 实录：banner
-# 打了 50/35 但循环里 GRIP_SS 已被本行旧赋值抹成 None，静默退
-# 回 chg 门=状态机整跑未生效）
-# （_GRIP_* 状态 dict/计数器已收编 common/bodies/s1.py，步2b-2）
+# （_GRIPJ_* 状态 dict/计数器已收编 common/bodies/s1.py，步2b-2；cmd 路
+# send_grip 各门已随 --grip-path 封存移除，11-03）
 
 
 # ── 换块融合纯件已收编 common/control/fusion.py（步2b-1，原文逐位一致；

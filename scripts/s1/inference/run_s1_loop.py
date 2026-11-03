@@ -413,7 +413,6 @@ def main() -> int:
                   "ctrl_hz": args.ctrl_hz,
                   "execute_actions_per_chunk": args.execute_actions_per_chunk,
                   "filter_alpha": args.filter_alpha,
-                  "grip_path": args.grip_path,
                   "live_frames": args.live_frames}
         out = pathlib.Path(args.out)
         out.mkdir(parents=True, exist_ok=True)
@@ -723,28 +722,9 @@ def send_grip_joint(robot, tg: S1Targets) -> None:
         print(f"⚠ grip 关节流 → {st}")
 
 
-def send_grippers(robot, tg: S1Targets, state_raw: np.ndarray) -> None:
-    """--grip-path cmd【逃生门/复现对照】=set_gripper_command 独立 API。
-    该路 onset=0.12s+行程/速度+吞令=训练外注入行为（G1 P6 破案），默认不走；
-    2mm 死区门只在此路有意义。"""
-    args = _args[0]
-    for side, w in (("left", tg.left_grip_m), ("right", tg.right_grip_m)):
-        if w is None:
-            continue
-        cur_pct = float(state_raw[7] if side == "left" else state_raw[15])
-        cur_m = gripper_pct_to_width_m(cur_pct)
-        if abs(w - cur_m) > 0.002:
-            robot.set_gripper_command(f"{side}_gripper", float(w),
-                                      velocity_mps=args.grip_velocity,
-                                      effort=args.grip_effort, is_blocking=False)
-
-
 def send_grips(robot, tg: S1Targets, state_raw: np.ndarray) -> None:
-    """爪发送分派：joint=关节流（traj 标准）；cmd=逃生门。"""
-    if _args[0].grip_path == "joint":
-        send_grip_joint(robot, tg)
-    else:
-        send_grippers(robot, tg, state_raw)
+    """爪发送：joint 关节流（traj 标准；cmd 逃生门已封存 11-03）。"""
+    send_grip_joint(robot, tg)
 
 
 def sleep_to(deadline: float) -> None:

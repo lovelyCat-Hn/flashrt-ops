@@ -7,7 +7,7 @@ delta-max 链钳自带慢速就位效应——首行离当前读数远时被钳�
 ②量化执行链（节拍抖动/块缝/回读残差）；③遥测为闭环对比预留同格式。
 
 同构保证：**直接 import run_s1_loop 的代码对象**——stream_row / plan_row /
-ema_row / send_grippers / sleep_to 原封复用，回放只换"动作来源"（文件/合成
+ema_row / send_grips / sleep_to 原封复用，回放只换"动作来源"（文件/合成
 vs 推理）。刻意比主执行器多一层：每 tick 重读臂关节刷新链钳基准（G1 traj
 同款 per-tick re-read；主执行器现为每块读一次，真机 A/B 后再回移）。
 
@@ -55,7 +55,7 @@ _INF = _HERE.parents[1] / "inference"
 sys.path.insert(0, str(_INF))
 
 # ── import run_s1_loop（其 argparse 在模块层 parse → 临时换空 argv）──
-# 目的：stream_row/plan_row/ema_row/send_grippers/sleep_to 用同一代码对象，
+# 目的：stream_row/plan_row/ema_row/send_grips/sleep_to 用同一代码对象，
 # 回放即与主执行器逐指令同路径（回放台立意，G1 同构原则）。
 _argv = sys.argv
 sys.argv = ["run_s1_loop.py"]
@@ -393,7 +393,7 @@ def run_replay(robot, body_names, names, chunks, grip, executing: bool,
                 if not executing:
                     advance_arm_state(state_raw, names, tgt, rnames)
                 if executing:
-                    rsl.send_grippers(robot, tg, state_raw)   # 爪逐行（矩阵实证爪无罪）
+                    rsl.send_grips(robot, tg, state_raw)   # 爪逐行（矩阵实证爪无罪）
                 pending.append((rnames, tgt))
                 if k == 0 and last_tgt:
                     d = [abs(prev[nm] - last_tgt[nm]) * 1000

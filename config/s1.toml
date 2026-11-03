@@ -30,10 +30,8 @@ max_joint_delta_per_step = 0.05
 filter_alpha = 0.1
 
 # ── 爪（关节流=traj 标准）──
-grip_path = "joint"                      # joint=set_joint_commands 关节流；cmd=set_gripper_command 逃生门
 grip_velocity = 0.05                     # m/s 速度帽（pyi：爪维 velocity/effort 生效）
 grip_effort = 10
-grip_chg = 2.0                           # 仅 cmd 逃生门消费（joint 路各门旁路）
 
 # ── traj 标准配方键（G1 [lerobot] 定档；run_s1_loop.py 不消费，忽略即可）──
 skip_frames = true                       # 换块跳帧安装（水位 0 的官配对）

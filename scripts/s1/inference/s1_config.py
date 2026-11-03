@@ -42,7 +42,6 @@ BUILTIN = {
                               # （R1/R2 真机均静，取最简）
     "filter_alpha": 0.1,      # S1 初档（用户定案 2026-10-28；G1 现役 0.3）
     "max_joint_delta_per_step": 0.05,  # rad/步（对原始增量 0.00% 截断=封版）
-    "grip_path": "joint",     # traj 标准（关节流；cmd=逃生门）
     "grip_velocity": 0.05,    # m/s 爪速度帽（关节流 velocity 字段被尊重）
     "grip_effort": 10,        # 爪 effort（同事同款；pyi：爪维生效）
     # ── traj 标准配方键（S1 toml 未列时回落；值=G1 traj [lerobot] 定档）──
@@ -58,7 +57,6 @@ BUILTIN = {
     "cache_frames": 1,        # 1=每帧全量（2 已判死，G1 9/30 实录）
     "max_excursion": 3.0,     # rad 漂移护栏（同 G1）
     "grip_enabled": True,     # S1 数据集带爪维，爪下发默认开（--no-grip 反关）
-    "grip_chg": 2.0,          # cmd 逃生门变化阈值 %（joint 路旁路）
 }
 
 # 命名正规化（对照 docs/lerobot-alignment.md）：命中旧键直接 SystemExit——

@@ -219,7 +219,6 @@ class Stub2:
 stub2 = Stub2()
 stub2.cur = curh2
 goal2 = m2.home_pose_targets()
-m2.args.grip_path = "joint"
 m2._args[0] = m2.args
 okh2 = m2.home_to(stub2, body17, goal2, "smoke就位")
 assert okh2, "home_to 未收敛"

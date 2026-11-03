@@ -9,7 +9,7 @@ delta-max 链钳自带慢速就位效应）；②量化执行链（节拍迟到/
 ③遥测落 `~/holy/evidence/s1_replay/` 为闭环对比预留同格式。
 
 **同构保证**：直接 import run_s1_loop 的代码对象（stream_row/plan_row/
-ema_row/send_grippers/sleep_to 原封复用），回放只换"动作来源"。
+ema_row/send_grips/sleep_to 原封复用），回放只换"动作来源"。
 刻意比主执行器多一层：**每 tick 重读臂关节刷新链钳基准**（G1 traj 同款
 per-tick re-read；主执行器现为每块读一次，真机 A/B 后再回移）。
 
