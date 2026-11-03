@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 688dacf4-1a8a-4f2b-b926-938022b6de08
-  modified: 2026-09-22T06:38:59.143Z
+  modified: 2026-11-03T09:37:18.364Z
 ---
 
 pi0.5 推理环境（FlashRT 0.2.0 + torch 2.4.0a0 自编 wheel + py3.11 conda env）打包迁移到另一台 Orin 的标准配方（2026-09-21 定稿）。核心思路：**所有编译产物已就绪，目标机零编译**；用"相同绝对路径解压"让 conda、editable 安装、cuBLAS 软链全部免修。
@@ -57,3 +57,5 @@ print('kernels  : ok')"
 相关：[[galbot-pi05-env-setup]]（环境本体与 cuBLAS 三层现象）、[[galbot-pi05-g1-finetune-data]]（补丁内容与 G1 三件套）、[[galbot-user-runs-install-commands]]（安装类命令由用户执行）
 
 **v3 纯环境包（2026-09-28）**：v2 原方去掉 `holy/models` 即 v3，成品 **7.5G**（权重 23G 是 v2 的大头；conda env 对 pkgs 硬链接多，du ~3G/tar 实写 7.5G 属正常）。命令：`cd ~ && tar --exclude='miniforge3/pkgs' --exclude='holy/FlashRT/build*' -cf ~/flashrt_bundle_v3_env.tar miniforge3 holy/FlashRT holy/cuda_warmup.py holy/pytorch/dist .cache/flash_rt`（35s，勿加 -z）。含 conda 全环境/FlashRT 源码/torch wheel/tokenizer，**不含权重**——新机跑推理另拷 models，verify_deploy.sh 的权重/推理项会报错属预期。配方已写进 DEPLOY.md §1 v3 节。
+
+**v5 环境包（2026-11-03，S1 机=源机）**：v4 配方原样（同 excludes），成品 **13G**——比 v4 大是源机多了 lerobot_cpu env 5.7G（数据集工作环境，随包无害）。sha256 `caab8bf03ccfe7dec3e08bfd677823942637d779b294e88be710309195d6e763`；抽查四关键件全在（flash_rt_kernels .so / fineart_vla_rtx.py〔含 rtc 三参修复〕/ pi05_rtx.py / paligemma_tokenizer.model）。**权重不入包（用户定案）**——fineart 050000 / pi05 S1 010000·030000 各 8.8G 另拷。**代码轨 2026-11-03 升级为 gitee 双仓**：flashrt-ops（脚本轨 master）+ **flashrt-dev（引擎轨=FlashRT 嵌套仓 849 commits 全历史备份，tip=fa644cb3）**；DEPLOY.md §2② 已更新（解出的 FlashRT 自带 .git 且 origin=github 不可达 → 挂 gitee 远端 `git reset --hard gitee/main` 对齐）。
