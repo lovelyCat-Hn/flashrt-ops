@@ -96,14 +96,16 @@ tar --exclude='miniforge3/pkgs' --exclude='holy/FlashRT/build*' \
 # ① 解压（必须在 ~ 下！解到别的目录 mv 也行，但最终位置必须是 /home/galbot/{miniforge3,holy,.cache}）
 cd ~ && tar -xf flashrt_bundle_v4_env.tar
 
-# ② 拉代码轨（脚本+文档以 git 为准，覆盖 bundle 里的冻结快照）
-#    新机首次连 GitHub 需先配认证（二选一）：
-#    a) SSH: ssh-keygen -t ed25519 -N "" → 把 ~/.ssh/id_ed25519.pub 加到 GitHub → Settings → SSH keys
-#    b) HTTPS: GitHub → Settings → Developer settings → Fine-grained token（Contents: RW）
-git clone git@github.com:lovelyCat-Hn/flashrt-ops.git /tmp/ops
+# ② 拉代码轨（2026-11-03 起 = gitee 双仓：flashrt-ops=脚本轨 / flashrt-dev=引擎轨；
+#    脚本/文档/引擎代码均以 git 为准，覆盖 bundle 里的冻结快照）
+git clone git@gitee.com:tq-llm/flashrt-ops.git /tmp/ops
 cp -r /tmp/ops/scripts/. ~/holy/scripts/
 cp -r /tmp/ops/hotfix_flashrt ~/holy/
 cp /tmp/ops/*.md ~/holy/
+# 引擎轨：v5 包解出的 ~/holy/FlashRT 自带 .git（origin=github 上游，本机不可达）
+# ——挂 gitee 远端、对齐最新（解包后 FlashRT 即 git 仓，此步幂等）：
+cd ~/holy/FlashRT && git remote add gitee git@gitee.com:tq-llm/flashrt-dev.git
+git fetch gitee && git reset --hard gitee/main && cd ~
 
 # ③ FlashRT 热修体检（v4 包已含全部本地补丁，此处应报「已在」= no-op；
 #    仅 v2/v3 老包需要真修。幂等，重复跑无副作用）
