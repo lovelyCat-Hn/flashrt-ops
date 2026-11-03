@@ -1,164 +1,54 @@
 #!/usr/bin/env python
-"""G1 双臂闭环——轨迹流执行器（set_joint_commands 高频流路线）。
+"""S1 双臂闭环轨迹流执行器（G1 run_g1_loop_traj.py 移植版）。
 
-【标准版配方（2026-10-21 用户定档=lerobot 对齐版）】
-  标准跑一条命令：run_g1_loop_traj.py --exec
-  配方固化在 config/g1.toml [lerobot] 档（三态 CLI > [lerobot] > 内置：
-  逐项覆盖=CLI 显式传参；布尔档显式关=--no-X 反关旗标；日志 [config]
-  覆盖行可核对生效来源）。旗标/档键名已对齐同事栈词汇
-  （execute_actions_per_chunk/skip_frames/aggregate_fn〔上游
-  AGGREGATE_FUNCTIONS 注册表；--fusion-alpha=连续 α 逃生门〕/filter_alpha/
-  max_joint_delta_per_step/execution_horizon；旧旗标名保留为 CLI 别名）。
-  等价 CLI 展开：
-    --rounds 200 --execute-actions-per-chunk 0 --skip-frames
-    --aggregate-fn weighted_average
-    --cmd-every 1 --filter-alpha 0.3 --grip-state-cmd --max-joint-delta-per-step 0.05
-    --burst-reserve-ms 0 --nav-suspend --execution-horizon 10 --head-crop
-    --ckpt models/pi05_g1_training_rtc_d10_deploy
-  语义=同事 lerobot 栈忠实复刻：爪=关节流（--grip-path joint 默认，
-  dim7/15 并回 set_joint_commands，P6 破案后 10-21 定档）、tfs=0、
-  30Hz 直发（cmd-every 1）、skip-install=同事 skip_frames、
-  overlap 0.7=同事 weighted_average（0.3 旧+0.7 新）、EMA=同事
-  action_filter（dim23 全维：臂+爪同 α，--grip-filter-alpha 默认跟随、
-  仅 A/B 单独覆盖）、水位 0=换块即预取；+trained-RTC（--execution-horizon 10
-  须配 sft1012_training_rtc_d10 权重，--head-crop pick 相必带——
-  place 相/非此 ckpt 勿带）。逐项依据见 USAGE §3.8。
+由 run_g1_loop_traj.py 整文件移植（2026-10-29 定案）：行为逻辑（水位预取/
+换块弃尾/星饿停机/链式限幅/EMA/换块融合/RTC 前缀引导/护栏/退出监听/遥测）
+与 G1 版同源，仅替换下述机体件。
 
-与 run_g1_loop_native.py（母本）同一条推理链路、同一套护栏与水位换块调度，
-只换发令侧：native 每拍发一条位置指令（30Hz 阶跃，10-09 真机七跑定案
-抖感∝指令沿能量=阶跃幅值×沿频率）；本脚本走同事 infer_policy 的真机在役
-路线——
-  换块时一次性：行目标（链式 ±--max-joint-delta-per-step rad/行 限幅）→ [当前实际位]+
-  行目标 样条插值成每行 --frames-per-row 帧（默认 1=纯 30Hz 直发；10-10
-  用户定案退役 240Hz 微流，N>1 仅 A/B 显式选用）→ 每 row-tick
-  按 (tick−--burst-reserve-ms) 预算匀速突发下发 set_joint_commands
-  （time_from_start=0，标准关节只消费 position）。N=1 时指令阶跃=整行差
-  （链钳 ±delta-max 封顶）；N>1 时阶跃≈行差/N——消指令沿激励而非压速度。
-SDK 契约出处：g1/__init__.pyi set_joint_commands "suitable for
-  high-frequency control usage; For standard joints only the position
-  field will be effective"；插值算法移植自同事 /home/galbot/infer_policy/
-  joint_interpolator.py（linear/cubic/quintic → g1_traj_interp.py）。
-调度约定出处（机制参照，非逐行移植；Apache-2.0）：
-  lerobot async_inference/robot_client.py L477-489 control_loop 固定节拍
-  （environment_dt 截止，sleep(max(0, dt−elapsed))）；L410-413
-  _ready_to_send_observation 水位换块（qsize/chunk_size ≤ 0.5）。
-时序铁律：绝对截止（next_t += TICK），落后超 1 拍即重锚——绝不连发追赶；
-  星饿（块耗尽且推理未归）=不下发（刚性伺服保持最后目标原地等待），超
-  --starve-limit 判挂死停机。帧突发配速预算=tick−--burst-reserve-ms，
-  SDK 单帧调用若超预算只会体现为丢拍重锚（遥测可见），绝不追发。
-RTC：--execution-horizon N > 0 时启用推理侧前缀引导（同 native，FlashRT 引擎
-  guided RTC）：旧块未消费尾段重锚进新块坐标系作为前缀，每个去噪步把
-  新块开头拉向旧计划，消换块接缝跳变。0=关（默认）。
-搭接：--blend 执行侧前向搭接（10-12 回放台定案移植）——换块后新块前 M 行
-  目标替换为"旧链末目标→rows[M−1]"直连，消回溯俯冲/块首急停；与 RTC
-  正交（推理侧 vs 执行侧），叠加属双重消缝，A/B 分开评估。0=关（默认）。
-合步：--cmd-every N>1 每 N 拍并成 1 条指令（拍 k 下发组末行 rows[k+N−1]，
-  中间行只消费不发送），指令沿 30→30/N Hz、阶跃≈N 行差——臂以指数追踪
-  大导程平滑扫过，切块误差被导程淹没（A 线 spc 合步同机制；native 七跑
-  定案抖感∝指令沿频率）。默认 1=纯 30Hz 直发零变。与 --blend 互斥
-  （blend 把块首重铺细步，方向相反）。
-  ⚠ 接口铁律（10-16 用户定案）：本脚本只走 set_joint_commands 纯流式，与
-  lerobot/同事 infer_policy 执行侧保持同源——不得引入 set_joint_positions/
-  配速（那是要配速时直接用 run_g1_loop 的理由）。代价已知：流式底层=指数
-  追踪 v≈2.6×gap，合步大步每条带一个初速尖峰（20261016「一震一震」实录），
-  属接口固有，压抖靠缩小 N 或 --cmd-first-only 减少合步条数。
-  折中口径 --cmd-first-only：合步只并每块首组（rows 0..N−1 一条指令消块界，
-  该拍组差本来就小 ~12-20 mrad），其余拍回 30Hz 逐拍流式密随——均匀合步的
-  组间大步 85-105 mrad 太肥（20261016 真机实录：块界治好但误差搬进块内），
-  且流式 Pursuit 会把首组滞后自然吃回。
-  --merge N（10-26 replay 台移植）：另一种合步=等时粗化——滤波后每 N 行取
-  1 个宏步、宏步段帧按拍均分，指令沿=fps×frames-per-row/N 且发令**均匀无洞**
-  （cmd-every 是组末单发+静默拍）；与 cmd-every 族互斥，二者取一。
-  --continuous-ref：换块链从 last_tgt 接续不重锚（replay 6f52423 移植）。
-参数命名对 lerobot 术语的对照：docs/lerobot-alignment.md。
+机体件差异：
+  SDK        galbot_sdk.g1 → galbot_sdk.s1；爪组名 "left/right_gripper"
+  state 27   [右臂7, 右爪%, 左臂7, 左爪%, torso, head2, swerve×8]（数据集序；
+             爪宽米→0-100%；swerve 恒 0；torso=torso_lift_joint1 高度米）
+  取图       get_rgb_data(JPEG)，HEAD_RIGHT/LEFT_ARM/RIGHT_ARM；冻结守卫常开
+  发令       set_joint_commands_batch 带时间轴批（tfs 逐拍累计=墙钟节拍；
+             WBC 按 tfs 细插，tfs=0 参考跳变→力矩跳变；--rows-per-cmd R>1
+             跨拍攒窗；--cmd-every>1 硬拦）
+  取图线程   fresh_obs 随推理入 worker 线程（--no-obs-worker 回退主线程）
+  爪标定     ckpt 无 manifest gripper 段 → 出厂行程 0.007/0.11 m
+             （告警：未逐台标定）
+  warm       内嵌 s1_warm：臂+头 @0.15 rad/s → torso @0.2；姿态由
+             config/s1.toml [warm_pose] 覆盖，缺省 policies/base.py 烘档；
+             --exec 确认后就位，自然结束归位；q/Ctrl-C 立即退出不复位
+  导航/护栏  无 nav 栈（--nav-suspend 保留为 no-op 兼容档键）；ckpt 无
+             joint_envelope.json 时包络护栏自动关闭
 
-⚠ 加 --exec 会连续真实驱动双臂！安全设计（与 native 同款）：
-  1. 只动双臂 14 关节；腿/头维度永不下发；夹爪仅 --grip 显式开启时下发
-     （0~100%% → manifest 标定宽度，变化超 --grip-chg 才发，非阻塞不等反馈）
-  2. 换块时行目标链式限幅 ±--max-joint-delta-per-step rad/行 + 逐帧包络钳位；漂移护栏：
-     行目标偏离起始位超 --max-excursion → 立即停止循环
-  3. q 键即时退出（后台监听线程，SDK 阻塞中也可退）；物理急停第一优先级
-  4. 执行前回车确认
+权重族：--policy pi05（默认）| fineart_vla_s1（16/27 维 delta-除爪同语义
+链，2026-11-02 接入；predict 包装层族通用，RTC 前缀引导同生效）。
 
-每块遥测：推理 ms / 取图 ms / tick 服务时长与抖动 / 星饿窗 /
-接缝尖峰（换块首行 |Δcmd| vs 块内均值——RTC 收益主指标）/
-汇总分位数（LatencyTracker，lerobot 同款 API）。
+配置：config/s1.toml，三态 CLI > toml > s1_config.BUILTIN；键名对齐
+config/g1.toml [lerobot]，术语对照 docs/lerobot-alignment.md。现役工作点
+（10-30 定案）：execute_actions_per_chunk 0（换块即预取）/ frames_per_row 1 ×
+rows_per_cmd 1（下发静音的必要条件=指令带 tfs 时间轴，窗内点数/窗长/合批
+均非自变量）/ filter_alpha 0.1 / aggregate_fn weighted_average（crossfade
+0.3 旧 + 0.7 新，双层融合；latest_only=单层对照口径）/
+max_joint_delta_per_step 0.05 / fps 30。
 
-用法:
+trained-RTC：--execution-horizon N>0 启用前缀引导——旧块未消费尾段重锚进
+新块坐标系作前缀，去噪步把新块开头拉向旧计划；推理延迟按实测 p50 动态补偿。
+仅对 RTC 训练权重开启（train_config rtc_training_max_delay>0）。
+
+安全（--exec 连续真实驱动双臂）：
+  1. 仅下发双臂 14 关节与双爪；torso/head/swerve 维永不下发
+  2. 行目标链式限幅 ±max_joint_delta_per_step rad/行 + 逐帧包络钳位；
+     漂移护栏超 --max-excursion 立即停机
+  3. q 键即时退出（后台监听线程，SDK 阻塞中亦可退）；物理急停第一优先级
+  4. --exec 双重确认：warm 就位前一次、进入控制环前一次
+
+用法：
   LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
   ~/miniforge3/envs/flash_pyrt311/bin/python \
-      ~/holy/scripts/g1/inference/run_g1_loop_traj.py \
-      [--ckpt ~/holy/models/pi05_g1_onlypick_deploy] [--exec] \
-      [--rounds 60] [--execution-horizon 10]
-  # 240Hz 微流（--frames-per-row 8）已于 10-10 退役，默认 1=纯 30Hz 直发
-"""
-#!/usr/bin/env python
-"""S1 双臂闭环——轨迹流执行器（run_g1_loop_traj.py 直移植版，S1 机体件）。
-
-【移植原则（2026-10-29 用户定案）】G1 traj 就是行为标准，写 traj 就是为了
-S1 直接用——本文件 = run_g1_loop_traj.py 整文件复制，只换「机体件」：
-  ① SDK 面：galbot_sdk.g1 → galbot_sdk.s1（G1JointGroup 枚举 → S1 组名字符串
-    "left_gripper"/"right_gripper"，写路径 set_joint_commands 签名同形）
-  ② 关节表/state：27 维 = [右臂7, 右爪%, 左臂7, 左爪%, torso, head2, swerve×8]
-    （pi05 S1 数据集序；爪=get_gripper_state 宽度米→0~100%；swerve 恒 0=
-    训练口径；torso=torso_lift_joint1 高度米）
-  ③ 取图：get_rgb_data(JPEG)（G1 同名相机 HEAD_RIGHT/LEFT_ARM/RIGHT_ARM）
-  ④ 发令批形态：G1 traj 逐帧单点 tfs=0 流 → S1 带时间轴批 set_joint_commands_batch
-    （帧=tick 内插值帧，tfs 全批累计=墙钟节拍；--rows-per-cmd R>1 再跨拍攒窗=
-    R×tick 窗每 R 拍一发）。S1 ③定案（10-29 晚真机）：singorix WBC 按 tfs
-    时间轴细插，tfs=0 ASAP=参考跳变→LP 削顶→力矩跳变=卡卡；时间轴是解药
-    ——故移植版把「每帧一条单点指令」换成「带时间轴批」（同回放台/适配器
-    执行器真机验证过的下发形状）。10-30 五角闭环收口：①单点tfs0响/③全零tfs
-    响/②R2×fr8静/④R1×fr2静/⑤R1×fr1单点静——时间轴存在性=唯一必要条件，
-    现役工作点 R1×fr1（单点也带 tfs=T 斜坡）。--cmd-every>1 S1 硬拦（审查④：
-    S1 WBC 直视计划断点，G1 伺服吞阶跃语义不成立）
-  ④b 取图在 worker：fresh_obs（三相机 ~86ms）随推理搬进工作线程（10-29 审查①，
-    主线程同步取图≈2.6 拍=每块预取拍丢拍重锚）；--no-obs-worker 回退主线程
-  ⑤ 爪标定：S1 ckpt 无 manifest gripper 段 → 出厂行程缺省 0.007/0.11 m
-    （policies/base.py GRIP_WIDTH_*，pyi 同值）+ 告警（未逐台标定）
-  ⑥ warm：G1 手跑 g1_pose_warmup.py → 移植版内嵌同款机制（set_joint_positions
-    is_blocking 限速 0.15 rad/s 臂+头 → torso @0.2，G1 send_warm 节奏），
-    --exec 确认后就位到 S1_HOME_POSE（config/s1.toml [warm_pose] 可覆盖，
-    scripts/tools/warm_pose_from_dataset.py 生成）、自然跑完归位；q/Ctrl-C
-    照 traj=立即
-    退出不复位（已下发目标可能仍在限速执行）
-  ⑦ 导航栈：S1 无 nav 栈，NavSuspend 整类删除（--nav-suspend 旗标保留兼容
-    档键，生效 no-op）；包络护栏=S1 ckpt 无 joint_envelope.json 时自动关闭
-行为逻辑（水位预取/换块弃尾/星饿限/链钳/EMA/融合/入口匹配/合步/合并/
-护栏/QuitWatcher/日志/汇总）逐行未动。参数命名对照 docs/lerobot-alignment.md。
-
-【标准版配方】固化在 config/s1.toml（三态 CLI > toml > s1_config.BUILTIN），
-等价 CLI 展开：--rounds 200 --execute-actions-per-chunk 0 --skip-frames
---aggregate-fn weighted_average --cmd-every 1 --filter-alpha 0.1
---max-joint-delta-per-step 0.05 --burst-reserve-ms 0 --frames-per-row 1
---rows-per-cmd 1 --grip-path joint --grip-velocity 0.05 --grip-effort 10
---fps 30
-（发令窗工作点 10-30 用户定案钉 R1×fr1【现役最简】：五角闭环——①单点
-tfs=0 响/③全零 tfs 响/②R2×fr8 静/④R1×fr2 静/⑤R1×fr1 单点 tfs=33.3ms
-静——时间轴存在性=唯一必要条件，窗内点数/窗长/合批全非自变量；fr2~8=
-样条弧线纹理备档、R2 攒批余量备档）
-（换块融合真机 A/B 定案 10-30：双层 crossfade 0.3旧/0.7新 + EMA【现役】胜
-latest_only 缝上单层 EMA——后者午间试跑用户判「没有之前的好」判退；缝上的
-旧流惯性项要留。E：--aggregate-fn latest_only 可复现单层口径对照）
-（真机跑必带 --exec；10-29 首跑教训：S1 版无合成图路径，取图即真实相机，
-无 --live-frames 概念——相机冻结守卫 _FREEZE_STREAK 常开）
-
-⚠ 加 --exec 会连续真实驱动双臂！安全设计（与 G1 traj 同款）：
-  1. 只动双臂 14 关节；torso/head/swerve 维永不下发；夹爪随 --grip 并入
-     关节流（0~100%% → 行程宽度，每发送拍无条件发）
-  2. 换块时行目标链式限幅 ±--max-joint-delta-per-step rad/行 + 逐帧包络钳位；漂移护栏：
-     行目标偏离起始位超 --max-excursion → 立即停止循环
-  3. q 键即时退出（后台监听线程，SDK 阻塞中也可退）；物理急停第一优先级
-  4. 执行前回车确认（--exec 就位 warm 前确认一次，进环前再确认一次）
-
-每块遥测：推理 ms / 取图 ms / tick 服务时长与抖动 / 星饿窗 /
-接缝尖峰（换块首行 |Δcmd| vs 块内均值）/ 汇总分位数（LatencyTracker）。
-
-用法:
-  LD_LIBRARY_PATH=/data/galbot/lib PYTHONPATH=/data/galbot/lib \
-  ~/miniforge3/envs/flash_pyrt311/bin/python \
-      ~/holy/scripts/s1/inference/run_s1_loop_traj.py --exec
-  # 配方默认全在 config/s1.toml；ckpt 缺省=S1 pi05 工作点
+  ~/holy/scripts/s1/inference/run_s1_loop_traj.py --exec
+配置缺省即现役配方；ckpt 缺省 = S1 pi05 工作点（010000）。
 """
 # ── 显式 bootstrap：holy 仓库根入 path（勿依赖 s1_config 的 import 副作用；
 #    append 保持脚本目录优先=不遮蔽同名包，同 s1_config.py 口径）──
