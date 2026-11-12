@@ -5,6 +5,8 @@ S1 执行器/闭环等。G1 系脚本在 `scripts/{inference,g1,probes,test,ab_t
 
 - `s1_body_control/`：数字孪生（真机→MuJoCo 镜像，自 G1 迁移；只读无指令路径）
 - `nav/`：底盘移动/定位（自 G1 g1_base_move 迁移；进程隔离+干净关闭纪律保留）
+  - `nav/pns_move_relative.py`：相对/绝对目标导航执行器（官方 `navigate_to_goal_v2` 顺序），说明见 `docs/s1-nav-relative.md`
+  - `nav/pns_point.py`：点位录制与标签导航（record/go/list/rm），说明见 `docs/s1-nav-points.md`
 
 - 关节/API 速查：`docs/s1-joint-api-quickref.md`
 - 维护手册与待办：`S1_MAINTENANCE.md`

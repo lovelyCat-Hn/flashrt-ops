@@ -226,6 +226,8 @@ def run():
                 self._res = None
                 self._err = None
                 self.dur_ms = 0.0
+                self.predict_ms = 0.0   # 纯 predict（dur_ms 含取图/前缀准备，
+                                        # 日志「推理」口径=此字段，11-12 用户定案）
 
             def start(self, obs, state_n, state_arm, rtc_prefix=None):
                 self._done.clear()
@@ -235,9 +237,11 @@ def run():
                 def _run():
                     t = time.perf_counter()
                     try:
+                        _t0 = time.perf_counter()
                         self._res = np.asarray(self._model.predict(
                             obs, prompt=self._prompt, state=state_n,
                             rtc_prefix=rtc_prefix))
+                        self.predict_ms = (time.perf_counter() - _t0) * 1000
                     except Exception as e:      # 主线程 result() 时再抛
                         self._err = e
                     self.dur_ms = (time.perf_counter() - t) * 1000
@@ -273,6 +277,8 @@ def run():
                 self._res = None
                 self._err = None
                 self.dur_ms = 0.0
+                self.predict_ms = 0.0   # 纯 predict（dur_ms 含取图/前缀准备，
+                                        # 日志「推理」口径=此字段，11-12 用户定案）
 
             def start(self, obs=None, state_n=None, state_arm=None):
                 """obs 三件套=None（默认）→ 工作线程内 fresh_obs() 自取。
@@ -293,9 +299,11 @@ def run():
                         if obs is None:
                             obs, state_n, state_arm = fresh_obs()
                             self.state_arm = state_arm
+                        _t0 = time.perf_counter()
                         self._res = np.asarray(self._model.predict(
                             obs, prompt=self._prompt, state=state_n,
                             rtc_prefix=_rtc_prefix(state_arm)))
+                        self.predict_ms = (time.perf_counter() - _t0) * 1000
                     except Exception as e:      # 主线程 result() 时再抛
                         self._err = e
                     self.dur_ms = (time.perf_counter() - t) * 1000
@@ -364,7 +372,7 @@ def run():
     else:
         _launch(job)                         # 首块（取图在工作线程，干跑同样口径）
     chunk = job.result()
-    _dur0 = job.dur_ms
+    _dur0 = job.predict_ms   # 纯 predict（dur_ms 含取图，11-12 用户定案；落盘同口径）
     infer_ms.add(_dur0)
     BASE_ARM = job.state_arm
     job = None
@@ -569,7 +577,7 @@ def run():
             _old_chunk = chunk.copy() if chunk is not None else None
             _old_k = k
             chunk = job.result()
-            _dur = job.dur_ms
+            _dur = job.predict_ms   # 纯 predict（dur_ms 含取图，11-12 用户定案）
             infer_ms.add(_dur)
             BASE_ARM = job.state_arm
             job = None
@@ -1075,7 +1083,9 @@ def run():
         starve_total += _d
         starve_worst = max(starve_worst, _d)
     if GRIP and args.do_exec:
-        time.sleep(8.0)   # 等爪走完最后一程再读终态（死区 0.9s+满程 0.8s，含余量）
+        time.sleep(2.0)   # 等爪走完最后一程再读终态（实测死区 0.9s+满程 0.8s=1.7s，
+                          # 11-12 用户定案 8.0→2.0：富余量砍到 0.3s；若终态读出
+                          # moving=True 再回调大）
         for name, _ in GRIP["names"]:
             if FACE == "g1":
                 gs = robot.get_gripper_state(getattr(G1JointGroup, name))
@@ -1158,7 +1168,9 @@ def run():
         # 手动收尾；S1 内嵌，10-29「一瞬间复位」病的治愈口径）。q/Ctrl-C 走
         # QuitWatcher 立即 os._exit 不经过这里（traj 忠实语义：已下发目标可能仍在
         # 限速执行）；护栏/星饿/非 SUCCESS 停机（aborted）也留在原地供排查。
-        if args.do_exec and not aborted:
+        if args.do_exec and not aborted and getattr(args, "tail_home", True):
+            # --no-tail-home（11-12 用户定案）：真实任务语义=保持推理末状态返程
+            # （归位含双爪打开——持物开车=先扔货；归位/投放改由任务层自己决定）
             print("[warm] 归位 S1_HOME_POSE（@0.15 rad/s 慢速）…")
             s1_warm(robot, "归位")
 

@@ -46,14 +46,19 @@ max_excursion = 3.0
 # S1 判读（勿照抄 G1 定档的键）：
 grip_state_cmd = false                   # state 爪维喂实时回读（SDK 爪回读滞后未测，首跑专项核查）
 nav_suspend = false                      # S1 无导航栈，旗标 no-op（兼容档键）
-execution_horizon = 0                    # trained-RTC 专属；非 RTC 权重=0。
-                                         # RTC 训练权重（train_config rtc_training_max_delay>0，
-                                         # 如 b3f637a6_030000）推理必带 --execution-horizon 10
-                                         # （训练 max_delay 15 拍、推理 p50 ~10 拍，域内；10-30）
+execution_horizon = 10                   # RTC 引导窗（11-12 定档）：在役 ckpt b3f637a6_010000
+                                         # =RTC 训练款（train_config rtc_training_max_delay=15，
+                                         # 与 030000 同 run），推理必带 10（训练 15 拍、推理 p50
+                                         # ~10 拍域内）。换非 RTC 权重须改回 0。
+                                         # 注：本 ckpt 目录名无 "rtc" 字样，启动会打
+                                         # ⚠ 命名提醒=已知误报（纯 print 不拦，010000
+                                         # 实为 RTC 款，11-02 train_config 实锤）。
 head_crop = false                        # S1 训练口径=4:3 letterbox 全幅
 
 # ── G1 [lerobot] 键的 S1 判读（无对应=刻意不带，非遗漏）──
-#   subtask_every              : fineart System 2 降频键，适配器版专属
+#   subtask_every              : fineart System 2 降频键（适配器版语义=每 N 轮；
+#                                traj 版同键名顶层可写，语义=每 N 块 re-plan；
+#                                traj 版开 System 2 须配 subtask_goal，11-10）
 #   live_frames                : 适配器版合成图开关；traj 版取图即真实相机
 #                                （冻结守卫常开），无此概念
 #   execution_horizon = 10     : 同上 execution_horizon=0 判读

@@ -83,6 +83,18 @@ ap.add_argument("--prompt", default=None, help="任务指令（默认 config [ru
 ap.add_argument("--policy", default=None,
                 help="权重族：pi05（默认）| fineart_vla_s1（S1 微调版 fineart，"
                      "16/27 维 delta-除爪同语义链；装载/stats 分支见模型段）")
+ap.add_argument("--subtask-goal", default=None,
+                help="高层目标文本（System 2 自动子任务，fineart 专属；给定即开，"
+                     "pi05 硬拒）。goal 只喂 S2 的 ${task} 槽，S2 产出才进 S1 "
+                     "prompt 槽（${subtask}）——两串语义不同不可混用；S2 首查"
+                     "落地前 S1 吃 --prompt 原值作种子串。控制器/policies/"
+                     "subtask_controller.py，引擎零改（代理回填 TE.model）")
+ap.add_argument("--subtask-every", type=int, default=30,
+                help="System 2 复查节拍：循环内每 N 次 re-plan 查一次（启动 "
+                     "warm 首查即落地初始子任务，吸收 S2 解码器懒建进 init）。"
+                     "S2 ~0.9s 串行藏进预取 worker 的块窗口（0.9+infer < 块长 "
+                     "1.67s），不上 tick 路径；S2 失败保当前串、连败 3 次休眠。"
+                     "仅 --subtask-goal 给定时生效")
 ap.add_argument("--exec", dest="do_exec", action="store_true",
                 help="真实连续驱动双臂（默认干跑只打印首块 5 拍目标；不进配置，仅 CLI）")
 ap.add_argument("--rounds", type=int, default=None,
@@ -460,6 +472,11 @@ ap.add_argument("--no-nav-suspend", action="store_true",
 ap.add_argument("--no-head-crop", action="store_true",
                 help="显式关头图裁剪（[lerobot] 档 head_crop=true 的反关；"
                      "place 相/非裁剪训练 ckpt 用）")
+ap.add_argument("--no-tail-home", action="store_false", dest="tail_home",
+                default=True,
+                help="跑完不归位（保持推理末状态——编排返程/持物场景：归位含"
+                     "双爪打开=持物先被松掉；归位/投放由任务层自决。默认关="
+                     "照旧归位，standalone 口径不变）")
 args = ap.parse_args()
 # ── 全文日志落盘：q 退出走 os._exit 不刷缓冲（09-23 坑），故逐行强制 flush ──
 _log_path = args.log_file or str(
@@ -524,6 +541,8 @@ s1_config.apply(args, {
     "grip": "grip_enabled",
     "grip_speed": "grip_velocity",
     "grip_effort": "grip_effort",
+    "subtask_goal": "subtask_goal",
+    "subtask_every": "subtask_every",
 }, path=args.config)
 if args.fps is None:
     args.fps = 30
@@ -546,6 +565,11 @@ if args.policy != "pi05":
               f"（…{pathlib.Path(_FA_CKPT).parent.name}）")
     if args.prompt is None:
         args.prompt = "test"
+
+# ── System 2 族门禁：文本头 fineart 专属（pi05 无 lm_head 文本路径）──
+if args.subtask_goal and args.policy == "pi05":
+    raise SystemExit("--subtask-goal 需要 System 2 文本头（fineart 专属）——"
+                     "换 --policy fineart_vla_s1 或去掉本旗标")
 
 # None 哨兵回落（配方旗标 argparse 默认改 None 交给三态回填，此处补脚本旧默认）
 # 换块融合：注册表名→α（上游 AGGREGATE_FUNCTIONS 逐名对应）；--fusion-alpha
@@ -1062,6 +1086,21 @@ GD.BASE_ARM = BASE_ARM
 GD.ENV_LO, GD.ENV_HI = ENV_LO, ENV_HI
 
 
+
+
+# ── System 2 子任务控制器（11-10 干跑架）：引擎零改——SubtaskProxy 代理
+#    predict 回填 TE.model，S2 串行落进预取 worker（0.9s 藏进块窗口）；
+#    不给 --subtask-goal = 在役路径逐位不变。warm 首查在此（init 计时区外，
+#    吸收 S2 解码器 ~7.4GB 懒建，防首次在飞 S2 顶穿 starve-limit）──
+SUBTASK = None
+if args.subtask_goal:
+    from policies.subtask_controller import SubtaskController, SubtaskProxy
+    SUBTASK = SubtaskController(model, goal=args.subtask_goal,
+                                every=args.subtask_every,
+                                ckpt_dir=str(CKPT), seed=args.prompt)
+    SUBTASK.warm(grab_views(robot))
+    print(SUBTASK.summary())
+    model = SubtaskProxy(model, SUBTASK)   # TE.model = model 回填自动吃代理
 
 
 # ── ② 预取 worker/换块主循环/③执行确认/④汇总已收编 common/loop/traj_engine.py

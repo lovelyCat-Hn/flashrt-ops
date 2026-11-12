@@ -57,6 +57,11 @@ BUILTIN = {
     "cache_frames": 1,        # 1=每帧全量（2 已判死，G1 9/30 实录）
     "max_excursion": 3.0,     # rad 漂移护栏（同 G1）
     "grip_enabled": True,     # S1 数据集带爪维，爪下发默认开（--no-grip 反关）
+    "subtask_goal": "",       # System 2 自动子任务（fineart 专属，11-10 两环认
+                              # 键）：可选项默认关（""=off，消费端全 truthiness
+                              # 判断，不给 = 在役路径逐位不变）。traj mapping
+                              # 认此键后三态若无兜底=裸跑 SystemExit（11-12
+                              # 干跑实录：死亡串恰似进度打印极具迷惑性）
 }
 
 # 命名正规化（对照 docs/lerobot-alignment.md）：命中旧键直接 SystemExit——
@@ -72,8 +77,10 @@ _RENAMED_KEYS = {
     "grip_speed": "grip_velocity",
 }
 # 未认键告警白名单（run_s1_loop.py 消费、traj 移植版不消费的键也算认识；
-# warm_pose 段由本模块 warm_pose() 消费=traj 入口回填 S1_HOME_POSE 覆盖组）
-_KNOWN_EXTRA = {"policy", "subtask_every", "live_frames", "warm_pose"}
+# warm_pose 段由本模块 warm_pose() 消费=traj 入口回填 S1_HOME_POSE 覆盖组；
+# subtask_goal/subtask_every=System 2 自动子任务，traj 版 11-10 起两环都认）
+_KNOWN_EXTRA = {"policy", "subtask_every", "subtask_goal", "live_frames",
+                "warm_pose"}
 
 # [warm_pose] 合法组键（=policies/base.py S1_HOME_POSE 的键集）
 _WARM_POSE_KEYS = {"right_arm", "left_arm", "torso", "head", "grip_pct"}
