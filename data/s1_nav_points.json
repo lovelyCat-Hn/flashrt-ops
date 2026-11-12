@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "map": {
+    "name": "galbot_pre_map-b178954e8f13411789495900932bdf40-b178954e8f13411789495900932bdf40",
+    "dir": "/var/maps/galbot_pre_map-b178954e8f13411789495900932bdf40-b178954e8f13411789495900932bdf40",
+    "pcd_mtime": 1794374791,
+    "pcd_size": 22484986
+  },
+  "points": {
+    "home": {
+      "x": 0.2487,
+      "y": 0.0028,
+      "z": 0.0,
+      "yaw_deg": -0.37,
+      "created": "2026-11-11T18:01:41",
+      "note": "初始位",
+      "map": {
+        "name": "galbot_pre_map-b178954e8f13411789495900932bdf40-b178954e8f13411789495900932bdf40",
+        "dir": "/var/maps/galbot_pre_map-b178954e8f13411789495900932bdf40-b178954e8f13411789495900932bdf40",
+        "pcd_mtime": 1794374791,
+        "pcd_size": 22484986
+      }
+    },
+    "dock": {
+      "x": 1.6677,
+      "y": -0.0048,
+      "z": 0.0,
+      "yaw_deg": -0.752,
+      "created": "2026-11-11T18:03:26",
+      "note": "对接位1",
+      "map": {
+        "name": "galbot_pre_map-b178954e8f13411789495900932bdf40-b178954e8f13411789495900932bdf40",
+        "dir": "/var/maps/galbot_pre_map-b178954e8f13411789495900932bdf40-b178954e8f13411789495900932bdf40",
+        "pcd_mtime": 1794374791,
+        "pcd_size": 22484986
+      }
+    }
+  },
+  "updated": "2026-11-11T18:03:26"
+}
